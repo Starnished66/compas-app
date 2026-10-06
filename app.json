@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "compas-app",
-    "slug": "compas-app",
-    "version": "1.0.0",
+    "name": "Compás Remote",
+    "slug": "compas-remote",
+    "version": "0.3.6-8",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -16,10 +16,28 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.compas.remote",
+      "versionCode": 24
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-sqlite",
+      "expo-secure-store",
+      "./plugins/withCompasAndroid",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 28,
+            "compileSdkVersion": 37,
+            "targetSdkVersion": 37,
+            "buildToolsVersion": "37.0.0"
+          }
+        }
+      ]
+    ]
   }
 }

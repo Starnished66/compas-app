@@ -31,7 +31,9 @@ yarn-error.*
 *.pem
 
 # local env files
-.env*.local
+.env
+.env.*
+!.env.example
 
 # typescript
 *.tsbuildinfo
@@ -39,3 +41,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Local native module build output
+**/build/
+**/.gradle/
+**/.cxx/
+local.properties

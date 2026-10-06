@@ -1,0 +1,24 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+group = 'com.compas.remote.discovery'
+version = '1.0.0'
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
+useExpoPublishing()
+
+android {
+  namespace "com.compas.remote.discovery"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  implementation "org.jetbrains.kotlin:kotlin-stdlib"
+}

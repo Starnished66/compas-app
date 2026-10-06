@@ -1,0 +1,8 @@
+{
+  "name": "compas-discovery",
+  "version": "1.0.0",
+  "description": "Compas Wi-Fi NSD/mDNS discovery module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {}
+}

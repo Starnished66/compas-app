@@ -1,0 +1,8 @@
+{
+  "name": "compas-media-session",
+  "version": "1.0.0",
+  "description": "Compas Android MediaSession and Notification module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {}
+}

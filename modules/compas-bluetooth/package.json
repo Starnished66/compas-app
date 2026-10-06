@@ -1,0 +1,8 @@
+{
+  "name": "compas-bluetooth",
+  "version": "1.0.0",
+  "description": "Compas Bluetooth Classic RFCOMM transport and discovery module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {}
+}
