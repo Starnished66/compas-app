@@ -5,7 +5,7 @@ import {
   readableForeground,
   blendColors,
   artworkAccent,
-  applyArtworkPalette,
+  withArtworkPalette,
   ArtworkPalette,
 } from '../theme';
 
@@ -59,16 +59,19 @@ describe('UI Theme & Palette Engine', () => {
     expect(contrastRatio(darkAccent, DarkColors.surface)).toBeGreaterThanOrEqual(4.5);
   });
 
-  test('applyArtworkPalette returns unmodified base when palette is null or unsaturated', () => {
-    expect(applyArtworkPalette(DarkColors, null, true)).toBe(DarkColors);
-
+  // withArtworkPalette takes a non-null palette; App.tsx skips the call entirely when there is no artwork.
+  test('withArtworkPalette keeps base accents when palette is unsaturated', () => {
     const neutralPalette: ArtworkPalette = { hue: 200, saturation: 0.05 };
-    expect(applyArtworkPalette(DarkColors, neutralPalette, true)).toBe(DarkColors);
+    const themed = withArtworkPalette(DarkColors, neutralPalette, true);
+    expect(themed.primary).toBe(DarkColors.primary);
+    expect(themed.secondary).toBe(DarkColors.primary);
+    expect(themed.tertiary).toBe(DarkColors.primary);
+    expect(themed.background).toBe(DarkColors.background);
   });
 
-  test('applyArtworkPalette derives harmonic primary, secondary, and tertiary containers', () => {
+  test('withArtworkPalette derives harmonic primary, secondary, and tertiary containers', () => {
     const vibrantPalette: ArtworkPalette = { hue: 280, saturation: 0.75 };
-    const themed = applyArtworkPalette(DarkColors, vibrantPalette, true);
+    const themed = withArtworkPalette(DarkColors, vibrantPalette, true);
 
     expect(themed.primary).not.toBe(DarkColors.primary);
     expect(themed.secondary).not.toBe(DarkColors.secondary);

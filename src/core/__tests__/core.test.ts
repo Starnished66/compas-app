@@ -1,7 +1,15 @@
+// expo-crypto ships ESM and needs the native runtime; src/data/cryptoUtils falls back to pure-JS SHA-256 when it throws.
+jest.mock('expo-crypto', () => ({
+  CryptoDigestAlgorithm: { SHA256: 'SHA-256' },
+  digestStringAsync: async () => {
+    throw new Error('expo-crypto is unavailable under Jest');
+  },
+}));
+
 import { normalizeWifiAddress, DEFAULT_PLAYER_PORT } from '../endpoint';
 import { StreamHttpParser, HttpRequest, HttpResponse, HttpTransport } from '../transport';
-import { RemoteApi } from '../api';
-import { RemoteApiException } from '../errors';
+// RemoteApi throws the src/data RemoteApiException (re-exported by ../api), not the legacy one in ../errors.
+import { RemoteApi, RemoteApiException } from '../api';
 import { PlaybackStatusGate, CommandOutcome } from '../playbackStatusGate';
 import {
   BluetoothRequestPolicy,
@@ -92,12 +100,18 @@ describe('RemoteApi', () => {
     api = new RemoteApi(mockTransport, '123456');
   });
 
-  test('enforces 4-12 digit PIN', () => {
+  test('enforces 4-12 digit PIN', async () => {
     expect(() => new RemoteApi(mockTransport, '123')).toThrow('PIN must contain 4 to 12 digits');
     expect(() => new RemoteApi(mockTransport, '1234567890123')).toThrow('PIN must contain 4 to 12 digits');
     expect(() => new RemoteApi(mockTransport, 'abcd')).toThrow('PIN must contain 4 to 12 digits');
-    expect(new RemoteApi(mockTransport, '1234').pin).toBe('1234');
-    expect(new RemoteApi(mockTransport, null).pin).toBeNull();
+
+    // The PIN is private, so check it through the header each request carries.
+    const ok = () => new HttpResponse(200, 'OK', {}, new TextEncoder().encode('{}'));
+    mockTransport.execute.mockResolvedValue(ok());
+    await new RemoteApi(mockTransport, '1234').capabilities();
+    expect(mockTransport.execute.mock.calls[0][0].headers).toEqual({ 'X-Compas-PIN': '1234' });
+    await new RemoteApi(mockTransport, null).capabilities();
+    expect(mockTransport.execute.mock.calls[1][0].headers).toEqual({});
   });
 
   test('calls /status and parses fields including bluetooth_audio_output', async () => {
@@ -167,6 +181,7 @@ describe('RemoteApi', () => {
     }
   });
 
+  // Spaces encode as '+' to match java.net.URLEncoder in the Android client (RemoteApi.encode).
   test('play command builds correct query with context and revision', async () => {
     mockTransport.execute.mockResolvedValueOnce(
       new HttpResponse(200, 'OK', {}, new TextEncoder().encode('OK'))
@@ -176,7 +191,7 @@ describe('RemoteApi', () => {
 
     expect(mockTransport.execute).toHaveBeenCalledWith({
       method: 'POST',
-      target: '/api/v1/playback/play?index=105&artist=Daft%20Punk&album=Discovery&catalog_revision=lib-1%3Arev-2',
+      target: '/api/v1/playback/play?index=105&artist=Daft+Punk&album=Discovery&catalog_revision=lib-1%3Arev-2',
       headers: { 'X-Compas-PIN': '123456' },
     });
   });

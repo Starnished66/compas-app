@@ -1,3 +1,11 @@
+// expo-crypto ships ESM and needs the native runtime; src/data/cryptoUtils falls back to pure-JS SHA-256 when it throws.
+jest.mock('expo-crypto', () => ({
+  CryptoDigestAlgorithm: { SHA256: 'SHA-256' },
+  digestStringAsync: async () => {
+    throw new Error('expo-crypto is unavailable under Jest');
+  },
+}));
+
 import { SecurePinStore } from '../securePinStore';
 import { SyncedCoverStore } from '../syncedCoverStore';
 import {
