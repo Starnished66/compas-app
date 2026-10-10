@@ -14,6 +14,7 @@ import {
   BluetoothRequestPolicy,
 } from '../core/policies';
 import { ConnectionTransport } from '../core/models';
+import { base64ToBytes } from '../data/cryptoUtils';
 
 export interface SyncProgressUpdate {
   message: string;
@@ -179,8 +180,9 @@ export class CatalogSyncWorker {
         const artImage = await api.catalogArt(revision, cover.representativeId, cover.coverKey);
         if (this.isCancelled) return null;
 
-        if (artImage && artImage.bytes.length > 0) {
-          await coverStore.put(libraryId, cover.coverKey, artImage.bytes);
+        const artBytes = artImage ? base64ToBytes(artImage.base64) : null;
+        if (artBytes && artBytes.length > 0) {
+          await coverStore.put(libraryId, cover.coverKey, artBytes);
           await catalogStore.markCoverState(libraryId, revision, cover.albumKey, COVER_STORED);
         } else {
           await catalogStore.markCoverState(libraryId, revision, cover.albumKey, COVER_MISSING);

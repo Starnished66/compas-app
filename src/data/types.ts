@@ -169,6 +169,7 @@ export enum LibraryCategory {
 export enum RemoteTheme {
   Dark = 'Dark',
   Light = 'Light',
+  System = 'System',
 }
 
 export enum ConnectionStatus {
@@ -290,7 +291,7 @@ export interface RemoteUiState {
 }
 
 export type RemoteAction =
-  | { type: 'ToggleTheme' }
+  | { type: 'SetTheme'; theme: RemoteTheme }
   | { type: 'OpenHome' }
   | { type: 'OpenConnection' }
   | { type: 'StartAutoReconnect' }
@@ -311,6 +312,7 @@ export type RemoteAction =
   | { type: 'Back' }
   | { type: 'OpenLibrary'; category: LibraryCategory }
   | { type: 'RefreshLibrary'; category: LibraryCategory }
+  | { type: 'SyncLibrary' }
   | { type: 'OpenQueue' }
   | { type: 'TogglePlayback' }
   | { type: 'Play' }

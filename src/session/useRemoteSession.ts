@@ -76,6 +76,17 @@ import {
 } from './PermissionPolicy';
 
 const PREF_THEME = 'compas_pref_theme';
+const THEME_PREFERENCES: Record<RemoteTheme, string> = {
+  [RemoteTheme.Dark]: 'dark',
+  [RemoteTheme.Light]: 'light',
+  [RemoteTheme.System]: 'system',
+};
+
+function themeFromPreference(saved: string | null): RemoteTheme {
+  if (saved === 'dark') return RemoteTheme.Dark;
+  if (saved === 'light') return RemoteTheme.Light;
+  return RemoteTheme.System;
+}
 const PREF_WIFI_ADDRESS = 'compas_pref_wifi_address';
 const PREF_BLUETOOTH_ID = 'compas_pref_bt_id';
 const PREF_LAST_TRANSPORT = 'compas_pref_last_transport';
@@ -124,7 +135,7 @@ interface LibrarySnapshot {
 export function useRemoteSession() {
   const [state, setState] = useState<RemoteUiState>({
     screen: { type: 'Home' },
-    theme: RemoteTheme.Dark,
+    theme: RemoteTheme.System,
     connectionStatus: ConnectionStatus.Disconnected,
     connectionTransport: ConnectionTransport.Wifi,
     selectedConnectionTransport: ConnectionTransport.Wifi,
@@ -266,7 +277,7 @@ export function useRemoteSession() {
 
         setState((prev) => ({
           ...prev,
-          theme: savedTheme === 'light' ? RemoteTheme.Light : RemoteTheme.Dark,
+          theme: themeFromPreference(savedTheme),
           wifiAddress: savedWifi || prev.wifiAddress,
           selectedBluetoothPlayerId: savedBt || prev.selectedBluetoothPlayerId,
           selectedConnectionTransport:
@@ -2615,6 +2626,12 @@ export function useRemoteSession() {
   };
 
   const navigateBack = () => {
+    if (stateRef.current.screen.type === 'Queue') {
+      const screenUnderQueue = screenBackStackRef.current.pop() ?? { type: 'Home' };
+      setState((curr) => ({ ...curr, screen: screenUnderQueue }));
+      return;
+    }
+
     if (stateRef.current.libraryIsNested && libraryBackStackRef.current.length > 0) {
       const prev = libraryBackStackRef.current.pop()!;
       currentLibraryCategoryRef.current = prev.category;
@@ -2691,12 +2708,9 @@ export function useRemoteSession() {
         }
         break;
 
-      case 'ToggleTheme':
-        setState((prev) => {
-          const next = prev.theme === RemoteTheme.Dark ? RemoteTheme.Light : RemoteTheme.Dark;
-          AsyncStorage.setItem(PREF_THEME, next === RemoteTheme.Dark ? 'dark' : 'light').catch(() => {});
-          return { ...prev, theme: next };
-        });
+      case 'SetTheme':
+        AsyncStorage.setItem(PREF_THEME, THEME_PREFERENCES[action.theme]).catch(() => {});
+        setState((prev) => ({ ...prev, theme: action.theme }));
         break;
 
       case 'OpenHome':
@@ -2731,6 +2745,12 @@ export function useRemoteSession() {
       case 'RefreshLibrary':
         loadLibraryCategory(action.category);
         break;
+
+      case 'SyncLibrary': {
+        const api = apiRef.current;
+        if (api) startCatalogSync(api, connectionAttemptRef.current, [...featureSetRef.current]);
+        break;
+      }
 
       case 'OpenQueue':
         if (stateRef.current.screen.type !== 'Queue') {
