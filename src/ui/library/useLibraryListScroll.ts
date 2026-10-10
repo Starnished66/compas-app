@@ -1,0 +1,70 @@
+import { useCallback, useRef } from 'react';
+import { FlatList, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import { useChromeScrollHandler } from '../chrome/useChromeScrollHandler';
+import { LibraryItem } from './libraryItems';
+
+export interface LibraryListScroll {
+  listRef: React.RefObject<FlatList<LibraryItem> | null>;
+  offset: () => number;
+  onScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  onContentSizeChange: (width: number, height: number) => void;
+  scrollToTop: (animated?: boolean) => void;
+  restoreOffset: (offset: number) => void;
+}
+
+export function useLibraryListScroll(onOffsetChange?: (offset: number) => void): LibraryListScroll {
+  const offsetListener = useRef(onOffsetChange);
+  offsetListener.current = onOffsetChange;
+  const listRef = useRef<FlatList<LibraryItem> | null>(null);
+  const offsetRef = useRef(0);
+  const pendingRestore = useRef<number | null>(null);
+  const chromeScroll = useChromeScrollHandler(true);
+
+  const scrollTo = useCallback((offset: number, animated: boolean) => {
+    listRef.current?.scrollToOffset({ offset, animated });
+    offsetRef.current = offset;
+    offsetListener.current?.(offset);
+  }, []);
+
+  const onScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      offsetRef.current = event.nativeEvent.contentOffset.y;
+      offsetListener.current?.(offsetRef.current);
+      chromeScroll(event);
+    },
+    [chromeScroll],
+  );
+
+  const onContentSizeChange = useCallback(
+    (_width: number, height: number) => {
+      const target = pendingRestore.current;
+      if (target == null || height < target) return;
+      pendingRestore.current = null;
+      scrollTo(target, false);
+    },
+    [scrollTo],
+  );
+
+  const scrollToTop = useCallback(
+    (animated = false) => {
+      pendingRestore.current = null;
+      scrollTo(0, animated);
+    },
+    [scrollTo],
+  );
+
+  const restoreOffset = useCallback(
+    (offset: number) => {
+      pendingRestore.current = offset > 0 ? offset : null;
+      scrollTo(offset, false);
+      requestAnimationFrame(() => {
+        if (pendingRestore.current === offset) scrollTo(offset, false);
+      });
+    },
+    [scrollTo],
+  );
+
+  const offset = useCallback(() => offsetRef.current, []);
+
+  return { listRef, offset, onScroll, onContentSizeChange, scrollToTop, restoreOffset };
+}

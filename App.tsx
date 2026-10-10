@@ -1,248 +1,174 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import {
-  View,
-  Image,
-  Animated,
-  StyleSheet,
-  BackHandler,
-  ToastAndroid,
-  Platform,
-  SafeAreaView,
-  StatusBar as RNStatusBar,
-} from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { StyleSheet, useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import {
-  RemoteTheme,
-  ConnectionStatus,
-  LibraryCategory,
-} from './src/data/types';
-import { DarkColors, LightColors, ColorScheme, ArtworkPalette, withArtworkPalette } from './src/ui/theme';
-import { extractArtworkPalette } from './modules/compas-bluetooth/src';
+import { ConnectionStatus, LibraryCategory, RemoteScreen, RemoteTheme, RemoteUiState } from './src/data/types';
 import { useRemoteSession } from './src/session/useRemoteSession';
+import { PaletteProvider } from './src/ui/PaletteProvider';
+import { ChromeProvider } from './src/ui/chrome/ChromeProvider';
+import { AccentSource, useArtworkPalette } from './src/ui/useArtworkPalette';
+import { MiniProgressPreferenceProvider } from './src/ui/preferences/MiniProgressPreferenceProvider';
+import { useHardwareBack } from './src/ui/useHardwareBack';
+import { canOpenNowPlaying } from './src/ui/nowPlayingAccess';
+import { AppBackdrop } from './src/ui/components/AppBackdrop';
+import { AppChrome } from './src/ui/components/AppChrome';
+import { AppSnackbarProvider } from './src/ui/components/AppSnackbarProvider';
+import { PageTransition } from './src/ui/components/PageTransition';
+import { SlideUpScreen } from './src/ui/components/SlideUpScreen';
+import { TabKey } from './src/ui/components/TabBar';
+import { chromeContentInset } from './src/ui/components/bottomChromeLayout';
+import { PinDialog } from './src/ui/components/PinDialog';
+import { SessionSnackbars } from './src/ui/components/SessionSnackbars';
 import { HomeScreen } from './src/ui/screens/HomeScreen';
 import { LibraryScreen } from './src/ui/screens/LibraryScreen';
-import { QueueScreen } from './src/ui/screens/QueueScreen';
+import { PlaylistsScreen } from './src/ui/screens/PlaylistsScreen';
 import { ConnectionScreen } from './src/ui/screens/ConnectionScreen';
-import { MiniPlayerBar } from './src/ui/components/MiniPlayerBar';
-import { BottomLibraryBar } from './src/ui/components/BottomLibraryBar';
-import { PinDialog } from './src/ui/components/PinDialog';
-import { MoreSheet } from './src/ui/components/MoreSheet';
-import { artworkImageSource } from './src/ui/artworkSource';
+import { NowPlayingScreen } from './src/ui/screens/NowPlayingScreen';
+import { SettingsSheet } from './src/ui/sheets/SettingsSheet';
+import { SongActionsSheet } from './src/ui/sheets/SongActionsSheet';
+import { useScreenInsets } from './src/ui/useScreenInsets';
+
+const nonBrowsableLibraryCategories = new Set<LibraryCategory>([LibraryCategory.Playlists, LibraryCategory.Search]);
+
+type MainScreen = Exclude<RemoteScreen, { type: 'Connection' | 'Queue' }>;
+
+function tabFor(screen: MainScreen): TabKey {
+  if (screen.type === 'Library') return screen.category === LibraryCategory.Playlists ? 'playlists' : 'library';
+  return 'home';
+}
+
+const accentStatuses = new Set<ConnectionStatus>([ConnectionStatus.Connected, ConnectionStatus.Connecting]);
+
+function accentSourceFor(state: RemoteUiState): AccentSource {
+  if (!accentStatuses.has(state.connectionStatus) || !state.currentTrack) return { kind: 'neutral' };
+  return state.currentTrack.artwork ? { kind: 'artwork', uri: state.currentTrack.artwork } : { kind: 'pending' };
+}
 
 export default function App() {
-  const { state, onAction, currentLibraryCategory } = useRemoteSession();
-  const [moreSheetVisible, setMoreSheetVisible] = useState(false);
-  const [artworkPalette, setArtworkPalette] = useState<ArtworkPalette | null>(null);
-  const screenOpacity = useRef(new Animated.Value(1)).current;
-  const screenOffset = useRef(new Animated.Value(0)).current;
+  const { state, onAction } = useRemoteSession();
+  const [nowPlayingVisible, setNowPlayingVisible] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const lastBrowseCategoryRef = useRef<LibraryCategory>(LibraryCategory.Albums);
+  const lastMainScreenRef = useRef<MainScreen>({ type: 'Home' });
+  const [connectionReturnCount, setConnectionReturnCount] = useState(0);
 
-  const lastBackPressRef = useRef<number>(0);
-
-  const isDark = state.theme === RemoteTheme.Dark;
-  const baseColors: ColorScheme = isDark ? DarkColors : LightColors;
-  const colors: ColorScheme = useMemo(
-    () => artworkPalette ? withArtworkPalette(baseColors, artworkPalette, isDark) : baseColors,
-    [artworkPalette, baseColors, isDark]
-  );
-  const artworkUri = state.currentTrack?.artwork
-    ?? (state.screen.type === 'Library' ? state.libraryEntries.find((entry) => entry.artwork)?.artwork : null)
-    ?? null;
-  const backdropSource = useMemo(() => artworkImageSource(artworkUri), [artworkUri]);
-  const screenKey = state.screen.type === 'Library'
-    ? `Library:${state.screen.category}:${state.libraryIsNested ? 'nested' : 'root'}`
-    : state.screen.type;
+  const systemScheme = useColorScheme();
+  const isDark = state.theme === RemoteTheme.System ? systemScheme !== 'light' : state.theme === RemoteTheme.Dark;
+  const palette = useArtworkPalette(accentSourceFor(state), isDark);
+  const connectionVisible = state.screen.type === 'Connection';
+  if (state.screen.type !== 'Connection' && state.screen.type !== 'Queue') lastMainScreenRef.current = state.screen;
+  const mainScreen = lastMainScreenRef.current;
+  const libraryCategory = mainScreen.type === 'Library' ? mainScreen.category : null;
+  const activeTab = tabFor(mainScreen);
+  const isConnected = state.connectionStatus === ConnectionStatus.Connected;
+  const showMiniPlayer = mainScreen.type !== 'Home' && isConnected && state.currentTrack != null;
+  const insets = useScreenInsets();
+  const contentBottomInset = chromeContentInset(showMiniPlayer, insets.bottom);
 
   useEffect(() => {
-    let current = true;
-    setArtworkPalette(null);
-    if (artworkUri) {
-      extractArtworkPalette(artworkUri).then((palette) => {
-        if (current && palette && Number.isFinite(palette.hue) && Number.isFinite(palette.saturation)) {
-          setArtworkPalette(palette);
-        }
-      }).catch(() => {});
+    if (libraryCategory && !nonBrowsableLibraryCategories.has(libraryCategory)) {
+      lastBrowseCategoryRef.current = libraryCategory;
     }
-    return () => { current = false; };
-  }, [artworkUri]);
+  }, [libraryCategory]);
 
   useEffect(() => {
-    screenOpacity.setValue(0);
-    screenOffset.setValue(12);
-    Animated.parallel([
-      Animated.timing(screenOpacity, { toValue: 1, duration: 210, useNativeDriver: true }),
-      Animated.spring(screenOffset, { toValue: 0, speed: 20, bounciness: 3, useNativeDriver: true }),
-    ]).start();
-  }, [screenKey, screenOpacity, screenOffset]);
+    if (!state.currentTrack || !isConnected) setNowPlayingVisible(false);
+  }, [state.currentTrack, isConnected]);
 
-  // Android Hardware Back button handling
+  const queueOpen = state.screen.type === 'Queue';
   useEffect(() => {
-    const onBackPress = () => {
-      if (moreSheetVisible) {
-        setMoreSheetVisible(false);
-        return true;
-      }
+    if (queueOpen && !nowPlayingVisible) onAction({ type: 'Back' });
+  }, [queueOpen, nowPlayingVisible, onAction]);
 
-      if (state.pinDialogVisible) {
-        onAction({ type: 'DismissPin' });
-        return true;
-      }
+  const handleConnectionHidden = useCallback(() => setConnectionReturnCount((count) => count + 1), []);
 
-      if (state.screen.type !== 'Home') {
-        onAction({ type: 'Back' });
-        return true;
-      }
-
-      // We are on Home screen: double-tap back to exit within 2000ms
-      const now = Date.now();
-      if (now - lastBackPressRef.current <= 2000) {
-        BackHandler.exitApp();
-        return true;
-      }
-
-      lastBackPressRef.current = now;
-      if (Platform.OS === 'android') {
-        ToastAndroid.show('Press back again to exit', ToastAndroid.SHORT);
-      }
+  const handleBack = useCallback(() => {
+    if (nowPlayingVisible) {
+      setNowPlayingVisible(false);
       return true;
-    };
+    }
+    if (state.screen.type !== 'Home') {
+      onAction({ type: 'Back' });
+      return true;
+    }
+    return false;
+  }, [nowPlayingVisible, state.screen.type, onAction]);
+  useHardwareBack(handleBack);
 
-    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
-    return () => subscription.remove();
-  }, [state.screen, state.pinDialogVisible, moreSheetVisible, onAction]);
+  const selectTab = useCallback((tab: TabKey) => {
+    setNowPlayingVisible(false);
+    if (tab === 'home') onAction({ type: 'OpenHome' });
+    else if (tab === 'playlists') onAction({ type: 'OpenLibrary', category: LibraryCategory.Playlists });
+    else onAction({ type: 'OpenLibrary', category: lastBrowseCategoryRef.current });
+  }, [onAction]);
 
-  const renderActiveScreen = () => {
-    switch (state.screen.type) {
+  const nowPlayingAllowed = canOpenNowPlaying(state);
+  const openNowPlaying = useCallback(() => {
+    if (nowPlayingAllowed) setNowPlayingVisible(true);
+  }, [nowPlayingAllowed]);
+  const openSettings = useCallback(() => setSettingsVisible(true), []);
+
+  const renderMainScreen = () => {
+    switch (mainScreen.type) {
       case 'Home':
-        return <HomeScreen state={state} colors={colors} onAction={onAction} />;
-
+        return <HomeScreen state={state} onAction={onAction} onOpenNowPlaying={openNowPlaying} onOpenSettings={openSettings} settingsOpen={settingsVisible} bottomInset={contentBottomInset} />;
       case 'Library':
-        return (
-          <LibraryScreen
-            state={state}
-            category={state.screen.category}
-            colors={colors}
-            onAction={onAction}
-          />
-        );
-
-      case 'Queue':
-        return <QueueScreen state={state} colors={colors} onAction={onAction} />;
-
-      case 'Connection':
-        return (
-          <ConnectionScreen state={state} colors={colors} onAction={onAction} />
-        );
+        return mainScreen.category === LibraryCategory.Playlists
+          ? <PlaylistsScreen state={state} onAction={onAction} contentBottomInset={contentBottomInset} />
+          : <LibraryScreen state={state} onAction={onAction} category={mainScreen.category} contentBottomInset={contentBottomInset} />;
     }
   };
 
-  const showMiniPlayer =
-    state.screen.type !== 'Home' &&
-    state.currentTrack != null &&
-    state.connectionStatus === ConnectionStatus.Connected;
-
   return (
-    <SafeAreaView
-      style={[
-        styles.safeArea,
-        {
-          backgroundColor: colors.background,
-          paddingTop: Platform.OS === 'android' ? RNStatusBar.currentHeight : 0,
-        },
-      ]}
-    >
-      <StatusBar style={isDark ? 'light' : 'dark'} />
-
-      <View style={styles.ambientBackdrop} pointerEvents="none">
-        {backdropSource ? (
-          <Image source={backdropSource} style={StyleSheet.absoluteFill} resizeMode="cover" blurRadius={10} />
-        ) : (
-          <View style={[styles.ambientOrb, styles.ambientOrbOne, { backgroundColor: `${colors.primary}55` }]} />
-        )}
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: isDark ? 'rgba(14,15,18,0.34)' : 'rgba(242,243,245,0.38)' }]} />
-        {!backdropSource && <View style={[styles.ambientOrb, styles.ambientOrbTwo, { backgroundColor: `${colors.secondary}30` }]} />}
-      </View>
-
-      <Animated.View style={[styles.content, { opacity: screenOpacity, transform: [{ translateY: screenOffset }] }]}>
-        {renderActiveScreen()}
-      </Animated.View>
-
-      {/* Floating Mini Player on non-home screens */}
-      {showMiniPlayer && (
-        <MiniPlayerBar
-          track={state.currentTrack!}
-          isPlaying={state.isPlaying}
-          colors={colors}
-          onOpenHome={() => onAction({ type: 'OpenHome' })}
-          onTogglePlayback={() => onAction({ type: 'TogglePlayback' })}
-          onPrevious={() => onAction({ type: 'Previous' })}
-          onNext={() => onAction({ type: 'Next' })}
-        />
-      )}
-
-      {/* Bottom Navigation Bar */}
-      <BottomLibraryBar
-        screen={state.screen}
-        colors={colors}
-        onHomeSelected={() => onAction({ type: 'OpenHome' })}
-        onOpenLibrary={(category) => onAction({ type: 'OpenLibrary', category })}
-        onOpenConnection={() => onAction({ type: 'OpenConnection' })}
-        onOpenMore={() => setMoreSheetVisible(true)}
-      />
-
-      {/* PIN entry modal */}
-      <PinDialog
-        visible={state.pinDialogVisible}
-        pinInput={state.pinInput}
-        error={state.pinError}
-        cooldownSeconds={state.pinRetryDelaySeconds}
-        colors={colors}
-        onPinChange={(text) => onAction({ type: 'SetPinInput', value: text })}
-        onSubmit={() => onAction({ type: 'SubmitPin' })}
-        onDismiss={() => onAction({ type: 'DismissPin' })}
-      />
-
-      {/* More / Settings modal bottom sheet */}
-      <MoreSheet
-        visible={moreSheetVisible}
-        theme={state.theme}
-        connectionStatus={state.connectionStatus}
-        playerName={state.playerName}
-        colors={colors}
-        onClose={() => setMoreSheetVisible(false)}
-        onToggleTheme={() => onAction({ type: 'ToggleTheme' })}
-        onSelectCategory={(category) => onAction({ type: 'OpenLibrary', category })}
-        onDisconnect={() => onAction({ type: 'Disconnect' })}
-        onChangePin={() => onAction({ type: 'ChangePin' })}
-      />
-    </SafeAreaView>
+    <PaletteProvider palette={palette}>
+      <ChromeProvider>
+        <MiniProgressPreferenceProvider>
+          <View style={[styles.root, { backgroundColor: palette.background }]}>
+            <AppBackdrop artworkUri={state.currentTrack?.artwork ?? null} prominent={mainScreen.type === 'Home'} />
+            <AppSnackbarProvider activeTab={activeTab} showMiniPlayer={showMiniPlayer} chromeHidden={connectionVisible}>
+              <StatusBar style={isDark ? 'light' : 'dark'} />
+              <SessionSnackbars state={state} />
+              <View style={[styles.root, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
+                <View style={styles.root}>
+                  <PageTransition style={styles.content} transitionKey={`${activeTab}:${connectionReturnCount}`} kind="fade">
+                    {renderMainScreen()}
+                  </PageTransition>
+                  <AppChrome
+                    state={state}
+                    onAction={onAction}
+                    activeTab={activeTab}
+                    showMiniPlayer={showMiniPlayer}
+                    onSelectTab={selectTab}
+                    onOpenNowPlaying={openNowPlaying}
+                  />
+                </View>
+              </View>
+              <SlideUpScreen visible={connectionVisible} onHidden={handleConnectionHidden}>
+                <ConnectionScreen state={state} onAction={onAction} />
+              </SlideUpScreen>
+              <NowPlayingScreen
+                state={state}
+                onAction={onAction}
+                visible={nowPlayingVisible}
+                onClose={() => setNowPlayingVisible(false)}
+              />
+              <SettingsSheet
+                state={state}
+                onAction={onAction}
+                visible={settingsVisible}
+                onClose={() => setSettingsVisible(false)}
+                onOpenConnection={() => onAction({ type: 'OpenConnection' })}
+              />
+              <SongActionsSheet state={state} onAction={onAction} />
+              <PinDialog state={state} onAction={onAction} />
+            </AppSnackbarProvider>
+          </View>
+        </MiniProgressPreferenceProvider>
+      </ChromeProvider>
+    </PaletteProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    backgroundColor: 'transparent',
-  },
-  ambientBackdrop: {
-    ...StyleSheet.absoluteFill,
-    overflow: 'hidden',
-    backgroundColor: '#111214',
-  },
-  ambientOrb: {
-    position: 'absolute',
-    width: 340,
-    height: 340,
-    borderRadius: 170,
-  },
-  ambientOrbOne: {
-    top: '8%',
-    left: '-28%',
-  },
-  ambientOrbTwo: {
-    right: '-35%',
-    bottom: '8%',
-  },
+  root: { flex: 1 },
+  content: { flex: 1 },
 });
