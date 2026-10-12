@@ -10,6 +10,8 @@ import { ChromeProvider } from './src/ui/chrome/ChromeProvider';
 import { AccentSource, useArtworkPalette } from './src/ui/useArtworkPalette';
 import { MiniProgressPreferenceProvider } from './src/ui/preferences/MiniProgressPreferenceProvider';
 import { BackgroundPreferenceProvider } from './src/ui/preferences/BackgroundPreferenceProvider';
+import { useAccentPreference } from './src/ui/preferences/useAccentPreference';
+import { AccentStyle, accentFollowsArtwork } from './src/ui/accentStyle';
 import { useHardwareBack } from './src/ui/useHardwareBack';
 import { canOpenNowPlaying } from './src/ui/nowPlayingAccess';
 import { AppBackdrop } from './src/ui/components/AppBackdrop';
@@ -44,7 +46,9 @@ function tabFor(screen: MainScreen): TabKey {
 
 const accentStatuses = new Set<ConnectionStatus>([ConnectionStatus.Connected, ConnectionStatus.Connecting]);
 
-function accentSourceFor(state: RemoteUiState): AccentSource {
+function accentSourceFor(state: RemoteUiState, accentStyle: AccentStyle): AccentSource {
+  // TODO: use the player's accent color for 'player' once the Remote API exposes it.
+  if (!accentFollowsArtwork(accentStyle)) return { kind: 'neutral' };
   if (!accentStatuses.has(state.connectionStatus) || !state.currentTrack) return { kind: 'neutral' };
   return state.currentTrack.artwork ? { kind: 'artwork', uri: state.currentTrack.artwork } : { kind: 'pending' };
 }
@@ -59,7 +63,8 @@ export default function App() {
 
   const systemScheme = useColorScheme();
   const isDark = state.theme === RemoteTheme.System ? systemScheme !== 'light' : state.theme === RemoteTheme.Dark;
-  const palette = useArtworkPalette(accentSourceFor(state), isDark);
+  const { preference: accentStyle } = useAccentPreference();
+  const palette = useArtworkPalette(accentSourceFor(state, accentStyle), isDark);
   const connectionVisible = state.screen.type === 'Connection';
   if (state.screen.type !== 'Connection' && state.screen.type !== 'Queue') lastMainScreenRef.current = state.screen;
   const mainScreen = lastMainScreenRef.current;

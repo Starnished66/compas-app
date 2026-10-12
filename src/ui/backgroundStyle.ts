@@ -13,8 +13,8 @@ export const BACKGROUND_STYLE_LABELS: Record<BackgroundStyle, string> = {
 
 export const BACKGROUND_STYLE_HINTS: Record<BackgroundStyle, string> = {
   artwork: 'The blurred album cover behind a soft wash.',
-  mesh: 'A soft gradient in the cover’s colors.',
-  noise: 'Warped noise that flows through the cover’s colors.',
+  mesh: 'A soft gradient in the accent colors.',
+  noise: 'Warped noise that flows through the accent colors.',
 };
 
 export const SHADER_STYLE_ANIMATES: Record<ShaderBackgroundStyle, boolean> = {

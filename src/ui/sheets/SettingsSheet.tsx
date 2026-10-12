@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { ConnectionStatus, RemoteAction, RemoteTheme, RemoteUiState } from '../../data/types';
+import { AccentSetting } from '../components/AccentSetting';
 import { BackgroundSetting } from '../components/BackgroundSetting';
 import { BottomSheet } from '../components/BottomSheet';
 import { Card } from '../components/Card';
@@ -94,6 +95,8 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
             value={state.theme}
             onChange={(theme) => onAction({ type: 'SetTheme', theme })}
           />
+          <Divider />
+          <AccentSetting />
           <Divider />
           <BackgroundSetting />
           <Divider />

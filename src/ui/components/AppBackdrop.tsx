@@ -1,5 +1,7 @@
 import React from 'react';
+import { accentFollowsArtwork } from '../accentStyle';
 import { isShaderBackgroundStyle } from '../backgroundStyle';
+import { useAccentPreference } from '../preferences/useAccentPreference';
 import { useBackgroundPreference } from '../preferences/useBackgroundPreference';
 import { ArtworkBackdrop } from './ArtworkBackdrop';
 import type { ShaderBackdrop as ShaderBackdropComponent } from './ShaderBackdrop';
@@ -25,8 +27,10 @@ const ShaderBackdrop = loadShaderBackdrop();
 
 export function AppBackdrop({ artworkUri = null, prominent = false, paused = false }: AppBackdropProps) {
   const { preference } = useBackgroundPreference();
+  const { preference: accentStyle } = useAccentPreference();
   if (!ShaderBackdrop || !isShaderBackgroundStyle(preference)) {
     return <ArtworkBackdrop artworkUri={artworkUri} prominent={prominent} />;
   }
-  return <ShaderBackdrop style={preference} artworkUri={artworkUri} prominent={prominent} paused={paused} />;
+  const colorArtworkUri = accentFollowsArtwork(accentStyle) ? artworkUri : null;
+  return <ShaderBackdrop style={preference} artworkUri={colorArtworkUri} prominent={prominent} paused={paused} />;
 }
