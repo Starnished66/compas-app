@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { extractArtworkPalette } from '../../modules/compas-bluetooth/src';
 import { ArtworkPalette, ColorScheme, DarkColors, LightColors, withArtworkPalette } from './theme';
 import { Palette, paletteFrom } from './palette';
+import { artworkColors } from './backdrop/artworkColors';
 
 export type AccentSource =
   | { kind: 'neutral' }
@@ -32,8 +32,9 @@ export function useArtworkPalette(source: AccentSource, dark: boolean): Palette 
       return () => clearTimeout(timer);
     }
     let current = true;
-    extractArtworkPalette(source.uri)
-      .then((extracted) => {
+    artworkColors(source.uri)
+      .then((colors) => {
+        const extracted = colors?.accent ?? null;
         if (!isUsablePalette(extracted)) reportExtractionFailure(source.uri, extracted);
         if (current) setArtworkPalette(isUsablePalette(extracted) ? extracted : null);
       })

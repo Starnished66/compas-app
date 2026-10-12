@@ -7,6 +7,7 @@ import { PaletteProvider } from './src/ui/PaletteProvider';
 import { ChromeProvider } from './src/ui/chrome/ChromeProvider';
 import { AccentSource, useArtworkPalette } from './src/ui/useArtworkPalette';
 import { MiniProgressPreferenceProvider } from './src/ui/preferences/MiniProgressPreferenceProvider';
+import { BackgroundPreferenceProvider } from './src/ui/preferences/BackgroundPreferenceProvider';
 import { useHardwareBack } from './src/ui/useHardwareBack';
 import { canOpenNowPlaying } from './src/ui/nowPlayingAccess';
 import { AppBackdrop } from './src/ui/components/AppBackdrop';
@@ -122,46 +123,52 @@ export default function App() {
     <PaletteProvider palette={palette}>
       <ChromeProvider>
         <MiniProgressPreferenceProvider>
-          <View style={[styles.root, { backgroundColor: palette.background }]}>
-            <AppBackdrop artworkUri={state.currentTrack?.artwork ?? null} prominent={mainScreen.type === 'Home'} />
-            <AppSnackbarProvider activeTab={activeTab} showMiniPlayer={showMiniPlayer} chromeHidden={connectionVisible}>
-              <StatusBar style={isDark ? 'light' : 'dark'} />
-              <SessionSnackbars state={state} />
-              <View style={[styles.root, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
-                <View style={styles.root}>
-                  <PageTransition style={styles.content} transitionKey={`${activeTab}:${connectionReturnCount}`} kind="fade">
-                    {renderMainScreen()}
-                  </PageTransition>
-                  <AppChrome
-                    state={state}
-                    onAction={onAction}
-                    activeTab={activeTab}
-                    showMiniPlayer={showMiniPlayer}
-                    onSelectTab={selectTab}
-                    onOpenNowPlaying={openNowPlaying}
-                  />
+          <BackgroundPreferenceProvider>
+            <View style={[styles.root, { backgroundColor: palette.background }]}>
+              <AppBackdrop
+                artworkUri={state.currentTrack?.artwork ?? null}
+                prominent={mainScreen.type === 'Home'}
+                paused={nowPlayingVisible}
+              />
+              <AppSnackbarProvider activeTab={activeTab} showMiniPlayer={showMiniPlayer} chromeHidden={connectionVisible}>
+                <StatusBar style={isDark ? 'light' : 'dark'} />
+                <SessionSnackbars state={state} />
+                <View style={[styles.root, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
+                  <View style={styles.root}>
+                    <PageTransition style={styles.content} transitionKey={`${activeTab}:${connectionReturnCount}`} kind="fade">
+                      {renderMainScreen()}
+                    </PageTransition>
+                    <AppChrome
+                      state={state}
+                      onAction={onAction}
+                      activeTab={activeTab}
+                      showMiniPlayer={showMiniPlayer}
+                      onSelectTab={selectTab}
+                      onOpenNowPlaying={openNowPlaying}
+                    />
+                  </View>
                 </View>
-              </View>
-              <SlideUpScreen visible={connectionVisible} onHidden={handleConnectionHidden}>
-                <ConnectionScreen state={state} onAction={onAction} />
-              </SlideUpScreen>
-              <NowPlayingScreen
-                state={state}
-                onAction={onAction}
-                visible={nowPlayingVisible}
-                onClose={() => setNowPlayingVisible(false)}
-              />
-              <SettingsSheet
-                state={state}
-                onAction={onAction}
-                visible={settingsVisible}
-                onClose={() => setSettingsVisible(false)}
-                onOpenConnection={() => onAction({ type: 'OpenConnection' })}
-              />
-              <SongActionsSheet state={state} onAction={onAction} />
-              <PinDialog state={state} onAction={onAction} />
-            </AppSnackbarProvider>
-          </View>
+                <SlideUpScreen visible={connectionVisible} onHidden={handleConnectionHidden}>
+                  <ConnectionScreen state={state} onAction={onAction} />
+                </SlideUpScreen>
+                <NowPlayingScreen
+                  state={state}
+                  onAction={onAction}
+                  visible={nowPlayingVisible}
+                  onClose={() => setNowPlayingVisible(false)}
+                />
+                <SettingsSheet
+                  state={state}
+                  onAction={onAction}
+                  visible={settingsVisible}
+                  onClose={() => setSettingsVisible(false)}
+                  onOpenConnection={() => onAction({ type: 'OpenConnection' })}
+                />
+                <SongActionsSheet state={state} onAction={onAction} />
+                <PinDialog state={state} onAction={onAction} />
+              </AppSnackbarProvider>
+            </View>
+          </BackgroundPreferenceProvider>
         </MiniProgressPreferenceProvider>
       </ChromeProvider>
     </PaletteProvider>

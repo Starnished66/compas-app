@@ -1,4 +1,4 @@
-import { parseHexColor, toHexColor } from './theme';
+import { parseHexColor } from './theme';
 
 interface Rgba {
   r: number;
@@ -19,13 +19,4 @@ export function parseColor(color: string): Rgba | null {
   const match = RGBA_PATTERN.exec(trimmed);
   if (!match) return null;
   return { r: Number(match[1]), g: Number(match[2]), b: Number(match[3]), a: match[4] === undefined ? 1 : Number(match[4]) };
-}
-
-export function mixColors(from: string, to: string, amount: number): string {
-  if (amount >= 1) return to;
-  const start = parseColor(from);
-  const end = parseColor(to);
-  if (!start || !end) return to;
-  const lerp = (a: number, b: number) => a + (b - a) * amount;
-  return toHexColor(lerp(start.r, end.r), lerp(start.g, end.g), lerp(start.b, end.b), lerp(start.a, end.a));
 }

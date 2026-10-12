@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { ConnectionStatus, RemoteAction, RemoteTheme, RemoteUiState } from '../../data/types';
 import { AppText } from '../components/AppText';
+import { BackgroundSetting } from '../components/BackgroundSetting';
 import { BottomSheet } from '../components/BottomSheet';
 import { Card } from '../components/Card';
 import { DisconnectButton } from '../components/DisconnectButton';
@@ -98,6 +99,8 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
               onChange={(theme) => onAction({ type: 'SetTheme', theme })}
             />
           </View>
+          <Divider />
+          <BackgroundSetting />
           <Divider />
           <MiniProgressSetting />
           {connected ? (

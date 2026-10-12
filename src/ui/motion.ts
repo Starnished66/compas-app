@@ -57,8 +57,6 @@ export const Durations = {
   snackOut: 180,
   snackOffset: 300,
   snackVisible: 4200,
-  accent: 800,
-  accentFrame: 50,
   pill: 500,
   tabSquash: 520,
   chromeFade: 250,
