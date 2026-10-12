@@ -1,7 +1,6 @@
 import React, { useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { ConnectionStatus, RemoteAction, RemoteTheme, RemoteUiState } from '../../data/types';
-import { AppText } from '../components/AppText';
 import { BackgroundSetting } from '../components/BackgroundSetting';
 import { BottomSheet } from '../components/BottomSheet';
 import { Card } from '../components/Card';
@@ -13,7 +12,8 @@ import { ListRow } from '../components/ListRow';
 import { MiniProgressSetting } from '../components/MiniProgressSetting';
 import { PlayerCard } from '../components/PlayerCard';
 import { PlayerFeatureList } from '../components/PlayerFeatureList';
-import { SegmentedControl, SegmentedOption } from '../components/SegmentedControl';
+import { PreferenceSetting } from '../components/PreferenceSetting';
+import { SegmentedOption } from '../components/SegmentedControl';
 import { connectionStatusView } from '../connectionSummary';
 import { Space } from '../tokens';
 import { useConnectedPlayer } from '../useConnectedPlayer';
@@ -88,17 +88,12 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
         </Card>
 
         <Card variant="surface">
-          <View style={styles.appearance}>
-            <AppText variant="body" style={styles.appearanceLabel}>
-              Appearance
-            </AppText>
-            <SegmentedControl
-              label="Appearance"
-              options={THEME_OPTIONS}
-              value={state.theme}
-              onChange={(theme) => onAction({ type: 'SetTheme', theme })}
-            />
-          </View>
+          <PreferenceSetting
+            title="Appearance"
+            options={THEME_OPTIONS}
+            value={state.theme}
+            onChange={(theme) => onAction({ type: 'SetTheme', theme })}
+          />
           <Divider />
           <BackgroundSetting />
           <Divider />
@@ -121,15 +116,5 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: Space.lg,
     gap: Space.md,
-  },
-  appearance: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.md,
-    paddingHorizontal: Space.lg,
-    paddingVertical: Space.md,
-  },
-  appearanceLabel: {
-    flex: 1,
   },
 });

@@ -7,7 +7,7 @@ import { SegmentedControl, SegmentedOption } from './SegmentedControl';
 export interface PreferenceSettingProps<T extends string> {
   title: string;
   options: ReadonlyArray<SegmentedOption<T>>;
-  hints: Record<T, string>;
+  hints?: Record<T, string>;
   value: T;
   onChange: (value: T) => void;
 }
@@ -17,9 +17,11 @@ export function PreferenceSetting<T extends string>({ title, options, hints, val
     <View style={styles.container}>
       <AppText variant="body">{title}</AppText>
       <SegmentedControl label={title} options={options} value={value} onChange={onChange} />
-      <AppText variant="caption" tone="inkMuted">
-        {hints[value]}
-      </AppText>
+      {hints ? (
+        <AppText variant="caption" tone="inkMuted">
+          {hints[value]}
+        </AppText>
+      ) : null}
     </View>
   );
 }
