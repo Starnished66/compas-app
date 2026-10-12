@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { usePalette } from '../PaletteProvider';
 import { ICON_STROKE_WIDTH, ICON_VIEWBOX, IconElement, IconGlyph, IconName, IconPaint, iconGlyphs } from './iconPaths';
@@ -11,7 +11,7 @@ export interface IconProps {
   strokeWidth?: number;
 }
 
-export function Icon({ name, size = 22, color, filled = false, strokeWidth }: IconProps) {
+function IconContent({ name, size = 22, color, filled = false, strokeWidth }: IconProps) {
   const palette = usePalette();
   const glyph: IconGlyph = iconGlyphs[name];
   const tint = color ?? palette.ink;
@@ -31,6 +31,8 @@ export function Icon({ name, size = 22, color, filled = false, strokeWidth }: Ic
     </Svg>
   );
 }
+
+export const Icon = memo(IconContent);
 
 function paintProps(paint: IconPaint, tint: string, strokeWidth: number) {
   const strokes = paint !== 'fill';

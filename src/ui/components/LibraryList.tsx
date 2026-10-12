@@ -1,4 +1,4 @@
-import React, { ReactElement, useCallback, useMemo } from 'react';
+import React, { ReactElement, memo, useCallback, useMemo } from 'react';
 import { FlatList, ListRenderItemInfo, StyleSheet, View } from 'react-native';
 import { ContentStatus, LibraryEntry, RemoteAction, RemoteTrack } from '../../data/types';
 import { Space } from '../tokens';
@@ -12,6 +12,7 @@ import { DragReorderCell } from './DragReorderCell';
 import { SectionHeader } from './SectionHeader';
 import { Spinner } from './Spinner';
 import { unclippedScroll } from '../unclippedScroll';
+import { useStableTrack } from '../useStableTrack';
 
 const END_REACHED_THRESHOLD = 1.5;
 const INITIAL_ROWS = 16;
@@ -39,7 +40,11 @@ export interface LibraryListProps {
   scrollEnabled?: boolean;
 }
 
-export function LibraryList({
+function keyOf(item: LibraryItem): string {
+  return item.key;
+}
+
+function LibraryListContent({
   items,
   onAction,
   onOpenEntry,
@@ -69,6 +74,8 @@ export function LibraryList({
     [entryInsetRight],
   );
   const listRef = scroll?.listRef;
+  const currentSong = useStableTrack(currentTrack);
+  const contentContainerStyle = useMemo(() => ({ paddingBottom: contentBottomInset }), [contentBottomInset]);
 
   const onScrollToIndexFailed = useCallback(
     (info: { index: number; averageItemLength: number }) => {
@@ -94,7 +101,7 @@ export function LibraryList({
       case 'playlistTrack':
         return renderPlaylistTrack ? renderPlaylistTrack(item.entry, item.index) : null;
       case 'entry': {
-        const current = isCurrentEntry(item.entry, currentTrack);
+        const current = isCurrentEntry(item.entry, currentSong);
         return (
           <View style={insetStyle}>
             <LibraryEntryRow
@@ -115,7 +122,7 @@ export function LibraryList({
     tileWidth,
     openTile,
     renderPlaylistTrack,
-    currentTrack,
+    currentSong,
     isPlaying,
     insetStyle,
     onOpenEntry,
@@ -128,8 +135,9 @@ export function LibraryList({
       ref={listRef}
       style={unclippedScroll}
       data={items}
-      keyExtractor={(item) => item.key}
+      keyExtractor={keyOf}
       renderItem={renderItem}
+      strictMode
       CellRendererComponent={renderPlaylistTrack ? DragReorderCell : undefined}
       stickyHeaderIndices={stickyHeaderIndices}
       onEndReached={onEndReached}
@@ -146,17 +154,13 @@ export function LibraryList({
       showsVerticalScrollIndicator={false}
       initialNumToRender={INITIAL_ROWS}
       windowSize={RENDER_WINDOW}
-      contentContainerStyle={{ paddingBottom: contentBottomInset }}
-      ListFooterComponent={
-        loadingMore ? (
-          <View style={styles.footer}>
-            <Spinner />
-          </View>
-        ) : null
-      }
+      contentContainerStyle={contentContainerStyle}
+      ListFooterComponent={loadingMore ? loadingFooter : null}
     />
   );
 }
+
+export const LibraryList = memo(LibraryListContent);
 
 const styles = StyleSheet.create({
   footer: {
@@ -170,3 +174,9 @@ const styles = StyleSheet.create({
     paddingRight: LETTER_HEADER_RIGHT,
   },
 });
+
+const loadingFooter = (
+  <View style={styles.footer}>
+    <Spinner />
+  </View>
+);

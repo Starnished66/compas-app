@@ -1,5 +1,5 @@
 import React, { ReactNode, useCallback, useMemo, useRef, useState } from 'react';
-import { ChromeContext, ChromeContextValue, ScrollToTopTarget } from './chromeContext';
+import { ChromeActions, ChromeActionsContext, ChromeMinimizedContext, ScrollToTopTarget } from './chromeContext';
 
 export function ChromeProvider({ children }: { children: ReactNode }) {
   const [minimized, setMinimized] = useState(false);
@@ -39,10 +39,14 @@ export function ChromeProvider({ children }: { children: ReactNode }) {
     [scrollToTopHandlers],
   );
 
-  const value = useMemo<ChromeContextValue>(
-    () => ({ minimized, expand, minimize, lastExpandedAt, requestScrollToTop, subscribeScrollToTop }),
-    [expand, lastExpandedAt, minimize, minimized, requestScrollToTop, subscribeScrollToTop],
+  const actions = useMemo<ChromeActions>(
+    () => ({ expand, minimize, lastExpandedAt, requestScrollToTop, subscribeScrollToTop }),
+    [expand, lastExpandedAt, minimize, requestScrollToTop, subscribeScrollToTop],
   );
 
-  return <ChromeContext.Provider value={value}>{children}</ChromeContext.Provider>;
+  return (
+    <ChromeActionsContext.Provider value={actions}>
+      <ChromeMinimizedContext.Provider value={minimized}>{children}</ChromeMinimizedContext.Provider>
+    </ChromeActionsContext.Provider>
+  );
 }

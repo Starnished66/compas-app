@@ -1,8 +1,8 @@
 import { useContext, useEffect, useRef } from 'react';
-import { ChromeContext, ScrollToTopTarget } from './chromeContext';
+import { ChromeActionsContext, ScrollToTopTarget } from './chromeContext';
 
 export function useScrollToTopRequest(target: ScrollToTopTarget, handler: () => void): void {
-  const chrome = useContext(ChromeContext);
+  const chrome = useContext(ChromeActionsContext);
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
   const subscribe = chrome?.subscribeScrollToTop;

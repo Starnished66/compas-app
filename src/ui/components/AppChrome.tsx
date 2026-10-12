@@ -1,11 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, LayoutChangeEvent, StyleSheet, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { LayoutChangeEvent, StyleSheet, View } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { RemoteAction, RemoteUiState } from '../../data/types';
 import { useChromeState } from '../chrome/useChromeState';
 import { resolveMiniProgressStyle } from '../miniProgress';
-import { playbackFraction } from '../playbackTime';
 import { useMiniProgressPreference } from '../preferences/useMiniProgressPreference';
-import { Durations, Easings, motionDuration } from '../motion';
+import { between } from '../collapse';
+import { Durations, motionDuration } from '../motion';
+import { WorkletEasings } from '../workletEasings';
 import { useReducedMotion } from '../useReducedMotion';
 import { TabBar, TabKey } from './TabBar';
 import { PlayerButton } from './PlayerButton';
@@ -29,10 +31,6 @@ export interface AppChromeProps {
   onOpenNowPlaying: () => void;
 }
 
-function between(progress: Animated.Value, from: number, to: number) {
-  return progress.interpolate({ inputRange: [0, 1], outputRange: [from, to] });
-}
-
 export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelectTab, onOpenNowPlaying }: AppChromeProps) {
   const chrome = useChromeState();
   const reducedMotion = useReducedMotion();
@@ -41,7 +39,7 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
   const [width, setWidth] = useState(0);
   const minimizable = showMiniPlayer && (activeTab === 'library' || activeTab === 'playlists');
   const minimized = chrome.minimized && minimizable;
-  const collapse = useRef(new Animated.Value(minimized ? 1 : 0)).current;
+  const collapse = useSharedValue(minimized ? 1 : 0);
   const { expand, requestScrollToTop } = chrome;
 
   useEffect(() => {
@@ -49,12 +47,10 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
   }, [expand, minimizable]);
 
   useEffect(() => {
-    Animated.timing(collapse, {
-      toValue: minimized ? 1 : 0,
+    collapse.value = withTiming(minimized ? 1 : 0, {
       duration: motionDuration(reducedMotion, Durations.pill),
-      easing: Easings.overshootSoft,
-      useNativeDriver: false,
-    }).start();
+      easing: WorkletEasings.overshootSoft,
+    });
   }, [collapse, minimized, reducedMotion]);
 
   const selectTab = (tab: TabKey) => {
@@ -66,14 +62,14 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
     onSelectTab(tab);
   };
 
-  const progress = playbackFraction(state.positionMs, state.durationMs);
-  const tabBarPosition =
-    width > 0 ? { right: between(collapse, TabBarRightInset, minimizedTabBarRightInset(width)) } : styles.tabBarRight;
-  const miniPlayerPosition = {
-    left: between(collapse, ChromeInset, MinimizedMiniPlayerInset),
-    right: between(collapse, ChromeInset, MinimizedMiniPlayerInset),
-    bottom: between(collapse, MiniPlayerBottom, ChromeInset),
-  };
+  const minimizedRight = minimizedTabBarRightInset(width);
+  const tabBarPosition = useAnimatedStyle(() => ({
+    right: between(collapse.value, TabBarRightInset, minimizedRight),
+  }));
+  const miniPlayerPosition = useAnimatedStyle(() => {
+    const inset = between(collapse.value, ChromeInset, MinimizedMiniPlayerInset);
+    return { left: inset, right: inset, bottom: between(collapse.value, MiniPlayerBottom, ChromeInset) };
+  });
 
   return (
     <View
@@ -86,7 +82,6 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
           <MiniPlayer
             track={state.currentTrack}
             isPlaying={state.isPlaying}
-            progress={progress}
             progressStyle={resolveMiniProgressStyle(progressPreference, state.playbackMode)}
             onOpen={onOpenNowPlaying}
             onTogglePlayback={() => onAction({ type: 'TogglePlayback' })}
@@ -113,6 +108,5 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
 const styles = StyleSheet.create({
   miniPlayer: { position: 'absolute' },
   tabBar: { position: 'absolute', left: ChromeInset, bottom: ChromeInset },
-  tabBarRight: { right: TabBarRightInset },
   playerButton: { position: 'absolute', right: ChromeInset, bottom: ChromeInset },
 });

@@ -1,4 +1,4 @@
-import React, { ReactNode, useContext, useLayoutEffect, useRef } from 'react';
+import React, { ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Animated, StyleProp, View, ViewStyle } from 'react-native';
 import { FlipArtwork, FlipContext, FlipPart, createFlipValues } from '../library/flipRegistry';
 
@@ -13,7 +13,7 @@ export interface FlipViewProps {
 export function FlipView({ flipKey, part = 'box', artwork, style, children }: FlipViewProps) {
   const registry = useContext(FlipContext);
   const ref = useRef<View>(null);
-  const values = useRef(createFlipValues()).current;
+  const [values] = useState(createFlipValues);
   const latest = useRef({ artwork, children });
   latest.current = { artwork, children };
 
@@ -33,19 +33,20 @@ export function FlipView({ flipKey, part = 'box', artwork, style, children }: Fl
     });
   }, [flipKey, part, registry, values]);
 
+  const animatedStyle = useMemo(
+    () => ({
+      opacity: values.opacity,
+      transform: [{ translateX: values.translateX }, { translateY: values.translateY }, { scale: values.scale }],
+    }),
+    [values],
+  );
+
   if (!registry) return <View style={style}>{children}</View>;
 
   // Measured on this untransformed wrapper: the shadow tree does not track native-driven transforms mid-flight.
   return (
     <View ref={ref} collapsable={false} style={style}>
-      <Animated.View
-        style={{
-          opacity: values.opacity,
-          transform: [{ translateX: values.translateX }, { translateY: values.translateY }, { scale: values.scale }],
-        }}
-      >
-        {children}
-      </Animated.View>
+      <Animated.View style={animatedStyle}>{children}</Animated.View>
     </View>
   );
 }

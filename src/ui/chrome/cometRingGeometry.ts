@@ -62,6 +62,7 @@ export function cometWedges(center: number, reach: number): CometWedge[] {
 }
 
 export function rotationAbout(center: number, degrees: number): [number, number, number, number, number, number] {
+  'worklet';
   const angle = (degrees * Math.PI) / 180;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);

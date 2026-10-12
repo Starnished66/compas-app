@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef } from 'react';
+import React, { memo, useLayoutEffect, useMemo, useState } from 'react';
 import { Animated, StyleSheet } from 'react-native';
 import { FlipContext, FlipRect, FlipRowGhostSpec } from '../library/flipRegistry';
 import { Durations, Easings } from '../motion';
@@ -8,8 +8,12 @@ export interface FlipRowGhostProps {
   origin: FlipRect;
 }
 
-export function FlipRowGhost({ ghost, origin }: FlipRowGhostProps) {
-  const progress = useRef(new Animated.Value(0)).current;
+function createProgress() {
+  return new Animated.Value(0);
+}
+
+function FlipRowGhostContent({ ghost, origin }: FlipRowGhostProps) {
+  const [progress] = useState(createProgress);
   const { rect } = ghost;
 
   useLayoutEffect(() => {
@@ -29,27 +33,26 @@ export function FlipRowGhost({ ghost, origin }: FlipRowGhostProps) {
     return finish;
   }, [ghost, progress]);
 
-  const opacity = progress.interpolate({ inputRange: [0, 1], outputRange: [ghost.opacity, 0] });
-  const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [0, ghost.drift] });
+  const style = useMemo(
+    () => ({
+      left: rect.x - origin.x,
+      top: rect.y - origin.y,
+      width: rect.width,
+      height: rect.height,
+      opacity: progress.interpolate({ inputRange: [0, 1], outputRange: [ghost.opacity, 0] }),
+      transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [0, ghost.drift] }) }],
+    }),
+    [ghost.drift, ghost.opacity, origin, progress, rect],
+  );
 
   return (
-    <Animated.View
-      style={[
-        styles.ghost,
-        {
-          left: rect.x - origin.x,
-          top: rect.y - origin.y,
-          width: rect.width,
-          height: rect.height,
-          opacity,
-          transform: [{ translateY }],
-        },
-      ]}
-    >
+    <Animated.View style={[styles.ghost, style]}>
       <FlipContext.Provider value={null}>{ghost.content}</FlipContext.Provider>
     </Animated.View>
   );
 }
+
+export const FlipRowGhost = memo(FlipRowGhostContent);
 
 const styles = StyleSheet.create({
   ghost: {

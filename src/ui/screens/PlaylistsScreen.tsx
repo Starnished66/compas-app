@@ -37,7 +37,9 @@ import { rememberPlaylistArtwork, withRememberedPlaylistArtwork } from '../libra
 import { useAlbumGrid } from '../library/useAlbumGrid';
 import { useLibraryLevels } from '../library/useLibraryLevels';
 import { useLibraryListScroll } from '../library/useLibraryListScroll';
+import { useFirstEntryArtwork } from '../library/useFirstEntryArtwork';
 import { useBackInterceptor } from '../useBackInterceptor';
+import { useStableTrack } from '../useStableTrack';
 import { PlaylistEditOutcome, usePlaylistTrackEdits } from '../library/usePlaylistTrackEdits';
 
 export interface PlaylistsScreenProps {
@@ -49,6 +51,7 @@ export interface PlaylistsScreenProps {
 const DETAIL_ARTWORK_SIZE = 120;
 const TRACK_ROW_HEIGHT = 56;
 const PLAYLISTS_ROOT_KEY = 'playlists';
+const NO_ENTRIES: LibraryEntry[] = [];
 
 function newPlaylistSubtitle(canCreate: boolean, canImport: boolean): string {
   if (canCreate && canImport) return 'Start empty, or import a file from this phone';
@@ -97,19 +100,30 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
     [playlistName, snackbar],
   );
   const edits = usePlaylistTrackEdits(state, onAction, announceEdit);
-  const tracks = playlist ? edits.entries : [];
+  const tracks = playlist ? edits.entries : NO_ENTRIES;
 
   useEffect(() => setEditing(false), [playlist?.key]);
   useEffect(() => {
     if (editing && playlist && !edits.busy && tracks.length === 0) setEditing(false);
   }, [editing, edits.busy, playlist, tracks.length]);
+  const playlistArtwork = useFirstEntryArtwork(playlist ? state.libraryEntries : null);
   useEffect(() => {
-    if (playlist) rememberPlaylistArtwork(playlist.key, state.libraryEntries);
-  }, [playlist, state.libraryEntries]);
+    if (playlist && playlistArtwork) rememberPlaylistArtwork(playlist.key, playlistArtwork);
+  }, [playlist, playlistArtwork]);
 
   if (!nested) rootNames.current = state.libraryEntries.map((entry) => playlistDisplayName(entry.title));
 
   const rootEntries = useMemo(() => withRememberedPlaylistArtwork(state.libraryEntries), [state.libraryEntries]);
+  const showingPlaylist = playlist != null;
+  const listedEntries = nested ? state.libraryEntries : rootEntries;
+  const nestedTitle = state.libraryNestedTitle;
+  const rowItems = useMemo(
+    () =>
+      showingPlaylist
+        ? playlistTrackItems(tracks)
+        : entryItems(listedEntries, { category: LibraryCategory.Playlists, isNested: nested, nestedTitle }),
+    [showingPlaylist, tracks, listedEntries, nested, nestedTitle],
+  );
 
   const drag = useDragReorder({
     itemCount: tracks.length,
@@ -189,7 +203,7 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
           eyebrow={playlist.writable ? 'Playlist' : 'Made by the player · read only'}
           title={playlistName}
           meta={`${state.playlistTrackCount} ${state.playlistTrackCount === 1 ? 'song' : 'songs'}`}
-          artworkUri={state.libraryEntries.find((entry) => entry.artwork)?.artwork}
+          artworkUri={playlistArtwork}
           artworkSize={DETAIL_ARTWORK_SIZE}
           placeholderIcon="playlist"
           actions={
@@ -249,34 +263,37 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
   const trackOffset = items.length;
   if (placeholder) {
     items.push(nodeItem('placeholder', <LibraryPlaceholder {...placeholder} />));
-  } else if (playlist) {
-    items.push(...playlistTrackItems(tracks));
   } else {
-    const context = { category: LibraryCategory.Playlists, isNested: nested, nestedTitle: state.libraryNestedTitle };
-    items.push(...entryItems(nested ? state.libraryEntries : rootEntries, context));
+    items.push(...rowItems);
   }
 
   const { rowStyle, handleProps, draggingIndex } = drag;
   const cellStyle = useCallback((index: number) => rowStyle(index - trackOffset), [rowStyle, trackOffset]);
 
-  const renderPlaylistTrack = (entry: LibraryEntry, index: number) => {
-    const current = isCurrentEntry(entry, state.currentTrack);
-    return (
-      <PlaylistTrackRow
-        entry={entry}
-        index={index}
-        editing={editMode}
-        current={current}
-        playing={current && state.isPlaying}
-        lifted={draggingIndex === index}
-        removeDisabled={edits.busy}
-        handleProps={editMode ? handleProps(index) : undefined}
-        onPress={playTrack}
-        onMore={showTrackActions}
-        onRemove={edits.remove}
-      />
-    );
-  };
+  const currentSong = useStableTrack(state.currentTrack);
+  const isPlaying = state.isPlaying;
+  const { busy: editBusy, remove: removeTrack } = edits;
+  const renderPlaylistTrack = useCallback(
+    (entry: LibraryEntry, index: number) => {
+      const current = isCurrentEntry(entry, currentSong);
+      return (
+        <PlaylistTrackRow
+          entry={entry}
+          index={index}
+          editing={editMode}
+          current={current}
+          playing={current && isPlaying}
+          lifted={draggingIndex === index}
+          removeDisabled={editBusy}
+          handleProps={editMode ? handleProps(index) : undefined}
+          onPress={playTrack}
+          onMore={showTrackActions}
+          onRemove={removeTrack}
+        />
+      );
+    },
+    [currentSong, isPlaying, editMode, draggingIndex, editBusy, handleProps, playTrack, showTrackActions, removeTrack],
+  );
 
   return (
     <View style={styles.screen}>

@@ -1,9 +1,11 @@
-import React, { useEffect, useId, useMemo, useRef } from 'react';
-import { Animated, Easing, StyleProp, View, ViewStyle } from 'react-native';
-import Svg, { ClipPath, Defs, G, Path } from 'react-native-svg';
+import React, { useId, useMemo } from 'react';
+import { StyleProp, View, ViewStyle } from 'react-native';
+import Animated, { useAnimatedProps } from 'react-native-reanimated';
+import Svg, { ClipPath, Defs, G, GProps, Path } from 'react-native-svg';
 import { cometWedges, ringBandPath, RingGeometry, rotationAbout } from '../chrome/cometRingGeometry';
 import { Durations } from '../motion';
 import { roundedRectPerimeter } from '../roundedRectPerimeter';
+import { useLoopPhase } from '../useLoopPhase';
 import { useReducedMotion } from '../useReducedMotion';
 
 export interface CometRingProps extends RingGeometry {
@@ -19,11 +21,13 @@ const GLOW_BANDS = [
 ] as const;
 const GLOW_PAD = GLOW_BANDS[GLOW_BANDS.length - 1].spread;
 
+// Reanimated writes props straight to the native group, whose rotation prop is `matrix`;
+// G's JSX props only declare `transform`, which it converts to `matrix` in JS.
+const AnimatedG = Animated.createAnimatedComponent(G as unknown as React.ComponentClass<GProps & { matrix?: number[] }>);
+
 export function CometRing({ size, radius, strokeWidth, color, busy, style }: CometRingProps) {
   const reducedMotion = useReducedMotion();
-  const phase = useRef(new Animated.Value(0)).current;
-  const degrees = useRef(0);
-  const rotators = useRef<Array<G<unknown> | null>>([]);
+  const phase = useLoopPhase(busy ? Durations.ringBusy : Durations.ringIdle, !reducedMotion);
   const canvas = size + GLOW_PAD * 2;
   const center = canvas / 2;
   const clipId = `comet${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
@@ -44,29 +48,7 @@ export function CometRing({ size, radius, strokeWidth, color, busy, style }: Com
     [canvas, center, radius, size, strokeWidth],
   );
 
-  useEffect(() => {
-    const listener = phase.addListener(({ value }) => {
-      degrees.current = value * 360;
-      const matrix = rotationAbout(center, degrees.current);
-      rotators.current.forEach((rotator) => rotator?.setNativeProps({ matrix }));
-    });
-    return () => phase.removeListener(listener);
-  }, [center, phase]);
-
-  useEffect(() => {
-    phase.setValue(0);
-    if (reducedMotion) return;
-    const loop = Animated.loop(
-      Animated.timing(phase, {
-        toValue: 1,
-        duration: busy ? Durations.ringBusy : Durations.ringIdle,
-        easing: Easing.linear,
-        useNativeDriver: false,
-      }),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [busy, phase, reducedMotion]);
+  const rotation = useAnimatedProps(() => ({ matrix: rotationAbout(center, phase.value * 360) }));
 
   const layers = [{ id: `${clipId}-ring`, path: shapes.ring, opacity: 1 }].concat(
     shapes.glows.map((glow, index) => ({ id: `${clipId}-glow${index}`, path: glow.path, opacity: glow.opacity })),
@@ -85,18 +67,13 @@ export function CometRing({ size, radius, strokeWidth, color, busy, style }: Com
         <G x={GLOW_PAD} y={GLOW_PAD}>
           <Path d={shapes.track} stroke={color} strokeOpacity={TRACK_OPACITY} strokeWidth={strokeWidth} fill="none" />
         </G>
-        {layers.map((layer, index) => (
+        {layers.map((layer) => (
           <G key={layer.id} clipPath={`url(#${layer.id})`} opacity={layer.opacity}>
-            <G
-              ref={(rotator: G<unknown> | null) => {
-                rotators.current[index] = rotator;
-              }}
-              transform={rotationAbout(center, degrees.current)}
-            >
+            <AnimatedG animatedProps={rotation}>
               {shapes.wedges.map((wedge, wedgeIndex) => (
                 <Path key={wedgeIndex} d={wedge.path} fill={color} fillOpacity={wedge.opacity} />
               ))}
-            </G>
+            </AnimatedG>
           </G>
         ))}
       </Svg>

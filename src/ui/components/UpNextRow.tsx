@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Animated, Pressable, StyleSheet, View } from 'react-native';
 import { RemoteTrack } from '../../data/types';
 import { DragHandleProps } from '../useDragReorder';
-import { useEditStagger } from '../useEditStagger';
+import { editRange, useEditStagger } from '../useEditStagger';
 import { usePalette } from '../PaletteProvider';
 import { Radius, Size, Space } from '../tokens';
 import { AppText } from './AppText';
@@ -35,7 +35,18 @@ const EDIT_SHIFT = Space.xs + REMOVE_SLOT_WIDTH + Space.md - Space.lg;
 function UpNextRowContent({ track, index, editing, current, playing, onPress, onRemove, dragHandle }: UpNextRowProps) {
   const palette = usePalette();
   const progress = useEditStagger(editing, index);
-  const between = (from: number, to: number) => progress.interpolate({ inputRange: [0, 1], outputRange: [from, to] });
+  const motion = useMemo(
+    () => ({
+      shifted: { transform: [{ translateX: editRange(progress, 0, EDIT_SHIFT) }] },
+      removeSlot: { opacity: progress, transform: [{ scale: editRange(progress, REMOVE_START_SCALE, 1) }] },
+      details: {
+        opacity: editRange(progress, 1, 0),
+        transform: [{ translateX: editRange(progress, 0, TRAILING_EXIT_SHIFT) }],
+      },
+      handle: { opacity: progress, transform: [{ translateX: editRange(progress, HANDLE_ENTER_SHIFT, 0) }] },
+    }),
+    [progress],
+  );
   const subtitle = track.artist || 'Unknown artist';
 
   return (
@@ -49,9 +60,7 @@ function UpNextRowContent({ track, index, editing, current, playing, onPress, on
       style={({ pressed }) => [styles.row, pressed && { backgroundColor: palette.surfaceRaised }]}
     >
       <View style={styles.content}>
-        <Animated.View
-          style={[styles.shifted, { paddingRight: editing ? EDIT_SHIFT : 0, transform: [{ translateX: between(0, EDIT_SHIFT) }] }]}
-        >
+        <Animated.View style={[styles.shifted, editing && styles.shiftedEditing, motion.shifted]}>
           <ArtworkThumb uri={track.artwork} size={Size.rowArtwork} placeholderIcon="music" />
           <View style={styles.text}>
             <AppText variant="bodyStrong" tone={current && !editing ? 'accent' : 'ink'} numberOfLines={1}>
@@ -64,7 +73,7 @@ function UpNextRowContent({ track, index, editing, current, playing, onPress, on
         </Animated.View>
         <Animated.View
           pointerEvents={editing ? 'box-none' : 'none'}
-          style={[styles.removeSlot, { opacity: progress, transform: [{ scale: between(REMOVE_START_SCALE, 1) }] }]}
+          style={[styles.removeSlot, motion.removeSlot]}
         >
           <Pressable
             accessibilityRole="button"
@@ -82,7 +91,7 @@ function UpNextRowContent({ track, index, editing, current, playing, onPress, on
         <View style={[styles.trailing, dragHandle && styles.trailingWithHandle]}>
           <Animated.View
             pointerEvents="none"
-            style={[styles.details, { opacity: between(1, 0), transform: [{ translateX: between(0, TRAILING_EXIT_SHIFT) }] }]}
+            style={[styles.details, motion.details]}
           >
             {current ? <PlayingIndicator playing={playing} /> : null}
             {track.duration ? (
@@ -94,7 +103,7 @@ function UpNextRowContent({ track, index, editing, current, playing, onPress, on
           {dragHandle ? (
             <Animated.View
               pointerEvents={editing ? 'auto' : 'none'}
-              style={[styles.handle, { opacity: progress, transform: [{ translateX: between(HANDLE_ENTER_SHIFT, 0) }] }]}
+              style={[styles.handle, motion.handle]}
               accessibilityElementsHidden={!editing}
               importantForAccessibility={editing ? 'auto' : 'no-hide-descendants'}
             >
@@ -131,6 +140,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
+  },
+  shiftedEditing: {
+    paddingRight: EDIT_SHIFT,
   },
   removeSlot: {
     position: 'absolute',

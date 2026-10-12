@@ -1,4 +1,4 @@
-import React, { forwardRef, ReactNode, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import React, { forwardRef, ReactNode, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityActionEvent,
   Animated,
@@ -48,6 +48,10 @@ const SWIPE_OUT_RATIO = 1.1;
 const BACKDROP_REVEAL_DISTANCE = 40;
 const REMOVE_ICON_SIZE = 20;
 
+function createRowValues() {
+  return { offset: new Animated.Value(0), contentOpacity: new Animated.Value(1), collapse: new Animated.Value(1) };
+}
+
 export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(function RemovableRow(
   {
     rowHeight = DEFAULT_ROW_HEIGHT,
@@ -66,10 +70,10 @@ export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(fu
 ) {
   const palette = usePalette();
   const reducedMotion = useReducedMotion();
-  const offset = useRef(new Animated.Value(0)).current;
-  const contentOpacity = useRef(new Animated.Value(1)).current;
-  const collapse = useRef(new Animated.Value(1)).current;
+  const [{ offset, contentOpacity, collapse }] = useState(createRowValues);
   const [collapsing, setCollapsing] = useState(false);
+  const [backdropShown, setBackdropShown] = useState(false);
+  const backdropShownRef = useRef(false);
   const measuredHeight = useRef(rowHeight);
   const widthRef = useRef(0);
   const removingRef = useRef(false);
@@ -86,7 +90,20 @@ export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(fu
     };
   }, []);
 
+  const revealBackdrop = () => {
+    if (!latest.current.swipeToRemove || backdropShownRef.current) return;
+    backdropShownRef.current = true;
+    setBackdropShown(true);
+  };
+
+  const concealBackdrop = () => {
+    if (!backdropShownRef.current || !mountedRef.current) return;
+    backdropShownRef.current = false;
+    setBackdropShown(false);
+  };
+
   const restore = () => {
+    concealBackdrop();
     removingRef.current = false;
     setCollapsing(false);
     collapse.setValue(1);
@@ -108,6 +125,7 @@ export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(fu
   const startRemoval = (slide: Animated.CompositeAnimation, collapseDuration: number, collapseDelay: number) => {
     if (removingRef.current) return;
     removingRef.current = true;
+    revealBackdrop();
     if (latest.current.reducedMotion) {
       finishRemoval();
       return;
@@ -147,22 +165,27 @@ export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(fu
       duration: latest.current.reducedMotion ? 0 : Durations.sheetSnapBack,
       easing: Easings.standard,
       useNativeDriver: true,
-    }).start();
+    }).start(({ finished }) => {
+      if (finished) concealBackdrop();
+    });
 
   const peek = () => {
     if (latest.current.reducedMotion || removingRef.current) return;
+    revealBackdrop();
     const half = { duration: Durations.peek / 2, easing: Easings.easeInOut, useNativeDriver: true };
     Animated.sequence([
       Animated.timing(offset, { ...half, toValue: -Distances.peek }),
       Animated.timing(offset, { ...half, toValue: 0 }),
-    ]).start();
+    ]).start(({ finished }) => {
+      if (finished) concealBackdrop();
+    });
   };
 
   useImperativeHandle(ref, () => ({ remove, peek }));
 
   const swipingRef = useRef(false);
   const grantedByMoveRef = useRef(false);
-  const panResponder = useRef(
+  const [panResponder] = useState(() =>
     PanResponder.create({
       onStartShouldSetPanResponder: () => {
         grantedByMoveRef.current = false;
@@ -186,6 +209,7 @@ export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(fu
         if (!latest.current.swipeToRemove) return;
         if (!swipingRef.current && gesture.dx < -Distances.tapSlop && Math.abs(gesture.dx) > Math.abs(gesture.dy)) {
           swipingRef.current = true;
+          revealBackdrop();
         }
         if (swipingRef.current) offset.setValue(Math.min(0, gesture.dx));
       },
@@ -205,7 +229,7 @@ export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(fu
         settleBack();
       },
     }),
-  ).current;
+  );
 
   const actions: RowAccessibilityAction[] = [
     ...(onTap && accessibilityLabel ? [{ name: 'activate', label: accessibilityLabel, onAction: onTap }] : []),
@@ -220,12 +244,25 @@ export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(fu
     if (!collapsing) measuredHeight.current = event.nativeEvent.layout.height || rowHeight;
   };
 
-  const height = collapse.interpolate({ inputRange: [0, 1], outputRange: [0, measuredHeight.current] });
-  const backdropOpacity = offset.interpolate({
-    inputRange: [-BACKDROP_REVEAL_DISTANCE, 0],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
+  const collapsingStyle = useMemo(() => {
+    if (!collapsing) return null;
+    return { height: collapse.interpolate({ inputRange: [0, 1], outputRange: [0, measuredHeight.current] }) };
+  }, [collapse, collapsing]);
+  const backdropStyle = useMemo(
+    () => ({
+      backgroundColor: palette.surfaceRaised,
+      opacity: offset.interpolate({ inputRange: [-BACKDROP_REVEAL_DISTANCE, 0], outputRange: [1, 0], extrapolate: 'clamp' }),
+    }),
+    [offset, palette.surfaceRaised],
+  );
+  const contentStyle = useMemo(
+    () => ({
+      backgroundColor: contentBackground ?? (swipeToRemove ? palette.surface : undefined),
+      opacity: contentOpacity,
+      transform: [{ translateX: offset }],
+    }),
+    [contentBackground, contentOpacity, offset, palette.surface, swipeToRemove],
+  );
 
   return (
     <Animated.View
@@ -236,25 +273,15 @@ export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(fu
       accessibilityActions={accessibilityLabel ? actions.map(({ name, label }) => ({ name, label })) : undefined}
       onAccessibilityAction={accessibilityLabel ? handleAccessibilityAction : undefined}
       onLayout={onLayout}
-      style={[styles.root, collapsing && { height }, style]}
+      style={[styles.root, collapsingStyle, style]}
     >
-      {swipeToRemove ? (
-        <Animated.View
-          pointerEvents="none"
-          style={[styles.backdrop, { backgroundColor: palette.surfaceRaised, opacity: backdropOpacity }]}
-        >
+      {swipeToRemove && backdropShown ? (
+        <Animated.View pointerEvents="none" style={[styles.backdrop, backdropStyle]}>
           <Icon name="trash" size={REMOVE_ICON_SIZE} color={palette.statusError} />
           <AppText variant="bodyStrong">{removeLabel}</AppText>
         </Animated.View>
       ) : null}
-      <Animated.View
-        {...panResponder.panHandlers}
-        style={{
-          backgroundColor: contentBackground ?? (swipeToRemove ? palette.surface : undefined),
-          opacity: contentOpacity,
-          transform: [{ translateX: offset }],
-        }}
-      >
+      <Animated.View {...panResponder.panHandlers} style={contentStyle}>
         {children}
       </Animated.View>
     </Animated.View>

@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { FlatList, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { useChromeScrollHandler } from '../chrome/useChromeScrollHandler';
 import { LibraryItem } from './libraryItems';
@@ -66,5 +66,8 @@ export function useLibraryListScroll(onOffsetChange?: (offset: number) => void):
 
   const offset = useCallback(() => offsetRef.current, []);
 
-  return { listRef, offset, onScroll, onContentSizeChange, scrollToTop, restoreOffset };
+  return useMemo(
+    () => ({ listRef, offset, onScroll, onContentSizeChange, scrollToTop, restoreOffset }),
+    [offset, onContentSizeChange, onScroll, restoreOffset, scrollToTop],
+  );
 }

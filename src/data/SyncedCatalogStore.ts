@@ -50,6 +50,8 @@ export interface SqlDatabase {
   run(sql: string, params?: any[]): Promise<{ changes?: number }> | { changes?: number };
   get<T = any>(sql: string, params?: any[]): Promise<T | null> | (T | null);
   all<T = any>(sql: string, params?: any[]): Promise<T[]> | T[];
+  query<T = any>(sql: string, params?: any[]): Promise<T[]>;
+  queryFirst<T = any>(sql: string, params?: any[]): Promise<T | null>;
   transaction<T>(action: (tx: SqlDatabase) => Promise<T>): Promise<T>;
 }
 
@@ -110,6 +112,14 @@ export class MemorySqlDatabase implements SqlDatabase {
     return [];
   }
 
+  query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+    return this.all<T>(sql, params);
+  }
+
+  queryFirst<T = any>(sql: string, params: any[] = []): Promise<T | null> {
+    return this.get<T>(sql, params);
+  }
+
   async transaction<T>(action: (tx: SqlDatabase) => Promise<T>): Promise<T> {
     return action(this);
   }
@@ -137,6 +147,8 @@ export class SyncedCatalogStore {
           run: async (sql, params = []) => expoDb.runSync(sql, params),
           get: async (sql, params = []) => expoDb.getFirstSync(sql, params),
           all: async (sql, params = []) => expoDb.getAllSync(sql, params),
+          query: (sql, params = []) => expoDb.getAllAsync(sql, params),
+          queryFirst: (sql, params = []) => expoDb.getFirstAsync(sql, params),
           transaction: async (action) => {
             let res: any;
             expoDb.withTransactionSync(() => {
@@ -185,6 +197,7 @@ export class SyncedCatalogStore {
       CREATE INDEX IF NOT EXISTS catalog_songs_artist ON catalog_songs(library_id, revision, artist);
       CREATE INDEX IF NOT EXISTS catalog_songs_album_artist ON catalog_songs(library_id, revision, album_artist);
       CREATE INDEX IF NOT EXISTS catalog_songs_genre ON catalog_songs(library_id, revision, genre);
+      CREATE INDEX IF NOT EXISTS catalog_songs_title ON catalog_songs(library_id, revision, title COLLATE NOCASE);
       CREATE TABLE IF NOT EXISTS catalog_song_artists (
         library_id TEXT NOT NULL,
         revision TEXT NOT NULL,
@@ -224,7 +237,7 @@ export class SyncedCatalogStore {
 
   async activeSongCount(libraryId: string, revision: string): Promise<number> {
     await this.init();
-    const row = await this.db.get(
+    const row = await this.db.queryFirst(
       'SELECT COUNT(*) as count FROM catalog_songs WHERE library_id = ? AND revision = ?',
       [libraryId, revision]
     );
@@ -507,7 +520,7 @@ export class SyncedCatalogStore {
 
   async catalogCovers(libraryId: string, revision: string): Promise<StoredCatalogCover[]> {
     await this.init();
-    const rows = await this.db.all(
+    const rows = await this.db.query(
       `SELECT album_key, representative_id, cover_key, available, download_state
        FROM catalog_covers WHERE library_id = ? AND revision = ? ORDER BY album_key`,
       [libraryId, revision]
@@ -538,6 +551,15 @@ export class SyncedCatalogStore {
     };
   }
 
+  async albumKeyForSong(libraryId: string, revision: string, songId: number): Promise<string | null> {
+    await this.init();
+    const r = await this.db.queryFirst(
+      'SELECT album_key FROM catalog_songs WHERE library_id = ? AND revision = ? AND id = ?',
+      [libraryId, revision, songId]
+    );
+    return r?.album_key != null ? String(r.album_key) : null;
+  }
+
   async markCoverState(libraryId: string, revision: string, albumKey: string, state: number): Promise<void> {
     await this.init();
     await this.db.run(
@@ -548,7 +570,7 @@ export class SyncedCatalogStore {
 
   async pendingCovers(libraryId: string, revision: string): Promise<StoredCatalogCover[]> {
     await this.init();
-    const rows = await this.db.all(
+    const rows = await this.db.query(
       `SELECT album_key, representative_id, cover_key, available, download_state
        FROM catalog_covers
        WHERE library_id = ? AND revision = ? AND (available IS NULL OR available != 0) AND download_state = ?
@@ -589,20 +611,21 @@ export class SyncedCatalogStore {
     await this.init();
     const [where, args] = this.songWhere(libraryId, revision, query, artist, albumArtist, album, genre, albumKey);
 
-    const countRow = await this.db.get(`SELECT COUNT(*) as count FROM catalog_songs WHERE ${where}`, args);
-    const total = countRow ? Number(countRow.count || 0) : 0;
-
     const order =
       albumKey != null || album != null
         ? `CASE WHEN disc_number IS NULL THEN 1 ELSE 0 END, disc_number,
            CASE WHEN track_number IS NULL THEN 1 ELSE 0 END, track_number, catalog_rank`
         : 'catalog_rank';
 
-    const rows = await this.db.all(
-      `SELECT id, title, artist, album, album_artist, genre, track_number, disc_number, album_key
-       FROM catalog_songs WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
-      [...args, limit, offset]
-    );
+    const [countRow, rows] = await Promise.all([
+      this.db.queryFirst(`SELECT COUNT(*) as count FROM catalog_songs WHERE ${where}`, args),
+      this.db.query(
+        `SELECT id, title, artist, album, album_artist, genre, track_number, disc_number, album_key
+         FROM catalog_songs WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
+        [...args, limit, offset]
+      ),
+    ]);
+    const total = countRow ? Number(countRow.count || 0) : 0;
 
     const songs: CatalogSong[] = rows.map((r: any) => ({
       id: Number(r.id),
@@ -663,7 +686,7 @@ export class SyncedCatalogStore {
         ORDER BY MIN(catalog_song_artists.artist) COLLATE NOCASE
       `;
 
-      const rows = await this.db.all(sql, args);
+      const rows = await this.db.query(sql, args);
       return rows.map((r: any) => ({
         name: String(r.name || ''),
         count: Number(r.count || 0),
@@ -730,7 +753,7 @@ export class SyncedCatalogStore {
            GROUP BY ${groupCol} COLLATE NOCASE
            ORDER BY MIN(${nameCol}) COLLATE NOCASE`;
 
-    const rows = await this.db.all(sql, args);
+    const rows = await this.db.query(sql, args);
     return rows.map((r: any) => ({
       name: String(r.name || ''),
       count: Number(r.count || 0),
@@ -748,7 +771,7 @@ export class SyncedCatalogStore {
     album: string
   ): Promise<string | null> {
     await this.init();
-    const row = await this.db.get(
+    const row = await this.db.queryFirst(
       `SELECT album_key FROM catalog_songs
        WHERE library_id = ? AND revision = ? AND
              title = ? COLLATE NOCASE AND artist = ? COLLATE NOCASE AND album = ? COLLATE NOCASE AND

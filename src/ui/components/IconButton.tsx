@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Animated, Pressable, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { Palette } from '../palette';
 import { usePalette } from '../PaletteProvider';
@@ -63,7 +63,7 @@ function variantColors(palette: Palette, variant: IconButtonVariant, active: boo
   }
 }
 
-export function IconButton({
+function IconButtonContent({
   icon,
   label,
   onPress,
@@ -128,6 +128,8 @@ export function IconButton({
     </AnimatedPressable>
   );
 }
+
+export const IconButton = memo(IconButtonContent);
 
 const styles = StyleSheet.create({
   base: {

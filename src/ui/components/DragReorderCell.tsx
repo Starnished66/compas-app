@@ -1,4 +1,4 @@
-import React, { ReactNode, useContext } from 'react';
+import React, { ReactNode, memo, useContext, useMemo } from 'react';
 import { Animated, StyleProp, ViewStyle } from 'react-native';
 import { DragReorderCellContext } from './dragReorderCellContext';
 
@@ -8,11 +8,15 @@ export interface DragReorderCellProps {
   children?: ReactNode;
 }
 
-export function DragReorderCell({ index, style, children, ...rest }: DragReorderCellProps) {
+function DragReorderCellContent({ index, style, children, ...rest }: DragReorderCellProps) {
   const rowStyle = useContext(DragReorderCellContext);
+  const shiftStyle = rowStyle?.(index);
+  const cellStyle = useMemo(() => [style, shiftStyle], [style, shiftStyle]);
   return (
-    <Animated.View {...rest} style={[style, rowStyle?.(index)]}>
+    <Animated.View {...rest} style={cellStyle}>
       {children}
     </Animated.View>
   );
 }
+
+export const DragReorderCell = memo(DragReorderCellContent);

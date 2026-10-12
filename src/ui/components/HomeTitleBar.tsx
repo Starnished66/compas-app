@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
-import { Animated, StyleSheet } from 'react-native';
+import React from 'react';
+import { StyleSheet } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { between, CollapseProgress, fadeOnCollapse } from '../collapse';
 import { Size, Space } from '../tokens';
 import { AppText } from './AppText';
@@ -15,25 +16,27 @@ export interface HomeTitleBarProps {
 const TITLE_LIFT = 48;
 const SETTINGS_LIFT = 56;
 const SETTINGS_TOP = (Size.bar - Size.controlSm) / 2;
-const EXPANDED = new Animated.Value(0);
 
-export function HomeTitleBar({ onOpenSettings, collapse = EXPANDED, compact = false, settingsOpen = false }: HomeTitleBarProps) {
-  const animated = useMemo(() => {
-    const opacity = fadeOnCollapse(collapse);
-    return {
-      title: { opacity, transform: [{ translateY: between(collapse, 0, -TITLE_LIFT) }] },
-      settings: { opacity, transform: [{ translateY: between(collapse, 0, -SETTINGS_LIFT) }] },
-    };
-  }, [collapse]);
+export function HomeTitleBar({ onOpenSettings, collapse, compact = false, settingsOpen = false }: HomeTitleBarProps) {
+  const expanded = useSharedValue(0);
+  const progress = collapse ?? expanded;
+  const titleStyle = useAnimatedStyle(() => ({
+    opacity: fadeOnCollapse(progress.value),
+    transform: [{ translateY: between(progress.value, 0, -TITLE_LIFT) }],
+  }));
+  const settingsStyle = useAnimatedStyle(() => ({
+    opacity: fadeOnCollapse(progress.value),
+    transform: [{ translateY: between(progress.value, 0, -SETTINGS_LIFT) }],
+  }));
 
   return (
     <>
-      <Animated.View pointerEvents="none" style={[styles.title, animated.title]}>
+      <Animated.View pointerEvents="none" style={[styles.title, titleStyle]}>
         <AppText variant="headline" accessibilityRole="header">
           Compás Remote
         </AppText>
       </Animated.View>
-      <Animated.View pointerEvents={compact ? 'none' : 'box-none'} style={[styles.settings, animated.settings]}>
+      <Animated.View pointerEvents={compact ? 'none' : 'box-none'} style={[styles.settings, settingsStyle]}>
         <IconButton
           icon="settings"
           label="Settings"

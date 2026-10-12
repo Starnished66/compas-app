@@ -21,6 +21,7 @@ import {
   HttpRequest,
   HttpResponse,
   isArtworkPreemptibleTransport,
+  isFileDownloadTransport,
 } from './HttpTransport';
 
 export class RemoteApiException extends Error {
@@ -114,6 +115,8 @@ function nullableString(value: unknown, field: string): string | null {
   return result.trim() ? result : null;
 }
 
+let commandsSent = 0;
+
 export class RemoteApi {
   static readonly PIN_HEADER = 'X-Compas-PIN';
   static readonly CATALOG_SYNC_FEATURE = 'catalog_sync_v1';
@@ -182,8 +185,24 @@ export class RemoteApi {
     this.ensureSuccess(response);
     return {
       contentType: response.header('content-type'),
-      base64: bytesToBase64(response.body),
+      base64: response.bodyBase64 ?? bytesToBase64(response.body),
     };
+  }
+
+  get commandGeneration(): number {
+    return commandsSent;
+  }
+
+  get canDownloadArt(): boolean {
+    return isFileDownloadTransport(this.transport);
+  }
+
+  async downloadArt(fileUri: string): Promise<boolean> {
+    if (!isFileDownloadTransport(this.transport)) throw new Error('Transport cannot download files');
+    const response = await this.transport.download(this.request('GET', `${this.prefix}/art`), fileUri);
+    if (response.statusCode === 404) return false;
+    this.ensureSuccess(response);
+    return true;
   }
 
   async togglePlayback(): Promise<void> {
@@ -529,7 +548,7 @@ export class RemoteApi {
     this.ensureSuccess(response);
     return {
       contentType: response.header('content-type'),
-      base64: bytesToBase64(response.body),
+      base64: response.bodyBase64 ?? bytesToBase64(response.body),
     };
   }
 
@@ -705,6 +724,7 @@ export class RemoteApi {
   private async command(path: string, params: [string, string][] = []): Promise<void> {
     // Match the native backend: player commands release the socket from optional artwork reads.
     this.preemptArtworkRequest();
+    commandsSent++;
     const res = await this.send('POST', `${this.prefix}${path}`, params);
     this.ensureSuccess(res);
   }
@@ -716,6 +736,10 @@ export class RemoteApi {
   }
 
   private async send(method: 'GET' | 'POST', path: string, params: [string, string][] = [], body?: Uint8Array): Promise<HttpResponse> {
+    return this.transport.execute(this.request(method, path, params, body));
+  }
+
+  private request(method: 'GET' | 'POST', path: string, params: [string, string][] = [], body?: Uint8Array): HttpRequest {
     if (!path.startsWith('/') || path.includes('?')) {
       throw new Error('Invalid path format');
     }
@@ -729,12 +753,7 @@ export class RemoteApi {
       headers['Content-Type'] = 'audio/x-mpegurl';
       headers['Content-Length'] = String(body.length);
     }
-    return this.transport.execute({
-      method,
-      target,
-      headers,
-      body,
-    });
+    return { method, target, headers, body };
   }
 
   private ensureSuccess(response: HttpResponse): void {

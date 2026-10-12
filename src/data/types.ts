@@ -258,8 +258,6 @@ export interface RemoteUiState {
   isPlaying: boolean;
   bluetoothArtworkRefreshGeneration: number;
   catalogArtworkRefreshGeneration: number;
-  positionMs: number;
-  durationMs: number;
   volume: number;
   playbackMode: PlaybackMode;
   currentFavorite: boolean;

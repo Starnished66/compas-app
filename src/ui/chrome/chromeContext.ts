@@ -2,8 +2,7 @@ import { createContext } from 'react';
 
 export type ScrollToTopTarget = 'home' | 'library' | 'playlists';
 
-export interface ChromeContextValue {
-  minimized: boolean;
+export interface ChromeActions {
   expand(): void;
   minimize(): void;
   lastExpandedAt(): number;
@@ -11,4 +10,6 @@ export interface ChromeContextValue {
   subscribeScrollToTop(target: ScrollToTopTarget, handler: () => void): () => void;
 }
 
-export const ChromeContext = createContext<ChromeContextValue | null>(null);
+export const ChromeActionsContext = createContext<ChromeActions | null>(null);
+
+export const ChromeMinimizedContext = createContext(false);

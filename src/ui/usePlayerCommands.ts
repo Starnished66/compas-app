@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ConnectionTransport, PlaybackMode, RemoteAction, RemoteUiState } from '../data/types';
+import { PlaybackPosition } from '../session/PlaybackPositionStore';
 import { formatPlaybackTime } from './playbackTime';
 import { recordSkip } from './skipDirection';
 import { useSnackbar } from './snackbar/useSnackbar';
 import { trackKey } from './trackKey';
+import { usePlaybackPositionStore } from './usePlaybackPosition';
 
 export interface PlayerCommands {
   pendingLabel: string | null;
@@ -22,7 +24,7 @@ interface PendingCommand {
   id: number;
   label: string;
   skipping: boolean;
-  settled?: (state: RemoteUiState) => boolean;
+  settled?: (state: RemoteUiState, position: PlaybackPosition) => boolean;
 }
 
 const WIFI_FEEDBACK_MS = 800;
@@ -43,15 +45,24 @@ function repeatLabel(mode: PlaybackMode): string {
 
 export function usePlayerCommands(state: RemoteUiState, onAction: (action: RemoteAction) => void): PlayerCommands {
   const snackbar = useSnackbar();
+  const positionStore = usePlaybackPositionStore();
   const [pending, setPending] = useState<PendingCommand | null>(null);
   const counter = useRef(0);
-  const latest = useRef({ state, onAction, snackbar });
-  latest.current = { state, onAction, snackbar };
+  const latest = useRef({ state, onAction, snackbar, positionStore });
+  latest.current = { state, onAction, snackbar, positionStore };
   const feedbackMs = state.connectionTransport === ConnectionTransport.Bluetooth ? BLUETOOTH_FEEDBACK_MS : WIFI_FEEDBACK_MS;
 
   useEffect(() => {
-    if (pending?.settled?.(state)) setPending(null);
-  }, [pending, state]);
+    const settled = pending?.settled;
+    if (!settled) return;
+    const settle = () => {
+      if (settled(state, positionStore.getSnapshot())) {
+        setPending((current) => (current?.id === pending.id ? null : current));
+      }
+    };
+    settle();
+    return positionStore.subscribe(settle);
+  }, [pending, state, positionStore]);
 
   useEffect(() => {
     if (!pending) return;
@@ -69,13 +80,13 @@ export function usePlayerCommands(state: RemoteUiState, onAction: (action: Remot
     const skip = (direction: -1 | 1) => {
       const before = latest.current.state;
       const fromKey = trackKey(before.currentTrack);
-      const restarting = direction < 0 && before.positionMs > RESTART_THRESHOLD_MS;
+      const restarting = direction < 0 && latest.current.positionStore.getSnapshot().positionMs > RESTART_THRESHOLD_MS;
       if (!restarting) recordSkip(direction, fromKey);
       const label = direction > 0 ? 'Skipping…' : restarting ? 'Restarting…' : 'Going back…';
       run(direction > 0 ? { type: 'Next' } : { type: 'Previous' }, label, {
         skipping: true,
         settled: restarting
-          ? (current) => current.positionMs < RESTART_THRESHOLD_MS || trackKey(current.currentTrack) !== fromKey
+          ? (current, position) => position.positionMs < RESTART_THRESHOLD_MS || trackKey(current.currentTrack) !== fromKey
           : (current) => trackKey(current.currentTrack) !== fromKey,
       });
     };

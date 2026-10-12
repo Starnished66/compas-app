@@ -1,10 +1,21 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import React, { useEffect, useMemo } from 'react';
+import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useAnimatedProps,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import Svg, { Circle, G, Path } from 'react-native-svg';
-import { Easings, motionDuration } from '../motion';
-import { roundedRectPerimeter } from '../roundedRectPerimeter';
+import { COMET_SEGMENT_COUNT } from '../cometSegments';
+import { pointOnPerimeter, roundedRectPerimeter } from '../roundedRectPerimeter';
 import { ProgressLaps } from '../useProgressLaps';
 import { useReducedMotion } from '../useReducedMotion';
+import { ProgressCometSegment } from './ProgressCometSegment';
 
 export interface ProgressCometProps {
   width: number;
@@ -22,56 +33,33 @@ export interface ProgressCometProps {
 }
 
 const STROKE_WIDTH = 2;
-const SEGMENT_COUNT = 8;
 const LEAD_SEGMENT_OPACITY = 0.15;
 const SEGMENT_OPACITY = 0.12;
 const GLOW_SCALE = 2.4;
 const GLOW_OPACITY = 0.28;
 const BREATHE_MS = 1200;
 const BREATHE_MIN = 0.3;
-const MIN_SEGMENT = 0.001;
+const BREATHE_EASING = Easing.bezier(0.42, 0, 0.58, 1);
+const SEGMENT_INDICES = Array.from({ length: COMET_SEGMENT_COUNT }, (_, index) => index);
 
-interface Segment {
-  start: number;
-  length: number;
-}
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 export function cometGlowPad(headSize: number): number {
   return Math.ceil((headSize * GLOW_SCALE) / 2);
 }
 
-function wrap(value: number): number {
-  return ((value % 1) + 1) % 1;
-}
-
-function cometSegments({ lap, progress, endless }: ProgressLaps): Segment[] {
-  return Array.from({ length: SEGMENT_COUNT }, (_, k) => {
-    const share = k / SEGMENT_COUNT;
-    if (endless) return { start: lap + progress - 1 + share, length: 1 - share };
-    const offset = progress * share;
-    return { start: lap + offset, length: progress - offset };
-  });
-}
-
 function useBreathing(active: boolean) {
   const reducedMotion = useReducedMotion();
-  const opacity = useRef(new Animated.Value(1)).current;
+  const opacity = useSharedValue(1);
 
   useEffect(() => {
     if (!active || reducedMotion) {
-      opacity.setValue(1);
+      cancelAnimation(opacity);
+      opacity.value = 1;
       return;
     }
-    const step = (toValue: number) =>
-      Animated.timing(opacity, {
-        toValue,
-        duration: motionDuration(reducedMotion, BREATHE_MS),
-        easing: Easings.easeInOut,
-        useNativeDriver: true,
-      });
-    const loop = Animated.loop(Animated.sequence([step(BREATHE_MIN), step(1)]));
-    loop.start();
-    return () => loop.stop();
+    const breathe = (toValue: number) => withTiming(toValue, { duration: BREATHE_MS, easing: BREATHE_EASING });
+    opacity.value = withRepeat(withSequence(breathe(BREATHE_MIN), breathe(1)), -1);
   }, [active, opacity, reducedMotion]);
 
   return opacity;
@@ -96,10 +84,14 @@ export function ProgressComet({
     [height, radius, width],
   );
   const breathing = useBreathing(playing);
-  const total = perimeter.length;
-  const head = perimeter.pointAt(laps.lap + laps.progress);
   const pad = cometGlowPad(headSize);
   const canvas = { width: width + pad * 2, height: height + pad * 2, style: [styles.canvas, { left: -pad, top: -pad }] };
+  const { lap, progress } = laps;
+  const headPosition = useAnimatedProps(() => {
+    const head = pointOnPerimeter(perimeter, lap.value + progress.value);
+    return { cx: head.x + pad, cy: head.y + pad };
+  });
+  const glowStyle = useAnimatedStyle(() => ({ opacity: playing ? breathing.value : headOpacity }));
 
   return (
     <View
@@ -107,35 +99,32 @@ export function ProgressComet({
       accessible={Boolean(label)}
       accessibilityRole="progressbar"
       accessibilityLabel={label}
-      accessibilityValue={{ min: 0, max: 100, now: Math.round(laps.progress * 100) }}
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(laps.fraction * 100) }}
       style={[{ width, height }, style]}
     >
       <Svg {...canvas}>
         <G x={pad} y={pad}>
           <Path d={perimeter.path} stroke={trackColor} strokeOpacity={trackOpacity} strokeWidth={STROKE_WIDTH} fill="none" />
-          {cometSegments(laps).map((segment, index) =>
-            segment.length > MIN_SEGMENT ? (
-              <Path
-                key={index}
-                d={perimeter.path}
-                stroke={color}
-                strokeOpacity={index === 0 ? LEAD_SEGMENT_OPACITY : SEGMENT_OPACITY}
-                strokeWidth={STROKE_WIDTH}
-                strokeDasharray={[segment.length * total, Math.max(MIN_SEGMENT, (1 - segment.length) * total)]}
-                strokeDashoffset={-wrap(segment.start) * total}
-                fill="none"
-              />
-            ) : null,
-          )}
+          {SEGMENT_INDICES.map((index) => (
+            <ProgressCometSegment
+              key={index}
+              index={index}
+              laps={laps}
+              perimeter={perimeter}
+              color={color}
+              opacity={index === 0 ? LEAD_SEGMENT_OPACITY : SEGMENT_OPACITY}
+              strokeWidth={STROKE_WIDTH}
+            />
+          ))}
         </G>
       </Svg>
-      <Animated.View style={[StyleSheet.absoluteFill, { opacity: playing ? breathing : headOpacity }]}>
+      <Animated.View style={[StyleSheet.absoluteFill, glowStyle]}>
         <Svg {...canvas}>
-          <Circle cx={head.x + pad} cy={head.y + pad} r={(headSize * GLOW_SCALE) / 2} fill={color} fillOpacity={GLOW_OPACITY} />
+          <AnimatedCircle animatedProps={headPosition} r={(headSize * GLOW_SCALE) / 2} fill={color} fillOpacity={GLOW_OPACITY} />
         </Svg>
       </Animated.View>
       <Svg {...canvas}>
-        <Circle cx={head.x + pad} cy={head.y + pad} r={headSize / 2} fill={color} fillOpacity={playing ? 1 : headOpacity} />
+        <AnimatedCircle animatedProps={headPosition} r={headSize / 2} fill={color} fillOpacity={playing ? 1 : headOpacity} />
       </Svg>
     </View>
   );

@@ -102,6 +102,30 @@ export class ArtworkDiskCache {
     }
   }
 
+  async store(key: string, write: (fileUri: string) => Promise<boolean>): Promise<string | null> {
+    const target = this.fileFor(key);
+    const temporary = `${target}.${Date.now()}.${Math.random().toString(36).substring(2)}.tmp`;
+    try {
+      await this.ensureDirectory();
+      if (!(await write(temporary))) {
+        await FileSystem.deleteAsync(temporary, { idempotent: true });
+        return null;
+      }
+      await FileSystem.deleteAsync(target, { idempotent: true });
+      await FileSystem.moveAsync({ from: temporary, to: target });
+    } catch (error) {
+      await FileSystem.deleteAsync(temporary, { idempotent: true }).catch(() => {});
+      throw error;
+    }
+    void this.trim();
+    return target;
+  }
+
+  private async ensureDirectory(): Promise<void> {
+    const info = await FileSystem.getInfoAsync(this.directory);
+    if (!info.exists) await FileSystem.makeDirectoryAsync(this.directory, { intermediates: true });
+  }
+
   async clear(): Promise<void> {
     this.memoryCache.clear();
     try {

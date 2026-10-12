@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import { ChromeContext, ScrollToTopTarget } from './chromeContext';
+import { ChromeActionsContext, ChromeMinimizedContext, ScrollToTopTarget } from './chromeContext';
 
 export interface ChromeState {
   minimized: boolean;
@@ -14,8 +14,9 @@ const detachedChrome: ChromeState = {
 };
 
 export function useChromeState(): ChromeState {
-  const context = useContext(ChromeContext);
-  return context
-    ? { minimized: context.minimized, expand: context.expand, requestScrollToTop: context.requestScrollToTop }
+  const actions = useContext(ChromeActionsContext);
+  const minimized = useContext(ChromeMinimizedContext);
+  return actions
+    ? { minimized, expand: actions.expand, requestScrollToTop: actions.requestScrollToTop }
     : detachedChrome;
 }

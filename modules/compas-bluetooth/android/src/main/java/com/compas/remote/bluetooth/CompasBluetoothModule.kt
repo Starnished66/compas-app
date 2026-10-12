@@ -8,9 +8,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.graphics.BitmapFactory
-import android.graphics.Color
-import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -267,14 +264,6 @@ class CompasBluetoothModule : Module() {
             promise.resolve(count)
         }
 
-        AsyncFunction("extractArtworkPalette") { source: String, promise: Promise ->
-            try {
-                promise.resolve(extractArtworkPalette(source))
-            } catch (e: Exception) {
-                promise.reject("ARTWORK_PALETTE_FAILED", e.message, e)
-            }
-        }
-
         AsyncFunction("executeRfcommRequest") { deviceId: String, method: String, target: String, headers: Map<String, String>?, isArtwork: Boolean, artworkIndex: Double?, bodyBase64: String?, promise: Promise ->
             val idx = artworkIndex?.toLong()
             val exchange = if (isArtwork) {
@@ -422,59 +411,6 @@ class CompasBluetoothModule : Module() {
             runCatching {
                 bluetoothAdapter?.takeIf { it.isDiscovering }?.cancelDiscovery()
             }
-        }
-    }
-
-    private fun extractArtworkPalette(source: String): Map<String, Double>? {
-        val bytes = when {
-            source.startsWith("data:") -> {
-                val separator = source.indexOf(',')
-                if (separator < 0) return null
-                Base64.decode(source.substring(separator + 1), Base64.DEFAULT)
-            }
-            source.startsWith("file:") || source.startsWith("content:") -> {
-                context.contentResolver.openInputStream(Uri.parse(source))?.use { it.readBytes() } ?: return null
-            }
-            else -> return null
-        }
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        var sampleSize = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / sampleSize > 64) sampleSize *= 2
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply {
-            inSampleSize = sampleSize
-            inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
-        }) ?: return null
-
-        try {
-            val hueWeight = DoubleArray(12)
-            val hueX = DoubleArray(12)
-            val hueY = DoubleArray(12)
-            val saturationWeight = DoubleArray(12)
-            val hsv = FloatArray(3)
-            for (y in 0 until bitmap.height step 2) {
-                for (x in 0 until bitmap.width step 2) {
-                    Color.colorToHSV(bitmap.getPixel(x, y), hsv)
-                    val saturation = hsv[1].toDouble()
-                    val brightness = hsv[2].toDouble()
-                    if (saturation < 0.16 || brightness < 0.08 || brightness > 0.96) continue
-                    val bucket = ((hsv[0] / 30f).toInt().coerceIn(0, 11))
-                    val weight = saturation * (1.0 - kotlin.math.abs(brightness - 0.55) * 0.35)
-                    val angle = Math.toRadians(hsv[0].toDouble())
-                    hueWeight[bucket] += weight
-                    hueX[bucket] += kotlin.math.cos(angle) * weight
-                    hueY[bucket] += kotlin.math.sin(angle) * weight
-                    saturationWeight[bucket] += saturation * weight
-                }
-            }
-            val bucket = hueWeight.indices.maxByOrNull { hueWeight[it] } ?: return null
-            if (hueWeight[bucket] <= 0.0) return null
-            var hue = Math.toDegrees(kotlin.math.atan2(hueY[bucket], hueX[bucket]))
-            if (hue < 0.0) hue += 360.0
-            return mapOf("hue" to hue, "saturation" to (saturationWeight[bucket] / hueWeight[bucket]).coerceIn(0.0, 1.0))
-        } finally {
-            bitmap.recycle()
         }
     }
 

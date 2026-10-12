@@ -1,11 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { Animated } from 'react-native';
+import { SharedValue, useSharedValue, withTiming } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { Durations, Easings, motionDuration } from '../motion';
 import { useReducedMotion } from '../useReducedMotion';
+import { WorkletEasings } from '../workletEasings';
 
 export interface TabBarMotion {
   slot: Animated.Value;
-  collapse: Animated.Value;
+  collapse: SharedValue<number>;
   othersOpacity: Animated.Value;
   tabSquash: Animated.Value;
   minimizeSquash: Animated.Value;
@@ -23,7 +26,7 @@ export function useTabBarMotion(activeIndex: number, minimized: boolean, onColla
   const reducedMotion = useReducedMotion();
   const restSlot = minimized ? 0 : Math.max(0, activeIndex);
   const slot = useRef(new Animated.Value(restSlot)).current;
-  const collapse = useRef(new Animated.Value(minimized ? 1 : 0)).current;
+  const collapse = useSharedValue(minimized ? 1 : 0);
   const othersOpacity = useRef(new Animated.Value(minimized ? 0 : 1)).current;
   const tabSquash = useRef(new Animated.Value(1)).current;
   const minimizeSquash = useRef(new Animated.Value(1)).current;
@@ -34,13 +37,14 @@ export function useTabBarMotion(activeIndex: number, minimized: boolean, onColla
   const latest = useRef({ reducedMotion, activeIndex, onCollapseSettled });
   latest.current = { reducedMotion, activeIndex, onCollapseSettled };
 
-  const timing = (value: Animated.Value, toValue: number, duration: number, easing: (t: number) => number, native = true) =>
+  const timing = (value: Animated.Value, toValue: number, duration: number, easing: (t: number) => number) =>
     Animated.timing(value, {
       toValue,
       duration: motionDuration(latest.current.reducedMotion, duration),
       easing,
-      useNativeDriver: native,
+      useNativeDriver: true,
     });
+  const settleCollapse = () => latest.current.onCollapseSettled();
 
   const replay = (value: Animated.Value, duration: number) => {
     if (latest.current.reducedMotion) return;
@@ -66,9 +70,13 @@ export function useTabBarMotion(activeIndex: number, minimized: boolean, onColla
     if (!minimizedChanged) return;
     replay(minimizeSquash, MINIMIZE_SQUASH_MS);
     timing(othersOpacity, minimized ? 0 : 1, Durations.chromeFade, Easings.ease).start();
-    timing(collapse, minimized ? 1 : 0, Durations.pill, Easings.overshootSoft, false).start(({ finished }) => {
-      if (finished) latest.current.onCollapseSettled();
-    });
+    collapse.value = withTiming(
+      minimized ? 1 : 0,
+      { duration: motionDuration(latest.current.reducedMotion, Durations.pill), easing: WorkletEasings.overshootSoft },
+      (finished) => {
+        if (finished) scheduleOnRN(settleCollapse);
+      },
+    );
   }, [activeIndex, collapse, minimizeSquash, minimized, othersOpacity, restSlot, slot, tabSquash]);
 
   const beginDrag = () => {

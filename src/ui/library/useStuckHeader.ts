@@ -11,12 +11,16 @@ export interface StuckHeader {
 
 export function useStuckHeader(): StuckHeader {
   const [stuck, setStuck] = useState(false);
+  const stuckRef = useRef(false);
   const stickOffset = useRef<number | null>(null);
   const offset = useRef(0);
 
   const update = useCallback(() => {
     const stickAt = stickOffset.current;
-    setStuck(stickAt != null && offset.current >= stickAt - STICK_TOLERANCE);
+    const next = stickAt != null && offset.current >= stickAt - STICK_TOLERANCE;
+    if (next === stuckRef.current) return;
+    stuckRef.current = next;
+    setStuck(next);
   }, []);
 
   const trackOffset = useCallback(

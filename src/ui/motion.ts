@@ -1,13 +1,25 @@
 import { Easing } from 'react-native';
 
+export type BezierCurve = readonly [number, number, number, number];
+
+export const EasingCurves = {
+  standard: [0.2, 0.8, 0.2, 1],
+  exit: [0.4, 0, 1, 1],
+  overshoot: [0.3, 1.3, 0.5, 1],
+  overshootSoft: [0.3, 1.15, 0.4, 1],
+  ease: [0.25, 0.1, 0.25, 1],
+  easeInOut: [0.42, 0, 0.58, 1],
+  easeOut: [0, 0, 0.58, 1],
+} as const satisfies Record<string, BezierCurve>;
+
 export const Easings = {
-  standard: Easing.bezier(0.2, 0.8, 0.2, 1),
-  exit: Easing.bezier(0.4, 0, 1, 1),
-  overshoot: Easing.bezier(0.3, 1.3, 0.5, 1),
-  overshootSoft: Easing.bezier(0.3, 1.15, 0.4, 1),
-  ease: Easing.bezier(0.25, 0.1, 0.25, 1),
-  easeInOut: Easing.bezier(0.42, 0, 0.58, 1),
-  easeOut: Easing.bezier(0, 0, 0.58, 1),
+  standard: Easing.bezier(...EasingCurves.standard),
+  exit: Easing.bezier(...EasingCurves.exit),
+  overshoot: Easing.bezier(...EasingCurves.overshoot),
+  overshootSoft: Easing.bezier(...EasingCurves.overshootSoft),
+  ease: Easing.bezier(...EasingCurves.ease),
+  easeInOut: Easing.bezier(...EasingCurves.easeInOut),
+  easeOut: Easing.bezier(...EasingCurves.easeOut),
   linear: Easing.linear,
 } as const;
 

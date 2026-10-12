@@ -15,15 +15,7 @@ function AlbumTileRowContent({ entries, tileWidth, onPress }: AlbumTileRowProps)
   return (
     <View style={styles.row}>
       {entries.map((entry, column) => (
-        <AlbumTile
-          key={column}
-          title={entry.title}
-          subtitle={entry.subtitle}
-          artworkUri={entry.artwork}
-          width={tileWidth}
-          flipKey={entry.id}
-          onPress={() => onPress(entry)}
-        />
+        <AlbumTile key={column} entry={entry} width={tileWidth} onPress={onPress} />
       ))}
     </View>
   );

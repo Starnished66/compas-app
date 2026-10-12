@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTabActive } from './tabActivity';
 
 const TICK_MS = 250;
 const RESYNC_TOLERANCE_MS = 1500;
@@ -18,6 +19,7 @@ export function useInterpolatedPosition(positionMs: number, durationMs: number, 
   const reportedRef = useRef(positionMs);
   const playingRef = useRef(playing);
   const [, setTick] = useState(0);
+  const visible = useTabActive();
 
   if (reportedRef.current !== positionMs || playingRef.current !== playing) {
     const now = Date.now();
@@ -30,10 +32,10 @@ export function useInterpolatedPosition(positionMs: number, durationMs: number, 
   }
 
   useEffect(() => {
-    if (!playing || durationMs <= 0) return;
+    if (!playing || !visible || durationMs <= 0) return;
     const timer = setInterval(() => setTick((tick) => tick + 1), TICK_MS);
     return () => clearInterval(timer);
-  }, [playing, durationMs]);
+  }, [playing, visible, durationMs]);
 
   return projected(anchorRef.current, playing, durationMs, Date.now());
 }

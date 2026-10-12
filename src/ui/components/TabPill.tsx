@@ -1,5 +1,7 @@
 import React from 'react';
 import { Animated, StyleSheet } from 'react-native';
+import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
+import { between } from '../collapse';
 import { TabBarMotion } from '../chrome/useTabBarMotion';
 import { usePalette } from '../PaletteProvider';
 import { Radius } from '../tokens';
@@ -24,6 +26,7 @@ export function TabPill({ motion, tabWidth, minimizedWidth }: TabPillProps) {
   const { slot, collapse, tabSquash, minimizeSquash, detach, pillOpacity } = motion;
   const frostOpacity = detach.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: 'clamp' });
   const accentOpacity = detach.interpolate({ inputRange: [0, 1], outputRange: [1, 0], extrapolate: 'clamp' });
+  const bodyStyle = useAnimatedStyle(() => ({ width: between(collapse.value, tabWidth, minimizedWidth) }));
 
   return (
     <Animated.View
@@ -44,12 +47,7 @@ export function TabPill({ motion, tabWidth, minimizedWidth }: TabPillProps) {
         },
       ]}
     >
-      <Animated.View
-        style={[
-          styles.body,
-          { width: collapse.interpolate({ inputRange: [0, 1], outputRange: [tabWidth, minimizedWidth] }) },
-        ]}
-      >
+      <Reanimated.View style={[styles.body, bodyStyle]}>
         <Animated.View style={[styles.layer, { backgroundColor: palette.accentContainer, opacity: accentOpacity }]} />
         <Animated.View
           style={[
@@ -58,7 +56,7 @@ export function TabPill({ motion, tabWidth, minimizedWidth }: TabPillProps) {
             { backgroundColor: palette.frost, borderColor: palette.outline, opacity: frostOpacity },
           ]}
         />
-      </Animated.View>
+      </Reanimated.View>
     </Animated.View>
   );
 }

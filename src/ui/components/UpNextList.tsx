@@ -1,5 +1,6 @@
 import React, { forwardRef, useCallback, useEffect, useState } from 'react';
-import { Animated, FlatList, ListRenderItem, ScrollViewProps, StyleSheet } from 'react-native';
+import { FlatList, ListRenderItem, ScrollViewProps, StyleSheet } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { RemoteAction, RemoteTrack, RemoteUiState } from '../../data/types';
 import { songCount } from '../countLabels';
 import { Space } from '../tokens';
@@ -13,6 +14,7 @@ import { UpNextFooter } from './UpNextFooter';
 import { UpNextListItem } from './UpNextListItem';
 import { UP_NEXT_ROW_HEIGHT } from './UpNextRow';
 import { unclippedScroll } from '../unclippedScroll';
+import { useStableTrack } from '../useStableTrack';
 
 export interface UpNextListProps {
   state: RemoteUiState;
@@ -28,6 +30,12 @@ const INITIAL_ROWS = 12;
 const ROWS_PER_BATCH = 10;
 const RENDER_WINDOW = 5;
 
+const ScrollLinkedFlatList = Animated.createAnimatedComponent(FlatList) as unknown as typeof FlatList;
+
+function keyOf(track: RemoteTrack): string {
+  return track.id;
+}
+
 export const UpNextList = forwardRef<FlatList<RemoteTrack>, UpNextListProps>(function UpNextList(
   { state, onAction, editing, onToggleEditing, onReorderActiveChange, onCardHeightChange, scrollProps },
   ref,
@@ -38,7 +46,7 @@ export const UpNextList = forwardRef<FlatList<RemoteTrack>, UpNextListProps>(fun
   const [footerHeight, setFooterHeight] = useState(0);
   const hasRows = rows.length > 0;
   const total = Math.max(state.queueTotal, state.queue.length);
-  const currentTrack = state.currentTrack;
+  const currentTrack = useStableTrack(state.currentTrack);
   const playing = state.isPlaying;
   const { draggingIndex, handleProps } = drag;
   const cardHeight = headerHeight + footerHeight + rows.length * UP_NEXT_ROW_HEIGHT;
@@ -46,32 +54,35 @@ export const UpNextList = forwardRef<FlatList<RemoteTrack>, UpNextListProps>(fun
   useEffect(() => onCardHeightChange?.(cardHeight), [cardHeight, onCardHeightChange]);
 
   const renderItem: ListRenderItem<RemoteTrack> = useCallback(
-    ({ item, index }) => (
-      <UpNextListItem
-        track={item}
-        index={index}
-        editing={editing}
-        current={sameSong(item, currentTrack)}
-        playing={playing}
-        lifted={draggingIndex === index}
-        dragHandle={canEditQueue ? handleProps(index) : undefined}
-        onPlay={playTrack}
-        onRemove={removeTrack}
-      />
-    ),
+    ({ item, index }) => {
+      const current = sameSong(item, currentTrack);
+      return (
+        <UpNextListItem
+          track={item}
+          index={index}
+          editing={editing}
+          current={current}
+          playing={current && playing}
+          lifted={draggingIndex === index}
+          dragHandle={canEditQueue ? handleProps(index) : undefined}
+          onPlay={playTrack}
+          onRemove={removeTrack}
+        />
+      );
+    },
     [canEditQueue, currentTrack, draggingIndex, editing, handleProps, playTrack, playing, removeTrack],
   );
 
   return (
     <DragReorderCellContext.Provider value={drag.rowStyle}>
-      <Animated.FlatList
+      <ScrollLinkedFlatList
         {...scrollProps}
         ref={ref}
         style={unclippedScroll}
         data={rows}
-        keyExtractor={(track) => track.id}
+        keyExtractor={keyOf}
         renderItem={renderItem}
-        extraData={renderItem}
+        strictMode
         CellRendererComponent={DragReorderCell}
         initialNumToRender={INITIAL_ROWS}
         maxToRenderPerBatch={ROWS_PER_BATCH}

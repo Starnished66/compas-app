@@ -4,6 +4,7 @@ import { RemoteTrack } from '../../data/types';
 import { usePalette } from '../PaletteProvider';
 import { formatPlaybackTime } from '../playbackTime';
 import { Radius, Space } from '../tokens';
+import { usePlaybackPosition } from '../usePlaybackPosition';
 import { AppText } from './AppText';
 import { ArtworkThumb } from './ArtworkThumb';
 import { PlayingIndicator } from './PlayingIndicator';
@@ -11,16 +12,15 @@ import { PlayingIndicator } from './PlayingIndicator';
 export interface QueueNowPlayingCardProps {
   track: RemoteTrack;
   isPlaying: boolean;
-  positionMs: number;
   style?: StyleProp<ViewStyle>;
 }
 
 const ARTWORK_SIZE = 48;
 
-export function QueueNowPlayingCard({ track, isPlaying, positionMs, style }: QueueNowPlayingCardProps) {
+export function QueueNowPlayingCard({ track, isPlaying, style }: QueueNowPlayingCardProps) {
   const palette = usePalette();
   const artist = track.artist || 'Unknown artist';
-  const position = formatPlaybackTime(positionMs);
+  const position = formatPlaybackTime(usePlaybackPosition().positionMs);
 
   return (
     <View

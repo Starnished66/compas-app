@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react';
 import { ViewToken } from 'react-native';
 import { ContentStatus, RemoteAction } from '../../data/types';
+import { useLibraryArtworkStore } from './libraryArtworkContext';
 import { LibraryItem, entriesOfItem } from './libraryItems';
 
 interface LibraryPagingInput {
@@ -12,9 +13,9 @@ interface LibraryPagingInput {
 export const LIBRARY_VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 1, minimumViewTime: 120 };
 
 export function useLibraryPaging({ hasMore, status, onAction }: LibraryPagingInput) {
-  const latest = useRef({ hasMore, status, onAction });
-  latest.current = { hasMore, status, onAction };
-  const requestedArtwork = useRef(new Set<string>());
+  const artworkStore = useLibraryArtworkStore();
+  const latest = useRef({ hasMore, status, onAction, artworkStore });
+  latest.current = { hasMore, status, onAction, artworkStore };
 
   const onEndReached = useCallback(() => {
     const current = latest.current;
@@ -26,8 +27,7 @@ export function useLibraryPaging({ hasMore, status, onAction }: LibraryPagingInp
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken<LibraryItem>[] }) => {
     for (const token of viewableItems) {
       for (const entry of entriesOfItem(token.item)) {
-        if (entry.artwork || requestedArtwork.current.has(entry.id)) continue;
-        requestedArtwork.current.add(entry.id);
+        if (entry.artwork || !latest.current.artworkStore.claimRequest(entry.id)) continue;
         latest.current.onAction({ type: 'LoadLibraryArtwork', entryId: entry.id });
       }
     }

@@ -11,6 +11,7 @@ import { SheetActionRow } from '../components/SheetActionRow';
 import { usePalette } from '../PaletteProvider';
 import { playlistDisplayName } from '../playlistName';
 import { useSnackbar } from '../snackbar/useSnackbar';
+import { useEntryArtwork } from '../library/useEntryArtwork';
 import { SnackbarMessage } from '../snackbar/snackbarContext';
 import { Space } from '../tokens';
 import { AddToPlaylistStep } from './AddToPlaylistStep';
@@ -127,6 +128,7 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
 
   const matches = useMemo(() => findSongEntries(state), [state]);
   const entry = matches[0];
+  const entryArtwork = useEntryArtwork(entry);
   const uniqueEntryId = matches.length === 1 ? matches[0].id : null;
   const title = state.songActionTitle;
   const features = state.supportedFeatures;
@@ -181,7 +183,7 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
   const renderActions = () => (
     <>
       <View style={styles.header}>
-        <ArtworkThumb uri={entry?.artwork} size={HEADER_ARTWORK_SIZE} />
+        <ArtworkThumb uri={entryArtwork} size={HEADER_ARTWORK_SIZE} />
         <View style={styles.headerText}>
           <AppText variant="bodyStrong" numberOfLines={1}>
             {title}

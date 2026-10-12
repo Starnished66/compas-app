@@ -69,3 +69,18 @@ export function verticalDirection(from: FlipRect | undefined, to: FlipRect | und
   if (!from || !to) return 1;
   return to.y < from.y ? -1 : 1;
 }
+
+export type FlipMode = 'sort' | 'view';
+export type FlipPart = 'box' | 'art';
+
+export function snapshotsBeforeFlip(mode: FlipMode, part: FlipPart): boolean {
+  return mode === 'sort' ? part === 'box' : part === 'art';
+}
+
+export function measuresAfterFlip(mode: FlipMode, part: FlipPart): boolean {
+  return mode === 'view' || part === 'box';
+}
+
+export function sameRect(a: FlipRect, b: FlipRect): boolean {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}

@@ -216,8 +216,6 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
                 </View>
                 <AudioFormatBadges track={track} variant="line" onPress={() => setFormatVisible(true)} />
                 <SeekBar
-                  positionMs={state.positionMs}
-                  durationMs={state.durationMs}
                   playing={state.isPlaying}
                   onSeek={commands.seek}
                   pendingLabel={commands.pendingLabel}

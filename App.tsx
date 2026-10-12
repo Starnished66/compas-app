@@ -4,6 +4,8 @@ import { StatusBar } from 'expo-status-bar';
 import { ConnectionStatus, LibraryCategory, RemoteScreen, RemoteTheme, RemoteUiState } from './src/data/types';
 import { useRemoteSession } from './src/session/useRemoteSession';
 import { PaletteProvider } from './src/ui/PaletteProvider';
+import { PlaybackPositionContext } from './src/ui/playbackPositionContext';
+import { LibraryArtworkContext } from './src/ui/library/libraryArtworkContext';
 import { ChromeProvider } from './src/ui/chrome/ChromeProvider';
 import { AccentSource, useArtworkPalette } from './src/ui/useArtworkPalette';
 import { MiniProgressPreferenceProvider } from './src/ui/preferences/MiniProgressPreferenceProvider';
@@ -15,6 +17,7 @@ import { AppChrome } from './src/ui/components/AppChrome';
 import { AppSnackbarProvider } from './src/ui/components/AppSnackbarProvider';
 import { PageTransition } from './src/ui/components/PageTransition';
 import { SlideUpScreen } from './src/ui/components/SlideUpScreen';
+import { TabPane } from './src/ui/components/TabPane';
 import { TabKey } from './src/ui/components/TabBar';
 import { chromeContentInset } from './src/ui/components/bottomChromeLayout';
 import { PinDialog } from './src/ui/components/PinDialog';
@@ -27,6 +30,8 @@ import { NowPlayingScreen } from './src/ui/screens/NowPlayingScreen';
 import { SettingsSheet } from './src/ui/sheets/SettingsSheet';
 import { SongActionsSheet } from './src/ui/sheets/SongActionsSheet';
 import { useScreenInsets } from './src/ui/useScreenInsets';
+
+const TAB_ORDER: TabKey[] = ['home', 'library', 'playlists'];
 
 const nonBrowsableLibraryCategories = new Set<LibraryCategory>([LibraryCategory.Playlists, LibraryCategory.Search]);
 
@@ -45,7 +50,7 @@ function accentSourceFor(state: RemoteUiState): AccentSource {
 }
 
 export default function App() {
-  const { state, onAction } = useRemoteSession();
+  const { state, onAction, playbackPosition, libraryArtwork } = useRemoteSession();
   const [nowPlayingVisible, setNowPlayingVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const lastBrowseCategoryRef = useRef<LibraryCategory>(LibraryCategory.Albums);
@@ -108,7 +113,10 @@ export default function App() {
   }, [nowPlayingAllowed]);
   const openSettings = useCallback(() => setSettingsVisible(true), []);
 
-  const renderMainScreen = () => {
+  const [visitedTabs] = useState(() => new Set<TabKey>());
+  visitedTabs.add(activeTab);
+
+  const renderActiveTab = () => {
     switch (mainScreen.type) {
       case 'Home':
         return <HomeScreen state={state} onAction={onAction} onOpenNowPlaying={openNowPlaying} onOpenSettings={openSettings} settingsOpen={settingsVisible} bottomInset={contentBottomInset} />;
@@ -120,58 +128,66 @@ export default function App() {
   };
 
   return (
-    <PaletteProvider palette={palette}>
-      <ChromeProvider>
-        <MiniProgressPreferenceProvider>
-          <BackgroundPreferenceProvider>
-            <View style={[styles.root, { backgroundColor: palette.background }]}>
-              <AppBackdrop
-                artworkUri={state.currentTrack?.artwork ?? null}
-                prominent={mainScreen.type === 'Home'}
-                paused={nowPlayingVisible}
-              />
-              <AppSnackbarProvider activeTab={activeTab} showMiniPlayer={showMiniPlayer} chromeHidden={connectionVisible}>
-                <StatusBar style={isDark ? 'light' : 'dark'} />
-                <SessionSnackbars state={state} />
-                <View style={[styles.root, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
-                  <View style={styles.root}>
-                    <PageTransition style={styles.content} transitionKey={`${activeTab}:${connectionReturnCount}`} kind="fade">
-                      {renderMainScreen()}
-                    </PageTransition>
-                    <AppChrome
+    <PlaybackPositionContext.Provider value={playbackPosition}>
+      <LibraryArtworkContext.Provider value={libraryArtwork}>
+        <PaletteProvider palette={palette}>
+          <ChromeProvider>
+            <MiniProgressPreferenceProvider>
+              <BackgroundPreferenceProvider>
+                <View style={[styles.root, { backgroundColor: palette.background }]}>
+                  <AppBackdrop
+                    artworkUri={state.currentTrack?.artwork ?? null}
+                    prominent={mainScreen.type === 'Home'}
+                    paused={nowPlayingVisible}
+                  />
+                  <AppSnackbarProvider activeTab={activeTab} showMiniPlayer={showMiniPlayer} chromeHidden={connectionVisible}>
+                    <StatusBar style={isDark ? 'light' : 'dark'} />
+                    <SessionSnackbars state={state} />
+                    <View style={[styles.root, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
+                      <View style={styles.root}>
+                        <PageTransition style={styles.content} transitionKey={`${activeTab}:${connectionReturnCount}`} kind="fade">
+                          {TAB_ORDER.filter((tab) => visitedTabs.has(tab)).map((tab) => (
+                            <TabPane key={tab} active={tab === activeTab}>
+                              {tab === activeTab ? renderActiveTab() : null}
+                            </TabPane>
+                          ))}
+                        </PageTransition>
+                        <AppChrome
+                          state={state}
+                          onAction={onAction}
+                          activeTab={activeTab}
+                          showMiniPlayer={showMiniPlayer}
+                          onSelectTab={selectTab}
+                          onOpenNowPlaying={openNowPlaying}
+                        />
+                      </View>
+                    </View>
+                    <SlideUpScreen visible={connectionVisible} onHidden={handleConnectionHidden}>
+                      <ConnectionScreen state={state} onAction={onAction} />
+                    </SlideUpScreen>
+                    <NowPlayingScreen
                       state={state}
                       onAction={onAction}
-                      activeTab={activeTab}
-                      showMiniPlayer={showMiniPlayer}
-                      onSelectTab={selectTab}
-                      onOpenNowPlaying={openNowPlaying}
+                      visible={nowPlayingVisible}
+                      onClose={() => setNowPlayingVisible(false)}
                     />
-                  </View>
+                    <SettingsSheet
+                      state={state}
+                      onAction={onAction}
+                      visible={settingsVisible}
+                      onClose={() => setSettingsVisible(false)}
+                      onOpenConnection={() => onAction({ type: 'OpenConnection' })}
+                    />
+                    <SongActionsSheet state={state} onAction={onAction} />
+                    <PinDialog state={state} onAction={onAction} />
+                  </AppSnackbarProvider>
                 </View>
-                <SlideUpScreen visible={connectionVisible} onHidden={handleConnectionHidden}>
-                  <ConnectionScreen state={state} onAction={onAction} />
-                </SlideUpScreen>
-                <NowPlayingScreen
-                  state={state}
-                  onAction={onAction}
-                  visible={nowPlayingVisible}
-                  onClose={() => setNowPlayingVisible(false)}
-                />
-                <SettingsSheet
-                  state={state}
-                  onAction={onAction}
-                  visible={settingsVisible}
-                  onClose={() => setSettingsVisible(false)}
-                  onOpenConnection={() => onAction({ type: 'OpenConnection' })}
-                />
-                <SongActionsSheet state={state} onAction={onAction} />
-                <PinDialog state={state} onAction={onAction} />
-              </AppSnackbarProvider>
-            </View>
-          </BackgroundPreferenceProvider>
-        </MiniProgressPreferenceProvider>
-      </ChromeProvider>
-    </PaletteProvider>
+              </BackgroundPreferenceProvider>
+            </MiniProgressPreferenceProvider>
+          </ChromeProvider>
+        </PaletteProvider>
+      </LibraryArtworkContext.Provider>
+    </PlaybackPositionContext.Provider>
   );
 }
 

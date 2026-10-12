@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, LayoutChangeEvent, Pressable, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import { LayoutChangeEvent, Pressable, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import Animated, { useSharedValue, withTiming } from 'react-native-reanimated';
 import { usePalette } from '../PaletteProvider';
-import { Durations, Easings, motionDuration } from '../motion';
+import { Durations, motionDuration } from '../motion';
 import { Radius, Size, Space, Type } from '../tokens';
 import { useReducedMotion } from '../useReducedMotion';
+import { WorkletEasings } from '../workletEasings';
 import { AppText } from './AppText';
 import { Icon } from './Icon';
 import { IconName } from './iconPaths';
@@ -45,28 +47,22 @@ export function SegmentedControl<T extends string>({
   const reducedMotion = useReducedMotion();
   const large = size === 'lg';
   const [segments, setSegments] = useState<Record<string, Segment>>({});
-  const pillX = useRef(new Animated.Value(0)).current;
-  const pillWidth = useRef(new Animated.Value(0)).current;
+  const pillX = useSharedValue(0);
+  const pillWidth = useSharedValue(0);
   const placedRef = useRef(false);
   const selected = segments[value];
 
   useEffect(() => {
     if (!selected) return;
     if (!placedRef.current) {
-      pillX.setValue(selected.x);
-      pillWidth.setValue(selected.width);
+      pillX.value = selected.x;
+      pillWidth.value = selected.width;
       placedRef.current = true;
       return;
     }
-    const config = {
-      duration: motionDuration(reducedMotion, Durations.pill),
-      easing: Easings.overshoot,
-      useNativeDriver: false,
-    };
-    Animated.parallel([
-      Animated.timing(pillX, { ...config, toValue: selected.x }),
-      Animated.timing(pillWidth, { ...config, toValue: selected.width }),
-    ]).start();
+    const config = { duration: motionDuration(reducedMotion, Durations.pill), easing: WorkletEasings.overshoot };
+    pillX.value = withTiming(selected.x, config);
+    pillWidth.value = withTiming(selected.width, config);
   }, [pillWidth, pillX, reducedMotion, selected]);
 
   const onSegmentLayout = (key: T) => (event: LayoutChangeEvent) => {

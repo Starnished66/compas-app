@@ -1,5 +1,6 @@
 import { ReactElement } from 'react';
 import { LibraryEntry } from '../../data/types';
+import { isSortableCategory } from './libraryCategories';
 import { LibraryEntryContext, LibraryEntryKind, libraryEntryKind } from './libraryEntryKind';
 
 export type LibraryItem =
@@ -13,13 +14,18 @@ export function nodeItem(key: string, node: ReactElement): LibraryItem {
   return { key, type: 'node', node };
 }
 
+function keysEntriesByPosition(context: LibraryEntryContext): boolean {
+  return !context.isNested && isSortableCategory(context.category);
+}
+
 export function entryItems(
   entries: LibraryEntry[],
   context: LibraryEntryContext,
   numbered = false,
 ): LibraryItem[] {
+  const byPosition = keysEntriesByPosition(context);
   return entries.map((entry, index) => ({
-    key: entry.id,
+    key: byPosition ? `row:${index}` : entry.id,
     type: 'entry',
     entry,
     kind: libraryEntryKind(entry, context),
@@ -27,12 +33,31 @@ export function entryItems(
   }));
 }
 
-export function tileItems(entries: LibraryEntry[], columns: number): LibraryItem[] {
+export function tileItems(
+  entries: LibraryEntry[],
+  columns: number,
+  previous: readonly LibraryItem[] = [],
+): LibraryItem[] {
   const rows: LibraryItem[] = [];
   for (let start = 0; start < entries.length; start += columns) {
-    rows.push({ key: `tiles:${start / columns}`, type: 'tiles', entries: entries.slice(start, start + columns) });
+    const end = Math.min(start + columns, entries.length);
+    const key = `tiles:${start / columns}`;
+    const reusable = previous[rows.length];
+    rows.push(
+      reusable && reusable.key === key && holdsTiles(reusable, entries, start, end)
+        ? reusable
+        : { key, type: 'tiles', entries: entries.slice(start, end) },
+    );
   }
   return rows;
+}
+
+function holdsTiles(item: LibraryItem, entries: LibraryEntry[], start: number, end: number): boolean {
+  if (item.type !== 'tiles' || item.entries.length !== end - start) return false;
+  for (let index = start; index < end; index++) {
+    if (item.entries[index - start] !== entries[index]) return false;
+  }
+  return true;
 }
 
 export function playlistTrackItems(entries: LibraryEntry[]): LibraryItem[] {

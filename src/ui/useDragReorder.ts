@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityActionEvent,
   AccessibilityActionInfo,
@@ -9,6 +9,7 @@ import {
   PanResponderInstance,
   ViewStyle,
 } from 'react-native';
+import { shiftUpdates } from './dragShifts';
 import { Durations, Easings, motionDuration } from './motion';
 import { useReducedMotion } from './useReducedMotion';
 
@@ -47,49 +48,56 @@ const LIFTED_SHADOW = {
   shadowOpacity: 0.32,
   shadowRadius: 14,
 } as const;
+const STILL_ROW_STYLE: ViewStyle = { transform: [{ translateY: 0 }, { scale: 1 }], zIndex: 0 };
+
+type RowStyle = Animated.WithAnimatedValue<ViewStyle>;
+
+function createDragState() {
+  return {
+    shifts: [] as Animated.Value[],
+    appliedShifts: new Map<number, number>(),
+    restingStyles: new Map<number, RowStyle>(),
+    dragY: new Animated.Value(0),
+    lift: new Animated.Value(1),
+    responders: new Map<number, PanResponderInstance>(),
+    handles: new Map<number, { min: number; max: number; props: DragHandleProps }>(),
+  };
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function indexBounds({ minIndex = 0, maxIndex, itemCount }: DragReorderOptions): { min: number; max: number } {
+  return { min: minIndex, max: Math.min(maxIndex ?? itemCount - 1, itemCount - 1) };
+}
+
 export function useDragReorder(options: DragReorderOptions): DragReorder {
   const reducedMotion = useReducedMotion();
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
-  const shifts = useRef<Animated.Value[]>([]).current;
-  const dragY = useRef(new Animated.Value(0)).current;
-  const lift = useRef(new Animated.Value(1)).current;
-  const responders = useRef(new Map<number, PanResponderInstance>()).current;
-  const handles = useRef(new Map<number, { min: number; max: number; props: DragHandleProps }>()).current;
+  const [{ shifts, appliedShifts, restingStyles, dragY, lift, responders, handles }] = useState(createDragState);
   const drag = useRef({ from: -1, target: -1 });
   const latest = useRef({ ...options, reducedMotion });
   latest.current = { ...options, reducedMotion };
 
   while (shifts.length < options.itemCount) shifts.push(new Animated.Value(0));
 
-  const bounds = () => {
-    const { minIndex = 0, maxIndex, itemCount } = latest.current;
-    return { min: minIndex, max: Math.min(maxIndex ?? itemCount - 1, itemCount - 1) };
-  };
-
-  const shiftFor = (index: number, from: number, target: number, rowHeight: number) => {
-    if (index === from) return 0;
-    if (from < index && index <= target) return -rowHeight;
-    if (target <= index && index < from) return rowHeight;
-    return 0;
-  };
+  const bounds = () => indexBounds(latest.current);
+  const { min: minBound, max: maxBound } = indexBounds(options);
 
   const applyTarget = (target: number) => {
-    const { from } = drag.current;
-    if (target === drag.current.target) return;
+    const { from, target: previous } = drag.current;
+    if (target === previous) return;
     drag.current.target = target;
-    const { rowHeight } = latest.current;
-    const { min, max } = bounds();
-    for (let index = min; index <= max; index += 1) {
+    const { rowHeight, reducedMotion: reduced } = latest.current;
+    const updates = shiftUpdates(from, previous, target, rowHeight, (index) => appliedShifts.get(index) ?? 0);
+    for (const { index, shift } of updates) {
       const value = shifts[index];
       if (!value) continue;
+      appliedShifts.set(index, shift);
       Animated.timing(value, {
-        toValue: shiftFor(index, from, target, rowHeight),
-        duration: motionDuration(latest.current.reducedMotion, Durations.rowShift),
+        toValue: shift,
+        duration: motionDuration(reduced, Durations.rowShift),
         easing: Easings.standard,
         useNativeDriver: true,
       }).start();
@@ -97,7 +105,8 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
   };
 
   const resetPositions = () => {
-    shifts.forEach((value) => value.setValue(0));
+    appliedShifts.forEach((_, index) => shifts[index]?.setValue(0));
+    appliedShifts.clear();
     dragY.setValue(0);
     lift.setValue(1);
   };
@@ -165,20 +174,31 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
     if (!options.enabled && drag.current.from >= 0) finish();
   });
 
-  const rowStyle = useCallback(
-    (index: number): Animated.WithAnimatedValue<ViewStyle> => {
-      const lifted = index === draggingIndex;
-      const shift = shifts[index] ?? 0;
-      return {
-        transform: [{ translateY: lifted ? dragY : shift }, { scale: lifted ? lift : 1 }],
-        zIndex: lifted ? LIFTED_Z_INDEX : 0,
-        ...(lifted ? { elevation: LIFTED_ELEVATION, ...LIFTED_SHADOW } : null),
-      };
-    },
-    [dragY, draggingIndex, lift, shifts],
+  const liftedStyle = useMemo<RowStyle>(
+    () => ({
+      transform: [{ translateY: dragY }, { scale: lift }],
+      zIndex: LIFTED_Z_INDEX,
+      elevation: LIFTED_ELEVATION,
+      ...LIFTED_SHADOW,
+    }),
+    [dragY, lift],
   );
 
-  const handleProps = (index: number): DragHandleProps => {
+  const rowStyle = useCallback(
+    (index: number): RowStyle => {
+      if (index === draggingIndex) return liftedStyle;
+      const shift = shifts[index];
+      if (!shift) return STILL_ROW_STYLE;
+      const cached = restingStyles.get(index);
+      if (cached) return cached;
+      const style: RowStyle = { transform: [{ translateY: shift }, { scale: 1 }], zIndex: 0 };
+      restingStyles.set(index, style);
+      return style;
+    },
+    [draggingIndex, liftedStyle, restingStyles, shifts],
+  );
+
+  const handleProps = useCallback((index: number): DragHandleProps => {
     const { min, max } = bounds();
     const cached = handles.get(index);
     if (cached && cached.min === min && cached.max === max) return cached.props;
@@ -200,7 +220,7 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
     };
     handles.set(index, { min, max, props });
     return props;
-  };
+  }, [minBound, maxBound]);
 
   return { rowStyle, handleProps, draggingIndex, scrollEnabled: draggingIndex === null };
 }

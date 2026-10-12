@@ -1,16 +1,16 @@
-import React, { useMemo, useState } from 'react';
-import { Animated, StyleProp, StyleSheet, ViewStyle } from 'react-native';
+import React, { useState } from 'react';
+import { StyleProp, StyleSheet, ViewStyle } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { between, CollapseProgress, fadeOnCollapse } from '../collapse';
 import { formatPlaybackTime, formatRemainingTime } from '../playbackTime';
 import { Space, Type } from '../tokens';
 import { useInterpolatedPosition } from '../useInterpolatedPosition';
+import { usePlaybackPosition } from '../usePlaybackPosition';
 import { AppText } from './AppText';
 import { PendingCaption } from './PendingCaption';
 import { Slider } from './Slider';
 
 export interface SeekBarProps {
-  positionMs: number;
-  durationMs: number;
   playing: boolean;
   onSeek: (positionMs: number) => void;
   disabled?: boolean;
@@ -22,9 +22,9 @@ export interface SeekBarProps {
 const EXPANDED_TOUCH_HEIGHT = 24;
 const COLLAPSED_TOUCH_HEIGHT = 12;
 const TIMES_HEIGHT = Type.caption.lineHeight;
-const EXPANDED = new Animated.Value(0);
 
-export function SeekBar({ positionMs, durationMs, playing, onSeek, disabled = false, collapse = EXPANDED, pendingLabel = null, style }: SeekBarProps) {
+export function SeekBar({ playing, onSeek, disabled = false, collapse, pendingLabel = null, style }: SeekBarProps) {
+  const { positionMs, durationMs } = usePlaybackPosition();
   const [dragFraction, setDragFraction] = useState<number | null>(null);
   const livePositionMs = useInterpolatedPosition(positionMs, durationMs, playing && dragFraction === null);
   const hasDuration = durationMs > 0;
@@ -36,18 +36,19 @@ export function SeekBar({ positionMs, durationMs, playing, onSeek, disabled = fa
     if (hasDuration) onSeek(Math.round(value * durationMs));
   };
 
-  const { touchHeight, timesHeight, timesOpacity } = useMemo(
-    () => ({
-      touchHeight: between(collapse, EXPANDED_TOUCH_HEIGHT, COLLAPSED_TOUCH_HEIGHT),
-      timesHeight: between(collapse, TIMES_HEIGHT, 0),
-      timesOpacity: fadeOnCollapse(collapse),
-    }),
-    [collapse],
-  );
+  const expanded = useSharedValue(0);
+  const progress = collapse ?? expanded;
+  const touchStyle = useAnimatedStyle(() => ({
+    height: between(progress.value, EXPANDED_TOUCH_HEIGHT, COLLAPSED_TOUCH_HEIGHT),
+  }));
+  const timesStyle = useAnimatedStyle(() => ({
+    height: between(progress.value, TIMES_HEIGHT, 0),
+    opacity: fadeOnCollapse(progress.value),
+  }));
 
   return (
     <Animated.View style={style}>
-      <Animated.View style={[styles.touchFrame, { height: touchHeight }]}>
+      <Animated.View style={[styles.touchFrame, touchStyle]}>
         <Slider
           value={fraction}
           label="Seek"
@@ -57,7 +58,7 @@ export function SeekBar({ positionMs, durationMs, playing, onSeek, disabled = fa
           onCommit={commit}
         />
       </Animated.View>
-      <Animated.View style={[styles.times, { height: timesHeight, opacity: timesOpacity }]}>
+      <Animated.View style={[styles.times, timesStyle]}>
         <AppText variant="caption" tone="inkMuted" tabular>
           {formatPlaybackTime(shownMs)}
         </AppText>

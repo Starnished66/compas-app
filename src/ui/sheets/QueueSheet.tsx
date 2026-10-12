@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, ListRenderItem, StyleSheet, View } from 'react-native';
 import { ContentStatus, PlaybackMode, RemoteAction, RemoteTrack, RemoteUiState } from '../../data/types';
 import { AppText } from '../components/AppText';
@@ -44,6 +44,10 @@ function repeatLabel(mode: PlaybackMode): string {
   if (mode === PlaybackMode.RepeatAll) return 'Repeat';
   if (mode === PlaybackMode.RepeatOne) return 'Repeat once';
   return 'Repeat off';
+}
+
+function keyOf(track: RemoteTrack): string {
+  return track.id;
 }
 
 function trackSubtitle(track: RemoteTrack): string {
@@ -96,12 +100,13 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
     onClose();
   };
 
-  const removeTrack = (track: RemoteTrack) => {
+  const removeTrack = useCallback((track: RemoteTrack) => {
     onAction({ type: 'RemoveQueueTrack', id: track.id });
     snackbar.show({ text: `Removed “${track.title}”` });
-  };
+  }, [onAction, snackbar]);
 
-  const renderTrack: ListRenderItem<RemoteTrack> = ({ item, index }) => {
+  const { draggingIndex, handleProps } = drag;
+  const renderTrack: ListRenderItem<RemoteTrack> = useCallback(({ item, index }) => {
     const play = canEditQueue ? () => onAction({ type: 'PlayQueueTrack', id: item.id }) : undefined;
     return (
       <RemovableRow
@@ -112,7 +117,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
         removeLabel="Remove"
         onRemove={() => removeTrack(item)}
         onTap={play}
-        contentBackground={drag.draggingIndex === index ? palette.surfaceRaised : undefined}
+        contentBackground={draggingIndex === index ? palette.surfaceRaised : undefined}
       >
         <TrackRow
           title={item.title || 'Unknown song'}
@@ -120,11 +125,11 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
           artworkUri={item.artwork}
           artworkSize={QUEUE_ROW_ARTWORK}
           onPress={play}
-          accessory={canEditQueue ? <DragHandle handle={drag.handleProps(index)} /> : undefined}
+          accessory={canEditQueue ? <DragHandle handle={handleProps(index)} /> : undefined}
         />
       </RemovableRow>
     );
-  };
+  }, [canEditQueue, draggingIndex, handleProps, onAction, palette.surfaceRaised, removeTrack]);
 
   const emptyState =
     state.queueStatus === ContentStatus.Loading ? (
@@ -195,7 +200,6 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
         <QueueNowPlayingCard
           track={state.currentTrack}
           isPlaying={state.isPlaying}
-          positionMs={state.positionMs}
           style={styles.nowPlaying}
         />
       ) : null}
@@ -211,11 +215,11 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
       <DragReorderCellContext.Provider value={drag.rowStyle}>
         <FlatList
           data={rows}
-          extraData={drag.draggingIndex}
           CellRendererComponent={DragReorderCell}
           scrollEnabled={drag.scrollEnabled}
-          keyExtractor={(track) => track.id}
+          keyExtractor={keyOf}
           renderItem={renderTrack}
+          strictMode
           ListEmptyComponent={emptyState}
           ListFooterComponent={footer}
           onEndReached={loadMore}

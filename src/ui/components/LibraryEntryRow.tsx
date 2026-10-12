@@ -4,6 +4,7 @@ import { LibraryEntry } from '../../data/types';
 import { usePalette } from '../PaletteProvider';
 import { Size, Space } from '../tokens';
 import { LibraryEntryKind, displaySubtitle, opensCollection, placeholderIconFor } from '../library/libraryEntryKind';
+import { useEntryArtwork } from '../library/useEntryArtwork';
 import { playlistDisplayName } from '../playlistName';
 import { ArtworkThumb } from './ArtworkThumb';
 import { FlipView } from './FlipView';
@@ -27,6 +28,7 @@ const CHEVRON_SIZE = 18;
 
 function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress, onLongPress, onMore }: LibraryEntryRowProps) {
   const palette = usePalette();
+  const artworkUri = useEntryArtwork(entry);
   const press = () => onPress(entry, kind);
   const longPress = onLongPress ? () => onLongPress(entry, kind) : undefined;
 
@@ -36,7 +38,7 @@ function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress
         <TrackRow
           title={entry.title}
           subtitle={displaySubtitle(entry) || undefined}
-          artworkUri={entry.artwork}
+          artworkUri={artworkUri}
           number={number}
           placeholderIcon="music"
           current={current}
@@ -68,8 +70,8 @@ function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress
         title={isPlaylist ? playlistDisplayName(entry.title) : entry.title}
         subtitle={displaySubtitle(entry) || undefined}
         leading={
-          <FlipView flipKey={entry.id} part="art" artwork={{ uri: entry.artwork, radius, placeholderIcon }}>
-            <ArtworkThumb uri={entry.artwork} radius={radius} placeholderIcon={placeholderIcon} />
+          <FlipView flipKey={entry.id} part="art" artwork={{ uri: artworkUri, radius, placeholderIcon }}>
+            <ArtworkThumb uri={artworkUri} radius={radius} placeholderIcon={placeholderIcon} />
           </FlipView>
         }
         trailing={trailing}

@@ -10,9 +10,61 @@ export interface HttpResponse {
   reason: string;
   headers: Record<string, string>;
   body: Uint8Array;
+  bodyBase64?: string;
   text(): string;
   header(name: string): string | undefined;
 }
+
+export interface FileDownloadResult {
+  status: number;
+  headers: Record<string, string>;
+  errorBody: string;
+}
+
+export type FileDownloader = (
+  url: string,
+  fileUri: string,
+  headers: Record<string, string>,
+  signal: AbortSignal
+) => Promise<FileDownloadResult>;
+
+export interface FileDownloadTransport extends HttpTransport {
+  download(request: HttpRequest, fileUri: string): Promise<HttpResponse>;
+}
+
+export function isFileDownloadTransport(transport: HttpTransport): transport is FileDownloadTransport {
+  return typeof (transport as Partial<FileDownloadTransport>).download === 'function';
+}
+
+function lowerCaseHeaders(forEachHeader: (visit: (value: string, name: string) => void) => void): Record<string, string> {
+  const headers: Record<string, string> = {};
+  forEachHeader((value, name) => {
+    headers[name.toLowerCase()] = value;
+  });
+  return headers;
+}
+
+export function createHttpResponse(
+  statusCode: number,
+  reason: string,
+  headers: Record<string, string>,
+  body: Uint8Array
+): HttpResponse {
+  return {
+    statusCode,
+    reason,
+    headers,
+    body,
+    text() {
+      return new TextDecoder('utf-8').decode(body);
+    },
+    header(name: string) {
+      return headers[name.toLowerCase()];
+    },
+  };
+}
+
+const CURRENT_ARTWORK_TARGET = '/api/v1/art';
 
 export class ArtworkRequestPreemptedException extends Error {
   constructor(message: string = 'Artwork request was preempted', public cause?: unknown) {
@@ -40,27 +92,48 @@ export function isArtworkPreemptibleTransport(transport: unknown): transport is 
 
 /** Serializes one-request-per-socket player traffic like the native session's network dispatcher. */
 export class SerializedHttpTransport implements HttpTransport, ArtworkPreemptibleTransport {
+  readonly download?: (request: HttpRequest, fileUri: string) => Promise<HttpResponse>;
   private nextOrder = 0;
   private running = false;
   private readonly pending: Array<{
     request: HttpRequest;
     order: number;
+    run: () => Promise<HttpResponse>;
     resolve: (response: HttpResponse) => void;
     reject: (error: unknown) => void;
   }> = [];
 
-  constructor(private readonly inner: HttpTransport) {}
+  constructor(private readonly inner: HttpTransport) {
+    if (isFileDownloadTransport(inner)) {
+      this.download = (request, fileUri) => this.enqueue(request, () => inner.download(request, fileUri));
+    }
+  }
 
   execute(request: HttpRequest): Promise<HttpResponse> {
-    return new Promise<HttpResponse>((resolve, reject) => {
-      this.pending.push({ request, order: this.nextOrder++, resolve, reject });
-      this.pending.sort((left, right) => this.priority(left.request) - this.priority(right.request) || left.order - right.order);
-      this.pump();
-    });
+    return this.enqueue(request, () => this.inner.execute(request));
   }
 
   preemptArtworkRequest(index?: number): void {
+    // A queued now-playing art read would run after the command and return the next track's art.
+    if (index == null) this.dropQueuedCurrentArtwork();
     if (isArtworkPreemptibleTransport(this.inner)) this.inner.preemptArtworkRequest(index);
+  }
+
+  private dropQueuedCurrentArtwork(): void {
+    for (let i = this.pending.length - 1; i >= 0; i--) {
+      const queued = this.pending[i];
+      if (queued.request.target !== CURRENT_ARTWORK_TARGET) continue;
+      this.pending.splice(i, 1);
+      queued.reject(new ArtworkRequestPreemptedException());
+    }
+  }
+
+  private enqueue(request: HttpRequest, run: () => Promise<HttpResponse>): Promise<HttpResponse> {
+    return new Promise<HttpResponse>((resolve, reject) => {
+      this.pending.push({ request, order: this.nextOrder++, run, resolve, reject });
+      this.pending.sort((left, right) => this.priority(left.request) - this.priority(right.request) || left.order - right.order);
+      this.pump();
+    });
   }
 
   private priority(request: HttpRequest): number {
@@ -73,7 +146,7 @@ export class SerializedHttpTransport implements HttpTransport, ArtworkPreemptibl
     const next = this.pending.shift();
     if (!next) return;
     this.running = true;
-    Promise.resolve().then(() => this.inner.execute(next.request)).then(next.resolve, next.reject).finally(() => {
+    Promise.resolve().then(next.run).then(next.resolve, next.reject).finally(() => {
       this.running = false;
       this.pump();
     });
@@ -100,16 +173,64 @@ export function extractArtworkIndex(target: string): number | null {
 }
 
 export class FetchHttpTransport implements HttpTransport, ArtworkPreemptibleTransport {
+  readonly download?: (request: HttpRequest, fileUri: string) => Promise<HttpResponse>;
   private baseUrl: string;
   private timeoutMs: number;
   private activeArtworkControllers = new Map<number | 'general', AbortController>();
 
-  constructor(baseUrl: string, timeoutMs: number = 8000) {
+  constructor(baseUrl: string, timeoutMs: number = 8000, downloadFile?: FileDownloader) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.timeoutMs = timeoutMs;
+    if (downloadFile) {
+      this.download = (request, fileUri) =>
+        this.withAbortSignal(request, async (signal) => {
+          const result = await downloadFile(this.urlFor(request), fileUri, request.headers ?? {}, signal);
+          return createHttpResponse(
+            result.status,
+            '',
+            lowerCaseHeaders((visit) => Object.entries(result.headers).forEach(([name, value]) => visit(value, name))),
+            new TextEncoder().encode(result.errorBody)
+          );
+        });
+    }
   }
 
-  async execute(request: HttpRequest): Promise<HttpResponse> {
+  execute(request: HttpRequest): Promise<HttpResponse> {
+    return this.withAbortSignal(request, async (signal) => {
+      const res = await fetch(this.urlFor(request), {
+        method: request.method,
+        headers: request.headers,
+        body: request.body ? new Blob([request.body as Uint8Array<ArrayBuffer>]) : undefined,
+        signal,
+      });
+      const body = new Uint8Array(await res.arrayBuffer());
+      return createHttpResponse(res.status, res.statusText || 'OK', lowerCaseHeaders((visit) => res.headers.forEach(visit)), body);
+    });
+  }
+
+  preemptArtworkRequest(index?: number): void {
+    if (index != null) {
+      const controller = this.activeArtworkControllers.get(index);
+      if (controller) {
+        controller.abort();
+        this.activeArtworkControllers.delete(index);
+      }
+    } else {
+      for (const controller of this.activeArtworkControllers.values()) {
+        controller.abort();
+      }
+      this.activeArtworkControllers.clear();
+    }
+  }
+
+  private urlFor(request: HttpRequest): string {
+    return `${this.baseUrl}${request.target}`;
+  }
+
+  private async withAbortSignal(
+    request: HttpRequest,
+    run: (signal: AbortSignal) => Promise<HttpResponse>
+  ): Promise<HttpResponse> {
     const isArt = isOptionalArtworkRequest(request.target);
     const artIndex = isArt ? extractArtworkIndex(request.target) : null;
     const controller = new AbortController();
@@ -121,33 +242,7 @@ export class FetchHttpTransport implements HttpTransport, ArtworkPreemptibleTran
 
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const url = `${this.baseUrl}${request.target}`;
-      const res = await fetch(url, {
-        method: request.method,
-        headers: request.headers,
-        body: request.body ? new Blob([request.body as Uint8Array<ArrayBuffer>]) : undefined,
-        signal: controller.signal,
-      });
-
-      const buffer = await res.arrayBuffer();
-      const body = new Uint8Array(buffer);
-      const resHeaders: Record<string, string> = {};
-      res.headers.forEach((val, name) => {
-        resHeaders[name.toLowerCase()] = val;
-      });
-
-      return {
-        statusCode: res.status,
-        reason: res.statusText || 'OK',
-        headers: resHeaders,
-        body,
-        text() {
-          return new TextDecoder('utf-8').decode(body);
-        },
-        header(name: string) {
-          return resHeaders[name.toLowerCase()];
-        },
-      };
+      return await run(controller.signal);
     } catch (err: any) {
       if (controller.signal.aborted && isArt) {
         throw new ArtworkRequestPreemptedException('Artwork request preempted or timed out', err);
@@ -155,25 +250,9 @@ export class FetchHttpTransport implements HttpTransport, ArtworkPreemptibleTran
       throw err;
     } finally {
       clearTimeout(timer);
-      if (key != null) {
+      if (key != null && this.activeArtworkControllers.get(key) === controller) {
         this.activeArtworkControllers.delete(key);
       }
-    }
-  }
-
-  preemptArtworkRequest(index?: number): void {
-    if (index != null) {
-      const controller = this.activeArtworkControllers.get(index);
-      if (controller) {
-        controller.abort();
-        this.activeArtworkControllers.delete(index);
-      }
-    } else {
-      // Abort all active artwork controllers
-      for (const [key, controller] of this.activeArtworkControllers.entries()) {
-        controller.abort();
-      }
-      this.activeArtworkControllers.clear();
     }
   }
 }

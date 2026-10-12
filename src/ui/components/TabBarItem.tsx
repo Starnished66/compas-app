@@ -1,5 +1,7 @@
 import React from 'react';
 import { Animated, Pressable, StyleSheet } from 'react-native';
+import Reanimated, { SharedValue, useAnimatedStyle } from 'react-native-reanimated';
+import { clampUnit } from '../collapse';
 import { usePalette } from '../PaletteProvider';
 import { Size, Type } from '../tokens';
 import { AppText } from './AppText';
@@ -11,7 +13,7 @@ export interface TabBarItemProps {
   icon: IconName;
   selected: boolean;
   hidden: boolean;
-  collapse: Animated.Value;
+  collapse: SharedValue<number>;
   othersOpacity: Animated.Value;
   onPress: () => void;
 }
@@ -21,13 +23,11 @@ const TAB_CONTENT_GAP = 2;
 export function TabBarItem({ label, icon, selected, hidden, collapse, othersOpacity, onPress }: TabBarItemProps) {
   const palette = usePalette();
   const tint = selected ? palette.onAccentContainer : palette.inkMuted;
+  const slotStyle = useAnimatedStyle(() => ({ flexGrow: selected ? 1 : clampUnit(1 - collapse.value) }));
 
   return (
-    <Animated.View
-      style={[
-        styles.slot,
-        { flexGrow: selected ? 1 : collapse.interpolate({ inputRange: [0, 1], outputRange: [1, 0], extrapolate: 'clamp' }) },
-      ]}
+    <Reanimated.View
+      style={[styles.slot, slotStyle]}
       importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
       accessibilityElementsHidden={hidden}
     >
@@ -46,7 +46,7 @@ export function TabBarItem({ label, icon, selected, hidden, collapse, othersOpac
           </AppText>
         </Animated.View>
       </Pressable>
-    </Animated.View>
+    </Reanimated.View>
   );
 }
 

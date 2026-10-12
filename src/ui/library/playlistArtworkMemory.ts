@@ -2,9 +2,8 @@ import { LibraryEntry } from '../../data/types';
 
 const artworkByPlaylist = new Map<string, string>();
 
-export function rememberPlaylistArtwork(playlistKey: string, entries: LibraryEntry[]): void {
-  const artwork = entries.find((entry) => entry.artwork)?.artwork;
-  if (artwork) artworkByPlaylist.set(playlistKey, artwork);
+export function rememberPlaylistArtwork(playlistKey: string, artwork: string): void {
+  artworkByPlaylist.set(playlistKey, artwork);
 }
 
 export function withRememberedPlaylistArtwork(entries: LibraryEntry[]): LibraryEntry[] {

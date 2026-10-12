@@ -16,12 +16,11 @@ import { CardComet } from './CardComet';
 import { FrostFill } from './FrostFill';
 import { IconButton } from './IconButton';
 import { PlayButtonRing } from './PlayButtonRing';
-import { ProgressBar } from './ProgressBar';
+import { PlaybackProgressBar } from './PlaybackProgressBar';
 
 export interface MiniPlayerProps {
   track: RemoteTrack;
   isPlaying: boolean;
-  progress: number;
   progressStyle: MiniProgressStyle;
   onOpen: () => void;
   onTogglePlayback: () => void;
@@ -40,7 +39,6 @@ const BAR_BORDER = 1;
 export function MiniPlayer({
   track,
   isPlaying,
-  progress,
   progressStyle,
   onOpen,
   onTogglePlayback,
@@ -117,14 +115,14 @@ export function MiniPlayer({
             onPress={onTogglePlayback}
           />
           {progressStyle === 'ring' ? (
-            <PlayButtonRing track={track} progress={progress} playing={isPlaying} buttonSize={Size.controlSm} />
+            <PlayButtonRing track={track} playing={isPlaying} buttonSize={Size.controlSm} />
           ) : null}
         </View>
         <IconButton icon="skipNext" label="Next" size="sm" iconSize={SKIP_ICON_SIZE} onPress={() => skip(1, onNext)} />
-        {progressStyle === 'bar' ? <ProgressBar value={progress} label="Song progress" style={styles.progress} /> : null}
+        {progressStyle === 'bar' ? <PlaybackProgressBar style={styles.progress} /> : null}
       </Pressable>
       {progressStyle === 'card' ? (
-        <CardComet track={track} progress={progress} playing={isPlaying} radius={Radius.lg} />
+        <CardComet track={track} playing={isPlaying} radius={Radius.lg} />
       ) : null}
     </Animated.View>
   );

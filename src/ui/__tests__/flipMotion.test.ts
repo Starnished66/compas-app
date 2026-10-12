@@ -1,4 +1,12 @@
-import { FlipMotion, offsetAt, sortRole, verticalDirection } from '../library/flipMotion';
+import {
+  FlipMotion,
+  measuresAfterFlip,
+  offsetAt,
+  sameRect,
+  snapshotsBeforeFlip,
+  sortRole,
+  verticalDirection,
+} from '../library/flipMotion';
 
 const linear = (progress: number) => progress;
 const VIEWPORT = 800;
@@ -50,5 +58,29 @@ describe('verticalDirection', () => {
     expect(verticalDirection(row(500), row(100))).toBe(-1);
     expect(verticalDirection(row(100), row(500))).toBe(1);
     expect(verticalDirection(row(100), undefined)).toBe(1);
+  });
+});
+
+describe('flip measuring plan', () => {
+  it('snapshots only row boxes before a sort and only artwork before a view switch', () => {
+    expect(snapshotsBeforeFlip('sort', 'box')).toBe(true);
+    expect(snapshotsBeforeFlip('sort', 'art')).toBe(false);
+    expect(snapshotsBeforeFlip('view', 'box')).toBe(false);
+    expect(snapshotsBeforeFlip('view', 'art')).toBe(true);
+  });
+
+  it('skips measuring artwork after a sort but measures everything after a view switch', () => {
+    expect(measuresAfterFlip('sort', 'box')).toBe(true);
+    expect(measuresAfterFlip('sort', 'art')).toBe(false);
+    expect(measuresAfterFlip('view', 'box')).toBe(true);
+    expect(measuresAfterFlip('view', 'art')).toBe(true);
+  });
+});
+
+describe('sameRect', () => {
+  it('compares rects by value', () => {
+    expect(sameRect(row(100), row(100))).toBe(true);
+    expect(sameRect(row(100), row(101))).toBe(false);
+    expect(sameRect(row(100), { ...row(100), width: 1 })).toBe(false);
   });
 });

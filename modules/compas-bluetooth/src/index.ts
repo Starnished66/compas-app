@@ -32,11 +32,6 @@ export interface DiscoveredBluetoothDevice {
   bonding?: boolean;
 }
 
-export interface ArtworkPaletteResult {
-  hue: number;
-  saturation: number;
-}
-
 let nativeModule: any = null;
 function getNativeModule() {
   if (!nativeModule) {
@@ -79,12 +74,6 @@ export async function preemptArtwork(index?: number | null): Promise<number> {
   return await mod.preemptArtwork(index ?? null);
 }
 
-export async function extractArtworkPalette(source: string): Promise<ArtworkPaletteResult | null> {
-  const mod = getNativeModule();
-  if (!mod?.extractArtworkPalette) return null;
-  return await mod.extractArtworkPalette(source);
-}
-
 export function addDeviceFoundListener(listener: (event: BluetoothDeviceFoundEvent) => void): EventSubscription | null {
   const mod = getNativeModule();
   return mod?.addListener ? mod.addListener('onDeviceFound', listener) : null;
@@ -122,7 +111,9 @@ export class BluetoothTransport implements HttpTransport, ArtworkPreemptibleTran
         request.body ? bytesToBase64(request.body) : null
       );
 
-      const body = base64ToBytes(result.bodyBase64 || '');
+      const bodyBase64: string = result.bodyBase64 || '';
+      let decodedBody: Uint8Array | null = null;
+      const decodeBody = () => (decodedBody ??= base64ToBytes(bodyBase64));
       const resHeaders: Record<string, string> = {};
       if (result.headers) {
         for (const [k, v] of Object.entries(result.headers)) {
@@ -134,9 +125,12 @@ export class BluetoothTransport implements HttpTransport, ArtworkPreemptibleTran
         statusCode: result.statusCode,
         reason: result.reason || 'OK',
         headers: resHeaders,
-        body,
+        get body() {
+          return decodeBody();
+        },
+        bodyBase64,
         text() {
-          return new TextDecoder('utf-8').decode(body);
+          return new TextDecoder('utf-8').decode(decodeBody());
         },
         header(name: string) {
           return resHeaders[name.toLowerCase()];

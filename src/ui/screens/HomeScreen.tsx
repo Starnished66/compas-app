@@ -1,16 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Animated,
-  FlatList,
-  LayoutChangeEvent,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-  StyleSheet,
-  View,
-} from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { FlatList, LayoutChangeEvent, StyleSheet, View } from 'react-native';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { RemoteAction, RemoteTrack, RemoteUiState } from '../../data/types';
 import { useScrollToTopRequest } from '../chrome/useScrollToTopRequest';
-import { between, CollapseProgress } from '../collapse';
+import { between } from '../collapse';
 import { EnterView } from '../components/EnterView';
 import { HomeEmptyState } from '../components/HomeEmptyState';
 import { HomeTitleBar } from '../components/HomeTitleBar';
@@ -22,6 +15,7 @@ import { isReconnecting } from '../reconnecting';
 import { AudioFormatSheet } from '../sheets/AudioFormatSheet';
 import { Size, Space } from '../tokens';
 import { useReducedMotion } from '../useReducedMotion';
+import { ScrollMetrics, useHomeScrollCollapse } from '../useHomeScrollCollapse';
 
 export interface HomeScreenProps {
   state: RemoteUiState;
@@ -37,17 +31,8 @@ const CONSOLE_TOP_COLLAPSED = Space.lg;
 const CONSOLE_GAP = Space.md;
 const ESTIMATED_CARD_EXPANDED = 350;
 const ESTIMATED_CARD_COLLAPSED = 94;
-const SNAP_DELAY_MS = 140;
 const LOAD_MORE_DISTANCE = 480;
-const COMPACT_THRESHOLD = 0.5;
-const MEASURE_EPSILON = 0.001;
-const EXPANDED = new Animated.Value(0);
-
-interface ScrollMetrics {
-  offset: number;
-  viewport: number;
-  content: number;
-}
+const CONSOLE_LIFT = CONSOLE_TOP_COLLAPSED - Size.bar;
 
 export function HomeScreen({
   state,
@@ -62,18 +47,13 @@ export function HomeScreen({
   const reconnecting = isReconnecting(state);
   const [editing, setEditing] = useState(false);
   const [formatVisible, setFormatVisible] = useState(false);
-  const [compact, setCompact] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [cardExpanded, setCardExpanded] = useState(ESTIMATED_CARD_EXPANDED);
   const [cardCollapsed, setCardCollapsed] = useState(ESTIMATED_CARD_COLLAPSED);
   const [upNextHeight, setUpNextHeight] = useState(0);
   const [reordering, setReordering] = useState(false);
   const scrollRef = useRef<FlatList<RemoteTrack>>(null);
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const progressRef = useRef(0);
   const metricsRef = useRef<ScrollMetrics>({ offset: 0, viewport: 0, content: 0 });
-  const draggingRef = useRef(false);
-  const snapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPageRequestRef = useRef('');
 
   const bannerBlock = reconnecting ? RECONNECT_BANNER_HEIGHT + CONSOLE_GAP : 0;
@@ -82,25 +62,9 @@ export function HomeScreen({
   const fits = listPad + upNextHeight + Space.lg <= viewportHeight - bottomInset;
   const collapsible = viewportHeight > 0 && !fits;
 
-  const collapse: CollapseProgress = useMemo(
-    () =>
-      collapsible
-        ? scrollY.interpolate({ inputRange: [0, collapseDistance], outputRange: [0, 1], extrapolate: 'clamp' })
-        : EXPANDED,
-    [collapsible, collapseDistance, scrollY],
-  );
-  const consoleTop = useMemo(() => between(collapse, Size.bar, CONSOLE_TOP_COLLAPSED), [collapse]);
-
-  const geometryRef = useRef({ collapsible, collapseDistance });
-  geometryRef.current = { collapsible, collapseDistance };
-
   useEffect(() => {
     if (editing && state.queue.length === 0) setEditing(false);
   }, [editing, state.queue.length]);
-
-  useEffect(() => () => {
-    if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
-  }, []);
 
   useScrollToTopRequest('home', () => scrollRef.current?.scrollToOffset({ offset: 0, animated: !reducedMotion }));
 
@@ -108,14 +72,6 @@ export function HomeScreen({
 
   const openNowPlaying = () => {
     if (canOpenNowPlaying(state)) onOpenNowPlaying();
-  };
-
-  const updateProgress = (offset: number) => {
-    const { collapsible: canCollapse, collapseDistance: distance } = geometryRef.current;
-    const progress = canCollapse ? Math.max(0, Math.min(1, offset / distance)) : 0;
-    progressRef.current = progress;
-    const nextCompact = progress > COMPACT_THRESHOLD;
-    setCompact((previous) => (previous === nextCompact ? previous : nextCompact));
   };
 
   const loadMoreNearEnd = ({ offset, viewport, content }: ScrollMetrics) => {
@@ -130,46 +86,27 @@ export function HomeScreen({
     }
   };
 
-  const cancelSnap = () => {
-    if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
-    snapTimerRef.current = null;
-  };
-
-  const scheduleSnap = () => {
-    cancelSnap();
-    snapTimerRef.current = setTimeout(() => {
-      const { collapsible: canCollapse, collapseDistance: distance } = geometryRef.current;
-      const offset = metricsRef.current.offset;
-      if (!canCollapse || draggingRef.current || offset <= 0 || offset >= distance) return;
-      scrollRef.current?.scrollToOffset({ offset: offset < distance / 2 ? 0 : distance, animated: !reducedMotion });
-    }, SNAP_DELAY_MS);
-  };
-
-  const scrollHandlersRef = useRef({ updateProgress, loadMoreNearEnd });
-  scrollHandlersRef.current = { updateProgress, loadMoreNearEnd };
-
-  const onScroll = useMemo(
-    () =>
-      Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
-        useNativeDriver: false,
-        listener: ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
-          metricsRef.current = {
-            offset: nativeEvent.contentOffset.y,
-            viewport: nativeEvent.layoutMeasurement.height,
-            content: nativeEvent.contentSize.height,
-          };
-          scrollHandlersRef.current.updateProgress(nativeEvent.contentOffset.y);
-          scrollHandlersRef.current.loadMoreNearEnd(metricsRef.current);
-        },
-      }),
-    [scrollY],
-  );
+  const { collapse, compact, onScroll, snapEvents, offset, settledStage } = useHomeScrollCollapse({
+    listRef: scrollRef,
+    collapsible,
+    collapseDistance,
+    nearEndDistance: LOAD_MORE_DISTANCE,
+    reducedMotion,
+    onNearEndScroll: (metrics) => {
+      metricsRef.current = metrics;
+      loadMoreNearEnd(metrics);
+    },
+  });
+  const consoleStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: between(collapse.value, 0, CONSOLE_LIFT) }],
+  }));
 
   const onCardLayout = (event: LayoutChangeEvent) => {
     const height = event.nativeEvent.layout.height;
-    if (progressRef.current <= MEASURE_EPSILON) {
+    const stage = settledStage();
+    if (stage === 'expanded') {
       setCardExpanded((previous) => (Math.abs(previous - height) > 0.5 ? height : previous));
-    } else if (progressRef.current >= 1 - MEASURE_EPSILON) {
+    } else if (stage === 'collapsed') {
       setCardCollapsed((previous) => (Math.abs(previous - height) > 0.5 ? height : previous));
     }
   };
@@ -197,22 +134,17 @@ export function HomeScreen({
         onReorderActiveChange={setReordering}
         onCardHeightChange={setUpNextHeight}
         scrollProps={{
-          onLayout: (event) => setViewportHeight(event.nativeEvent.layout.height),
+          onLayout: (event) => {
+            const viewport = event.nativeEvent.layout.height;
+            metricsRef.current = { ...metricsRef.current, viewport };
+            setViewportHeight(viewport);
+          },
           onScroll,
           scrollEventThrottle: 16,
           scrollEnabled: !reordering,
-          onScrollBeginDrag: () => {
-            draggingRef.current = true;
-            cancelSnap();
-          },
-          onScrollEndDrag: () => {
-            draggingRef.current = false;
-            scheduleSnap();
-          },
-          onMomentumScrollBegin: cancelSnap,
-          onMomentumScrollEnd: scheduleSnap,
+          ...snapEvents,
           onContentSizeChange: (_, content) => {
-            metricsRef.current = { ...metricsRef.current, content };
+            metricsRef.current = { ...metricsRef.current, offset: offset(), content };
             loadMoreNearEnd(metricsRef.current);
           },
           showsVerticalScrollIndicator: false,
@@ -226,7 +158,7 @@ export function HomeScreen({
 
       <HomeTitleBar onOpenSettings={onOpenSettings} settingsOpen={settingsOpen} collapse={collapse} compact={compact} />
 
-      <Animated.View pointerEvents="box-none" style={[styles.console, { top: consoleTop }]}>
+      <Animated.View pointerEvents="box-none" style={[styles.console, consoleStyle]}>
         {reconnecting ? (
           <EnterView from="down">
             <ReconnectBanner playerName={state.playerName} />
@@ -264,6 +196,7 @@ const styles = StyleSheet.create({
   },
   console: {
     position: 'absolute',
+    top: Size.bar,
     left: Space.lg,
     right: Space.lg,
     gap: CONSOLE_GAP,

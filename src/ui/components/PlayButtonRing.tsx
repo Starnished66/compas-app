@@ -3,12 +3,12 @@ import { StyleSheet } from 'react-native';
 import { RemoteTrack } from '../../data/types';
 import { usePalette } from '../PaletteProvider';
 import { trackKey } from '../trackKey';
+import { usePlaybackFraction } from '../usePlaybackPosition';
 import { useProgressLaps } from '../useProgressLaps';
 import { cometGlowPad, ProgressComet } from './ProgressComet';
 
 export interface PlayButtonRingProps {
   track: RemoteTrack;
-  progress: number;
   playing: boolean;
   buttonSize: number;
 }
@@ -19,9 +19,9 @@ const PAUSED_HEAD_OPACITY = 0.8;
 
 export const PLAY_BUTTON_RING_OUTSET = RING_GAP + cometGlowPad(HEAD_SIZE);
 
-export function PlayButtonRing({ track, progress, playing, buttonSize }: PlayButtonRingProps) {
+export function PlayButtonRing({ track, playing, buttonSize }: PlayButtonRingProps) {
   const palette = usePalette();
-  const laps = useProgressLaps(trackKey(track) ?? '', progress);
+  const laps = useProgressLaps(trackKey(track) ?? '', usePlaybackFraction());
   const size = buttonSize + RING_GAP * 2;
 
   return (

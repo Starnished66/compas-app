@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import {
   ConnectionStatus,
@@ -30,16 +30,19 @@ import { letterOfEntry, railLetters } from '../library/alphabetIndex';
 import { FlipContext, FlipMode, FlipRegistry } from '../library/flipRegistry';
 import { availableCategoryOptions, categoryNoun, isSortableCategory } from '../library/libraryCategories';
 import { LibraryEntryKind, opensCollection } from '../library/libraryEntryKind';
-import { LibraryItem, entryItems, nodeItem, songIds, tileItems, withLetterHeaders } from '../library/libraryItems';
+import { LibraryItem, entryItems, nodeItem, songIds, withLetterHeaders } from '../library/libraryItems';
 import { inlineLibraryError, libraryStateMessage } from '../library/libraryStateMessage';
 import { playCollection } from '../library/collectionPlayback';
 import { useAlbumGrid } from '../library/useAlbumGrid';
 import { useCollectionTrail } from '../library/useCollectionTrail';
+import { useFirstEntryArtwork } from '../library/useFirstEntryArtwork';
 import { useLibraryLevels } from '../library/useLibraryLevels';
 import { useLibraryListScroll } from '../library/useLibraryListScroll';
 import { useStuckHeader } from '../library/useStuckHeader';
-import { useTitleSortedEntries } from '../library/useTitleSortedEntries';
+import { useTileItems } from '../library/useTileItems';
+import { useSortDirection } from '../library/useSortDirection';
 import { useBackInterceptor } from '../useBackInterceptor';
+import { useTabActive } from '../tabActivity';
 import { SearchScreen } from './SearchScreen';
 
 export interface LibraryScreenProps {
@@ -71,7 +74,11 @@ function emptyMessage(category: LibraryCategory, nested: boolean): LibraryPlaceh
 
 export function LibraryScreen({ state, onAction, category, contentBottomInset = Space.lg }: LibraryScreenProps) {
   const [searchOpen, setSearchOpen] = useState(false);
-  useBackInterceptor(searchOpen && !state.libraryQuery, () => setSearchOpen(false));
+  useBackInterceptor(searchOpen && category !== LibraryCategory.Search, () => setSearchOpen(false));
+  const tabActive = useTabActive();
+  useEffect(() => {
+    if (!tabActive) setSearchOpen(false);
+  }, [tabActive]);
   const [ascending, setAscending] = useState(true);
   const [grid, setGrid] = useState(true);
   const [flipSerial, setFlipSerial] = useState(0);
@@ -142,7 +149,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   });
 
   const sortable = !nested && isSortableCategory(category);
-  const entries = useTitleSortedEntries(state.libraryEntries, sortable, ascending);
+  const entries = useSortDirection(state.libraryEntries, sortable && !ascending);
   const step = nested ? trail.current : null;
   const artistDetail = nested && state.libraryNestedTitle === NESTED_ALBUMS_TITLE;
   const albumDetail = nested && !artistDetail && step?.kind === 'album';
@@ -151,14 +158,16 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   const lettered = !nested && category === LibraryCategory.Songs;
   const nestedTitle = state.libraryNestedTitle;
 
+  const tiles = useTileItems(entries, columns, showGrid && !searchActive);
   const rows = useMemo(() => {
     if (searchActive) return [];
-    if (showGrid) return tileItems(entries, columns);
+    if (showGrid) return tiles;
     const entryRows = entryItems(entries, { category, isNested: nested, nestedTitle }, albumDetail);
     return lettered ? withLetterHeaders(entryRows, letterOfEntry) : entryRows;
-  }, [searchActive, showGrid, entries, columns, category, nested, nestedTitle, albumDetail, lettered]);
+  }, [searchActive, showGrid, tiles, entries, category, nested, nestedTitle, albumDetail, lettered]);
   const rowLetters = useMemo(() => (lettered ? railLetters(rows) : []), [lettered, rows]);
   const playableIds = useMemo(() => (albumDetail ? songIds(entries) : []), [albumDetail, entries]);
+  const albumArtwork = useFirstEntryArtwork(albumDetail ? entries : null, step?.entry);
 
   const page = (content: React.ReactNode, rail?: React.ReactNode) => (
     <FlipContext.Provider value={flipRegistry}>
@@ -244,7 +253,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
           title={step.entry.title}
           subtitle={step.entry.subtitle}
           meta={state.libraryCountLabel ?? undefined}
-          artworkUri={step.entry.artwork ?? entries.find((entry) => entry.artwork)?.artwork}
+          artworkUri={albumArtwork}
           actions={
             playableIds.length ? (
               <CollectionPlayButtons

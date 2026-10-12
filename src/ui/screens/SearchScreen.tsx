@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 import { LibraryCategory, LibraryEntry, RemoteAction, RemoteUiState } from '../../data/types';
 import { Button } from '../components/Button';
@@ -12,7 +12,7 @@ import { Size, Space } from '../tokens';
 import { LibraryEntryKind } from '../library/libraryEntryKind';
 import { LibraryItem, entryItems, nodeItem } from '../library/libraryItems';
 import { inlineLibraryError, libraryStateMessage } from '../library/libraryStateMessage';
-import { SEARCH_FILTER_OPTIONS, SearchFilter, searchSections } from '../library/searchSections';
+import { SEARCH_FILTER_OPTIONS, SearchFilter, SearchSection, searchSections } from '../library/searchSections';
 import { useAlbumGrid } from '../library/useAlbumGrid';
 import { LibraryListScroll } from '../library/useLibraryListScroll';
 
@@ -26,6 +26,7 @@ export interface SearchScreenProps {
 }
 
 const SEARCH_CONTEXT = { category: LibraryCategory.Search, isNested: false };
+const NO_SECTIONS: SearchSection[] = [];
 
 function isSearchScreen(state: RemoteUiState): boolean {
   return state.screen.type === 'Library' && state.screen.category === LibraryCategory.Search;
@@ -43,6 +44,33 @@ export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBot
   const { tileWidth } = useAlbumGrid();
   const term = query.trim();
   const showingResults = Boolean(term) && isSearchScreen(state);
+  const scrollToTop = scroll?.scrollToTop;
+  const sections = useMemo(
+    () => (showingResults ? searchSections(state.libraryEntries, filter) : NO_SECTIONS),
+    [showingResults, state.libraryEntries, filter],
+  );
+  const sectionItems = useMemo(
+    () =>
+      sections.flatMap((section) => {
+        const canExpand = filter === 'all' && section.total > section.entries.length;
+        return [
+          nodeItem(
+            `section:${section.filter}`,
+            <SectionHeader
+              label={section.label}
+              actionLabel={canExpand ? 'See all' : undefined}
+              onAction={() => {
+                setFilter(section.filter);
+                scrollToTop?.();
+              }}
+              style={styles.sectionHeader}
+            />,
+          ),
+          ...entryItems(section.entries, SEARCH_CONTEXT),
+        ];
+      }),
+    [sections, filter, scrollToTop],
+  );
 
   const changeQuery = (value: string) => {
     setQuery(value);
@@ -55,25 +83,7 @@ export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBot
     items.push(nodeItem('error', <InlineError message={inlineError} style={styles.inlineError} />));
   }
 
-  const sections = showingResults ? searchSections(state.libraryEntries, filter) : [];
-  for (const section of sections) {
-    const canExpand = filter === 'all' && section.total > section.entries.length;
-    items.push(
-      nodeItem(
-        `section:${section.filter}`,
-        <SectionHeader
-          label={section.label}
-          actionLabel={canExpand ? 'See all' : undefined}
-          onAction={() => {
-            setFilter(section.filter);
-            scroll?.scrollToTop();
-          }}
-          style={styles.sectionHeader}
-        />,
-      ),
-      ...entryItems(section.entries, SEARCH_CONTEXT),
-    );
-  }
+  items.push(...sectionItems);
 
   const placeholder = !term
     ? { title: 'Search your library', body: 'Find artists, albums, songs and genres on the player.' }

@@ -1,5 +1,10 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import { sha256Sync, bytesToBase64, base64ToBytes } from './cryptoUtils';
+import { boundedMemo } from './boundedMemo';
+import { bytesToBase64, base64ToBytes } from './cryptoUtils';
+import { legacyCoverDigest } from './sha256';
+
+const DIGEST_CACHE_LIMIT = 8192;
+const cachedDigest = boundedMemo(legacyCoverDigest, DIGEST_CACHE_LIMIT);
 
 export class SyncedCoverStore {
   readonly root: string;
@@ -11,7 +16,7 @@ export class SyncedCoverStore {
   }
 
   static digest(value: string): string {
-    return sha256Sync(value);
+    return cachedDigest(value);
   }
 
   fileFor(libraryId: string, coverKey: string): string {

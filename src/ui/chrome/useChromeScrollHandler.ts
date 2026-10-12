@@ -1,14 +1,14 @@
 import { useCallback, useContext, useEffect, useRef } from 'react';
 import { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { Distances } from '../motion';
-import { ChromeContext } from './chromeContext';
+import { ChromeActionsContext } from './chromeContext';
 
 const EXPAND_GRACE_MS = 700;
 
 export function useChromeScrollHandler(
   enabled: boolean,
 ): (event: NativeSyntheticEvent<NativeScrollEvent>) => void {
-  const chrome = useContext(ChromeContext);
+  const chrome = useContext(ChromeActionsContext);
   const lastY = useRef(0);
   const travel = useRef(0);
   const expand = chrome?.expand;

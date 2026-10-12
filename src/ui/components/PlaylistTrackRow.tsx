@@ -1,11 +1,12 @@
-import React, { useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import { LibraryEntry } from '../../data/types';
 import { usePalette } from '../PaletteProvider';
 import { Size, Space } from '../tokens';
 import { DragHandleProps } from '../useDragReorder';
-import { useEditStagger } from '../useEditStagger';
+import { editRange, useEditStagger } from '../useEditStagger';
 import { displaySubtitle } from '../library/libraryEntryKind';
+import { useEntryArtwork } from '../library/useEntryArtwork';
 import { ArtworkThumb } from './ArtworkThumb';
 import { DragHandle } from './DragHandle';
 import { IconButton } from './IconButton';
@@ -49,20 +50,25 @@ function PlaylistTrackRowContent({
   onRemove,
 }: PlaylistTrackRowProps) {
   const palette = usePalette();
+  const artworkUri = useEntryArtwork(entry);
   const progress = useEditStagger(editing, index);
   const removable = useRef<RemovableRowHandle>(null);
   const subtitle = displaySubtitle(entry) || undefined;
 
-  const bodyShift = progress.interpolate({ inputRange: [0, 1], outputRange: [0, EDIT_SHIFT] });
-  const removeScale = progress.interpolate({ inputRange: [0, 1], outputRange: [REMOVE_START_SCALE, 1] });
-  const moreOpacity = progress.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
-  const moreShift = progress.interpolate({ inputRange: [0, 1], outputRange: [0, MORE_EXIT_SHIFT] });
-  const handleShift = progress.interpolate({ inputRange: [0, 1], outputRange: [HANDLE_ENTER_SHIFT, 0] });
+  const motion = useMemo(
+    () => ({
+      bodyShift: editRange(progress, 0, EDIT_SHIFT),
+      removeSlot: { opacity: progress, transform: [{ scale: editRange(progress, REMOVE_START_SCALE, 1) }] },
+      more: { opacity: editRange(progress, 1, 0), transform: [{ translateX: editRange(progress, 0, MORE_EXIT_SHIFT) }] },
+      handle: { opacity: progress, transform: [{ translateX: editRange(progress, HANDLE_ENTER_SHIFT, 0) }] },
+    }),
+    [progress],
+  );
 
   const removeButton = (
     <Animated.View
       pointerEvents={editing ? 'box-none' : 'none'}
-      style={[styles.removeSlot, { opacity: progress, transform: [{ scale: removeScale }] }]}
+      style={[styles.removeSlot, motion.removeSlot]}
     >
       <RemoveDiscButton
         label={`Remove ${entry.title} from playlist`}
@@ -77,7 +83,7 @@ function PlaylistTrackRowContent({
       <Animated.View
         pointerEvents={editing ? 'none' : 'auto'}
         importantForAccessibility={editing ? 'no-hide-descendants' : 'auto'}
-        style={[styles.trailingLayer, { opacity: moreOpacity, transform: [{ translateX: moreShift }] }]}
+        style={[styles.trailingLayer, motion.more]}
       >
         {current ? <PlayingIndicator playing={playing} /> : null}
         <IconButton
@@ -90,7 +96,7 @@ function PlaylistTrackRowContent({
       <Animated.View
         pointerEvents={editing ? 'auto' : 'none'}
         importantForAccessibility={editing ? 'auto' : 'no-hide-descendants'}
-        style={[styles.handle, { opacity: progress, transform: [{ translateX: handleShift }] }]}
+        style={[styles.handle, motion.handle]}
       >
         {handleProps ? <DragHandle handle={handleProps} /> : null}
       </Animated.View>
@@ -108,9 +114,9 @@ function PlaylistTrackRowContent({
         <ListRow
           title={entry.title}
           subtitle={subtitle}
-          leading={<ArtworkThumb uri={entry.artwork} placeholderIcon="music" style={styles.artwork} />}
+          leading={<ArtworkThumb uri={artworkUri} placeholderIcon="music" style={styles.artwork} />}
           trailing={trailing}
-          bodyStyle={{ paddingRight: editing ? EDIT_SHIFT : 0, transform: [{ translateX: bodyShift }] }}
+          bodyStyle={{ paddingRight: editing ? EDIT_SHIFT : 0, transform: [{ translateX: motion.bodyShift }] }}
           onPress={editing ? undefined : () => onPress(entry)}
           onLongPress={editing ? undefined : () => onMore(entry)}
           accessibilityLabel={subtitle ? `${entry.title}, ${subtitle}` : entry.title}

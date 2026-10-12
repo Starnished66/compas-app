@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
-import { Animated, LayoutChangeEvent, StyleProp, StyleSheet, ViewStyle } from 'react-native';
+import { LayoutChangeEvent, StyleProp, StyleSheet, ViewStyle } from 'react-native';
+import Animated, { AnimatedStyle } from 'react-native-reanimated';
 import { RemoteTrack } from '../../data/types';
 import { usePalette } from '../PaletteProvider';
 import { trackKey } from '../trackKey';
+import { usePlaybackFraction } from '../usePlaybackPosition';
 import { useProgressLaps } from '../useProgressLaps';
 import { ProgressComet } from './ProgressComet';
 
 export interface CardCometProps {
   track: RemoteTrack;
-  progress: number;
   playing: boolean;
   radius: number;
-  style?: Animated.WithAnimatedValue<StyleProp<ViewStyle>>;
+  style?: StyleProp<AnimatedStyle<ViewStyle>>;
 }
 
 interface CometSize {
@@ -23,9 +24,9 @@ const OUTSET = 1;
 const HEAD_SIZE = 5;
 const TRACK_OPACITY = 0.6;
 
-export function CardComet({ track, progress, playing, radius, style }: CardCometProps) {
+export function CardComet({ track, playing, radius, style }: CardCometProps) {
   const palette = usePalette();
-  const laps = useProgressLaps(trackKey(track) ?? '', progress);
+  const laps = useProgressLaps(trackKey(track) ?? '', usePlaybackFraction());
   const [size, setSize] = useState<CometSize | null>(null);
 
   const onLayout = (event: LayoutChangeEvent) => {
