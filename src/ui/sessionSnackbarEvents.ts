@@ -1,6 +1,5 @@
 import { ConnectionStatus, ConnectionTransport, RemoteUiState } from '../data/types';
 import { connectedPlayerSummary } from './connectionSummary';
-import { songCount } from './countLabels';
 
 export type SessionSnapshot = Pick<
   RemoteUiState,
@@ -76,7 +75,9 @@ export function initialSessionMemory(state: SessionSnapshot): SessionMemory {
   };
 }
 
-function connectionEvent(memory: SessionMemory, state: SessionSnapshot, next: SessionMemory): string | null {
+type Translate = (source: string, variables?: Record<string, string | number>) => string;
+
+function connectionEvent(memory: SessionMemory, state: SessionSnapshot, next: SessionMemory, t?: Translate): string | null {
   const connected = state.connectionStatus === ConnectionStatus.Connected;
   const wasConnected = memory.status === ConnectionStatus.Connected;
 
@@ -89,8 +90,11 @@ function connectionEvent(memory: SessionMemory, state: SessionSnapshot, next: Se
     next.playerKey = key;
     next.droppedWithTrack = false;
     next.updatingPin = false;
-    if (updatedPin) return 'Saved PIN updated';
-    return `${recovered ? 'Reconnected to' : 'Connected to'} ${currentPlayerName(state)}`;
+    if (updatedPin) return t ? t('Saved PIN updated') : 'Saved PIN updated';
+    const name = currentPlayerName(state);
+    return t
+      ? t(recovered ? 'Reconnected to {name}' : 'Connected to {name}', { name })
+      : `${recovered ? 'Reconnected to' : 'Connected to'} ${name}`;
   }
 
   if (!state.pinDialogVisible && memory.pinDialogVisible) next.updatingPin = false;
@@ -100,7 +104,7 @@ function connectionEvent(memory: SessionMemory, state: SessionSnapshot, next: Se
   return null;
 }
 
-function syncEvent(memory: SessionMemory, state: SessionSnapshot, next: SessionMemory): string | null {
+function syncEvent(memory: SessionMemory, state: SessionSnapshot, next: SessionMemory, t?: Translate): string | null {
   const message = state.catalogSyncMessage ?? null;
   next.syncMessage = message;
   if (message) {
@@ -115,7 +119,8 @@ function syncEvent(memory: SessionMemory, state: SessionSnapshot, next: SessionM
   next.syncTransferred = false;
   next.syncSongTotal = null;
   if (!finished) return null;
-  return total !== null ? `Library synced · ${songCount(total)}` : 'Library synced';
+  if (total === null) return t ? t('Library synced') : 'Library synced';
+  return t ? t('Library synced · {count} song', { count: total }) : `Library synced · ${total} ${total === 1 ? 'song' : 'songs'}`;
 }
 
 function errorEvent(memory: SessionMemory, state: SessionSnapshot, next: SessionMemory): string | null {
@@ -125,14 +130,14 @@ function errorEvent(memory: SessionMemory, state: SessionSnapshot, next: Session
   return connectionMessageShownInline(state) ? null : message;
 }
 
-export function stepSession(memory: SessionMemory, state: SessionSnapshot): SessionStep {
+export function stepSession(memory: SessionMemory, state: SessionSnapshot, t?: Translate): SessionStep {
   const next: SessionMemory = {
     ...memory,
     status: state.connectionStatus,
     pinDialogVisible: state.pinDialogVisible,
   };
-  const connection = connectionEvent(memory, state, next);
+  const connection = connectionEvent(memory, state, next, t);
   const error = errorEvent(memory, state, next);
-  const sync = syncEvent(memory, state, next);
+  const sync = syncEvent(memory, state, next, t);
   return { memory: next, message: connection ?? error ?? sync };
 }

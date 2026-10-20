@@ -9,12 +9,19 @@ export function useUniformCrossfade(target: BackdropUniforms, durationMs: number
   const lastTarget = useRef(target);
 
   useEffect(() => {
+    if (!animate) {
+      from.value = target;
+      to.value = target;
+      progress.value = 1;
+      lastTarget.current = target;
+      return;
+    }
     if (lastTarget.current === target) return;
-    from.value = animate ? blendUniforms(from.value, lastTarget.current, progress.value) : target;
+    from.value = blendUniforms(from.value, lastTarget.current, progress.value);
     lastTarget.current = target;
     to.value = target;
-    progress.value = animate ? 0 : 1;
-    if (animate) progress.value = withTiming(1, { duration: durationMs });
+    progress.value = 0;
+    progress.value = withTiming(1, { duration: durationMs });
   }, [target, animate, durationMs, from, to, progress]);
 
   return useDerivedValue(() => blendUniforms(from.value, to.value, progress.value));

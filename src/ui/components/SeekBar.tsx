@@ -9,6 +9,7 @@ import { usePlaybackPosition } from '../usePlaybackPosition';
 import { AppText } from './AppText';
 import { PendingCaption } from './PendingCaption';
 import { Slider } from './Slider';
+import { useI18n } from '../../i18n';
 
 export interface SeekBarProps {
   playing: boolean;
@@ -24,6 +25,7 @@ const COLLAPSED_TOUCH_HEIGHT = 12;
 const TIMES_HEIGHT = Type.caption.lineHeight;
 
 export function SeekBar({ playing, onSeek, disabled = false, collapse, pendingLabel = null, style }: SeekBarProps) {
+  const { t } = useI18n();
   const { positionMs, durationMs } = usePlaybackPosition();
   const [dragFraction, setDragFraction] = useState<number | null>(null);
   const livePositionMs = useInterpolatedPosition(positionMs, durationMs, playing && dragFraction === null);
@@ -51,7 +53,7 @@ export function SeekBar({ playing, onSeek, disabled = false, collapse, pendingLa
       <Animated.View style={[styles.touchFrame, touchStyle]}>
         <Slider
           value={fraction}
-          label="Seek"
+          label={t('Seek')}
           disabled={disabled || !hasDuration}
           formatValue={(value) => formatPlaybackTime(value * durationMs)}
           onChange={setDragFraction}

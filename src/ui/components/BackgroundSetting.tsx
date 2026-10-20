@@ -8,6 +8,7 @@ import {
 import { useBackgroundPreference } from '../preferences/useBackgroundPreference';
 import { PreferenceSetting } from './PreferenceSetting';
 import { SegmentedOption } from './SegmentedControl';
+import { useI18n } from '../../i18n';
 
 const OPTIONS: ReadonlyArray<SegmentedOption<BackgroundStyle>> = BACKGROUND_STYLES.map((value) => ({
   value,
@@ -15,12 +16,13 @@ const OPTIONS: ReadonlyArray<SegmentedOption<BackgroundStyle>> = BACKGROUND_STYL
 }));
 
 export function BackgroundSetting() {
+  const { t } = useI18n();
   const { preference, setPreference } = useBackgroundPreference();
   return (
     <PreferenceSetting
-      title="Background"
-      options={OPTIONS}
-      hints={BACKGROUND_STYLE_HINTS}
+      title={t('Background')}
+      options={OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
+      hints={Object.fromEntries(Object.entries(BACKGROUND_STYLE_HINTS).map(([key, value]) => [key, t(value)])) as typeof BACKGROUND_STYLE_HINTS}
       value={preference}
       onChange={setPreference}
     />

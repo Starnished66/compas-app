@@ -15,6 +15,8 @@ import { UpNextListItem } from './UpNextListItem';
 import { UP_NEXT_ROW_HEIGHT } from './UpNextRow';
 import { unclippedScroll } from '../unclippedScroll';
 import { useStableTrack } from '../useStableTrack';
+import { useI18n } from '../../i18n';
+import { localizedCountLabel } from '../localizedLabels';
 
 export interface UpNextListProps {
   state: RemoteUiState;
@@ -40,6 +42,7 @@ export const UpNextList = forwardRef<FlatList<RemoteTrack>, UpNextListProps>(fun
   { state, onAction, editing, onToggleEditing, onReorderActiveChange, onCardHeightChange, scrollProps },
   ref,
 ) {
+  const { t } = useI18n();
   const queue = useUpNextQueue(state, onAction, editing, UP_NEXT_ROW_HEIGHT, onReorderActiveChange);
   const { rows, drag, canEditQueue, playTrack, removeTrack } = queue;
   const [headerHeight, setHeaderHeight] = useState(0);
@@ -94,9 +97,9 @@ export const UpNextList = forwardRef<FlatList<RemoteTrack>, UpNextListProps>(fun
             onLayout={(event) => setHeaderHeight(event.nativeEvent.layout.height)}
           >
             <SectionHeader
-              label="Up next"
-              caption={hasRows || total > 0 ? songCount(total) : undefined}
-              actionLabel={hasRows ? (editing ? 'Done' : 'Edit') : undefined}
+              label={t('Up next')}
+              caption={hasRows || total > 0 ? localizedCountLabel(songCount(total), t) : undefined}
+              actionLabel={hasRows ? t(editing ? 'Done' : 'Edit') : undefined}
               actionSelected={editing}
               onAction={onToggleEditing}
             />

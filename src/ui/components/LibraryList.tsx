@@ -38,6 +38,10 @@ export interface LibraryListProps {
   entryInsetRight?: number;
   scroll?: LibraryListScroll;
   scrollEnabled?: boolean;
+  selectionMode?: boolean;
+  selectedIds?: ReadonlySet<string>;
+  onSelectEntry?: (entry: LibraryEntry, kind: LibraryEntryKind) => void;
+  onEntrySelectionLongPress?: (entry: LibraryEntry, kind: LibraryEntryKind) => void;
 }
 
 function keyOf(item: LibraryItem): string {
@@ -60,6 +64,10 @@ function LibraryListContent({
   entryInsetRight,
   scroll,
   scrollEnabled = true,
+  selectionMode = false,
+  selectedIds,
+  onSelectEntry,
+  onEntrySelectionLongPress,
 }: LibraryListProps) {
   const { onEndReached, onViewableItemsChanged } = useLibraryPaging({ hasMore, status, onAction });
   const showMoreSongs = useCallback(
@@ -90,7 +98,16 @@ function LibraryListContent({
       case 'node':
         return item.node;
       case 'tiles':
-        return <AlbumTileRow entries={item.entries} tileWidth={tileWidth} onPress={openTile} />;
+        return (
+          <AlbumTileRow
+            entries={item.entries}
+            tileWidth={tileWidth}
+            onPress={(entry) => selectionMode ? onSelectEntry?.(entry, 'album') : openTile(entry)}
+            selectionMode={selectionMode}
+            selectedIds={selectedIds}
+            onLongPress={(entry) => onEntrySelectionLongPress?.(entry, 'album')}
+          />
+        );
       case 'letter':
         return (
           <SectionHeader
@@ -113,6 +130,9 @@ function LibraryListContent({
               onPress={onOpenEntry}
               onLongPress={onEntryLongPress}
               onMore={item.kind === 'song' ? showMoreSongs : undefined}
+              selectionMode={selectionMode}
+              selected={selectedIds?.has(item.entry.id)}
+              onSelect={(entry) => onSelectEntry?.(entry, item.kind)}
             />
           </View>
         );
@@ -127,6 +147,10 @@ function LibraryListContent({
     insetStyle,
     onOpenEntry,
     onEntryLongPress,
+    selectionMode,
+    selectedIds,
+    onSelectEntry,
+    onEntrySelectionLongPress,
     showMoreSongs,
   ]);
 
@@ -138,6 +162,7 @@ function LibraryListContent({
       keyExtractor={keyOf}
       renderItem={renderItem}
       strictMode
+      removeClippedSubviews={false}
       CellRendererComponent={renderPlaylistTrack ? DragReorderCell : undefined}
       stickyHeaderIndices={stickyHeaderIndices}
       onEndReached={onEndReached}

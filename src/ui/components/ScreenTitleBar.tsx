@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { Size, Space } from '../tokens';
 import { AppText } from './AppText';
 import { IconButton } from './IconButton';
+import { useI18n } from '../../i18n';
 
 export interface ScreenTitleBarProps {
   title?: string;
@@ -14,10 +15,11 @@ export interface ScreenTitleBarProps {
 const BACK_BUTTON_OFFSET = -Space.md;
 
 export function ScreenTitleBar({ title, backLabel, onBack, trailing }: ScreenTitleBarProps) {
+  const { t } = useI18n();
   return (
     <View style={styles.bar}>
       {onBack ? (
-        <IconButton icon="chevronLeft" label="Back" onPress={onBack} style={styles.back} />
+        <IconButton icon="chevronLeft" label={backLabel ?? t('Back')} onPress={onBack} style={styles.back} />
       ) : null}
       {backLabel ? (
         <AppText variant="bodyStrong" tone="inkMuted" numberOfLines={1}>

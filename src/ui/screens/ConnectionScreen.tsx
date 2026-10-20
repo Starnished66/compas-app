@@ -13,7 +13,7 @@ import { PlayerCard } from '../components/PlayerCard';
 import { SegmentedControl, SegmentedOption } from '../components/SegmentedControl';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { WifiPlayerList } from '../components/WifiPlayerList';
-import { connectButtonLabel, connectedPlayerKey, ConnectTarget, connectTarget } from '../connectTarget';
+import { connectedPlayerKey, ConnectTarget, connectTarget } from '../connectTarget';
 import { connectionStatusView } from '../connectionSummary';
 import { usePalette } from '../PaletteProvider';
 import { Size, Space } from '../tokens';
@@ -21,6 +21,7 @@ import { useConnectedPlayer } from '../useConnectedPlayer';
 import { usePairThenConnect } from '../usePairThenConnect';
 import { useScreenInsets } from '../useScreenInsets';
 import { insetBeyond } from '../insetBeyond';
+import { useI18n } from '../../i18n';
 
 export interface ConnectionScreenProps {
   state: RemoteUiState;
@@ -35,18 +36,19 @@ const TRANSPORT_OPTIONS: ReadonlyArray<SegmentedOption<ConnectionTransport>> = [
 const BLUETOOTH_AVAILABLE = Platform.OS === 'android';
 const BACK_BUTTON_OFFSET = -(Size.controlMd - Size.icon) / 2;
 
-function failureAdvice(transport: ConnectionTransport): string {
+function failureAdvice(transport: ConnectionTransport, t: (source: string) => string): string {
   return transport === ConnectionTransport.Bluetooth
-    ? 'Check that the player is on and that remote control is turned on in its settings. Being paired for calls or audio isn’t enough.'
-    : 'Check that the player is on, on the same Wi-Fi as this phone, and that remote control is turned on.';
+    ? t('Check that the player is on and that remote control is turned on in its settings. Being paired for calls or audio isn’t enough.')
+    : t('Check that the player is on, on the same Wi-Fi as this phone, and that remote control is turned on.');
 }
 
-function connectingLabel(target: ConnectTarget | null, message: string | null | undefined): string {
-  if (target) return `Contacting ${target.name}…`;
-  return message || 'Connecting…';
+function connectingLabel(target: ConnectTarget | null, message: string | null | undefined, t: (source: string, variables?: { name: string }) => string): string {
+  if (target) return t('Contacting {name}…', { name: target.name });
+  return message || t('Connecting…');
 }
 
 export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const insets = useScreenInsets();
   const [manualOpen, setManualOpen] = useState(false);
@@ -84,12 +86,12 @@ export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
       <View style={styles.header}>
         <IconButton
           icon="chevronLeft"
-          label="Back"
+          label={t('Back')}
           onPress={() => onAction({ type: 'Back' })}
           style={styles.back}
         />
         <AppText variant="title" accessibilityRole="header" numberOfLines={1} style={styles.title}>
-          Connect a player
+          {t('Connect a player')}
         </AppText>
         <StatusIndicator status={status.status} label={status.label} strong />
       </View>
@@ -104,12 +106,12 @@ export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
           <>
             <PlayerCard name={player.name} detail={player.detail}>
               <View style={styles.playerActions}>
-                <Button label="Update saved PIN" variant="container" fill onPress={() => onAction({ type: 'ChangePin' })} />
+                <Button label={t('Update saved PIN')} variant="container" fill onPress={() => onAction({ type: 'ChangePin' })} />
                 <DisconnectButton playerName={player.name} onDisconnect={() => onAction({ type: 'Disconnect' })} />
               </View>
             </PlayerCard>
             <AppText variant="eyebrow" tone="inkMuted" style={styles.eyebrow}>
-              Switch player
+              {t('Switch player')}
             </AppText>
           </>
         ) : null}
@@ -117,8 +119,8 @@ export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
         {BLUETOOTH_AVAILABLE ? (
           <SegmentedControl
             size="lg"
-            label="Connect over"
-            options={TRANSPORT_OPTIONS}
+            label={t('Connect over')}
+            options={TRANSPORT_OPTIONS.map((option) => ({ ...option, caption: t(option.caption ?? '') }))}
             value={transport}
             onChange={(next) => onAction({ type: 'SelectConnectionTransport', transport: next })}
           />
@@ -127,8 +129,8 @@ export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
         {failed ? (
           <EnterView>
             <ConnectionErrorCard
-              title="Couldn’t connect"
-              message={state.connectionMessage || failureAdvice(transport)}
+              title={t('Couldn’t connect')}
+              message={state.connectionMessage || failureAdvice(transport, t)}
               retryDelaySeconds={retryDelay}
               onRetry={() => onAction({ type: 'RetryConnection' })}
             />
@@ -155,11 +157,15 @@ export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
       </ScrollView>
 
       <ConnectFooter
-        label={connectButtonLabel(target, connected, !bluetooth && manualOpen, retryDelay)}
+        label={retryDelay > 0
+          ? t('Wait {seconds} s', { seconds: retryDelay })
+          : target
+            ? t(connected ? 'Switch to {name}' : 'Connect to {name}', { name: target.name })
+            : t(!bluetooth && manualOpen ? 'Enter an address' : 'Choose a player')}
         showButton={!alreadyConnected}
         disabled={!target || retryDelay > 0}
         connecting={connecting}
-        connectingLabel={connectingLabel(target, state.connectionMessage)}
+        connectingLabel={connectingLabel(target, state.connectionMessage, t)}
         notice={state.connectionStatus === ConnectionStatus.Disconnected ? state.connectionMessage : null}
         onConnect={connect}
         onCancel={() => onAction({ type: 'Disconnect' })}

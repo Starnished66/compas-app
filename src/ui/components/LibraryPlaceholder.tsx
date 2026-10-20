@@ -4,6 +4,7 @@ import { Space } from '../tokens';
 import { AppText } from './AppText';
 import { Button } from './Button';
 import { Spinner } from './Spinner';
+import { useI18n } from '../../i18n';
 
 export interface LibraryPlaceholderProps {
   title: string;
@@ -16,19 +17,22 @@ export interface LibraryPlaceholderProps {
 const SPINNER_SIZE = 24;
 
 export function LibraryPlaceholder({ title, body, loading = false, actionLabel, onAction }: LibraryPlaceholderProps) {
+  const { t } = useI18n();
+  const noResults = title.match(/^No results for “(.*)”$/);
+  const displayTitle = noResults ? t('No results for “{term}”', { term: noResults[1] }) : t(title);
   return (
     <View style={styles.container} accessibilityLiveRegion="polite">
       {loading ? <Spinner size={SPINNER_SIZE} /> : null}
       <AppText variant="bodyStrong" style={styles.centered}>
-        {title}
+        {displayTitle}
       </AppText>
       {body ? (
         <AppText variant="body" tone="inkMuted" style={styles.centered}>
-          {body}
+          {body ? t(body) : null}
         </AppText>
       ) : null}
       {actionLabel && onAction ? (
-        <Button label={actionLabel} variant="raised" onPress={onAction} style={styles.action} />
+        <Button label={t(actionLabel)} variant="raised" onPress={onAction} style={styles.action} />
       ) : null}
     </View>
   );

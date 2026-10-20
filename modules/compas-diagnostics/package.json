@@ -1,0 +1,7 @@
+{
+  "name": "compas-diagnostics",
+  "version": "1.0.0",
+  "description": "Local crash report recovery for Compás Remote",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

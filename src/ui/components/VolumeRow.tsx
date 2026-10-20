@@ -5,6 +5,7 @@ import { Size, Space } from '../tokens';
 import { AppText } from './AppText';
 import { Icon } from './Icon';
 import { Slider } from './Slider';
+import { useI18n } from '../../i18n';
 
 export interface VolumeRowProps {
   volume: number;
@@ -18,6 +19,7 @@ function percent(value: number): string {
 }
 
 export function VolumeRow({ volume, onChange, disabled = false, style }: VolumeRowProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const [dragVolume, setDragVolume] = useState<number | null>(null);
   const shown = dragVolume ?? volume;
@@ -32,7 +34,7 @@ export function VolumeRow({ volume, onChange, disabled = false, style }: VolumeR
       <Icon name="volume" color={palette.inkMuted} />
       <Slider
         value={shown}
-        label="Player volume"
+        label={t('Player volume')}
         disabled={disabled}
         formatValue={percent}
         showValueBubble={false}

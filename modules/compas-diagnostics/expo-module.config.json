@@ -1,0 +1,7 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "package": "com.compas.remote.diagnostics",
+    "modules": ["com.compas.remote.diagnostics.CompasDiagnosticsModule"]
+  }
+}

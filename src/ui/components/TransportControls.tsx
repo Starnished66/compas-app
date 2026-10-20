@@ -1,11 +1,13 @@
 import React, { ReactNode } from 'react';
 import { Animated, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { PlaybackMode } from '../../data/types';
-import { Space } from '../tokens';
+import { isShuffleMode } from '../../session/playbackModes';
+import { Size, Space } from '../tokens';
 import { usePlayGlyphSwap } from '../usePlayGlyphSwap';
 import { usePopAnimation } from '../usePopAnimation';
 import { IconButton } from './IconButton';
 import { IconName } from './iconPaths';
+import { useI18n } from '../../i18n';
 
 export interface TransportControlsProps {
   isPlaying: boolean;
@@ -26,14 +28,16 @@ export interface TransportControlsProps {
 const ACTIVE_STROKE_WIDTH = 2;
 const COMPACT_PLAY_ICON_SIZE = 20;
 
-function repeatPresentation(mode: PlaybackMode | undefined): { icon: IconName; label: string; active: boolean } {
+function repeatPresentation(mode: PlaybackMode | undefined, t: (source: string) => string): { icon: IconName; label: string; active: boolean } {
   switch (mode) {
     case PlaybackMode.RepeatAll:
-      return { icon: 'repeat', label: 'Repeating the queue', active: true };
+      return { icon: 'repeat', label: t('Repeating the queue'), active: true };
     case PlaybackMode.RepeatOne:
-      return { icon: 'repeatOne', label: 'Repeating this song', active: true };
+      return { icon: 'repeatOne', label: t('Repeating this song'), active: true };
+    case PlaybackMode.ShuffleRepeat:
+      return { icon: 'repeat', label: t('Repeating the queue'), active: true };
     default:
-      return { icon: 'repeat', label: 'Repeat off', active: false };
+      return { icon: 'repeat', label: t('Repeat off'), active: false };
   }
 }
 
@@ -52,18 +56,19 @@ export function TransportControls({
   playRing,
   style,
 }: TransportControlsProps) {
-  const playLabel = isPlaying ? 'Pause' : 'Play';
+  const { t } = useI18n();
+  const playLabel = t(isPlaying ? 'Pause' : 'Play');
   const playIcon: IconName = isPlaying ? 'pause' : 'play';
   const glyphStyle = usePlayGlyphSwap(isPlaying);
-  const shuffleOn = playbackMode === PlaybackMode.Shuffle;
-  const repeat = repeatPresentation(playbackMode);
+  const shuffleOn = playbackMode != null && isShuffleMode(playbackMode);
+  const repeat = repeatPresentation(playbackMode, t);
   const shufflePop = usePopAnimation(shuffleOn);
   const repeatPop = usePopAnimation(repeat.icon + repeat.active);
 
   if (variant === 'compact') {
     return (
       <View style={[styles.compactRow, style]}>
-        <IconButton icon="skipPrevious" label="Previous" onPress={onPrevious} disabled={disabled} />
+        <IconButton icon="skipPrevious" label={t('Previous')} onPress={onPrevious} disabled={disabled} />
         <View>
           <IconButton
             icon={playIcon}
@@ -77,7 +82,7 @@ export function TransportControls({
           />
           {playRing}
         </View>
-        <IconButton icon="skipNext" label="Next" onPress={onNext} disabled={disabled} />
+        <IconButton icon="skipNext" label={t('Next')} onPress={onNext} disabled={disabled} />
       </View>
     );
   }
@@ -88,7 +93,7 @@ export function TransportControls({
         <Animated.View style={shufflePop}>
           <IconButton
             icon={shuffleOn ? 'shuffle' : 'inOrder'}
-            label={shuffleOn ? 'Shuffle on' : 'Playing in order. Turn shuffle on'}
+            label={t(shuffleOn ? 'Shuffle on' : 'Playing in order. Turn shuffle on')}
             active={shuffleOn}
             iconStrokeWidth={shuffleOn ? ACTIVE_STROKE_WIDTH : undefined}
             onPress={onToggleShuffle}
@@ -96,7 +101,7 @@ export function TransportControls({
           />
         </Animated.View>
       ) : null}
-      <IconButton icon="skipPrevious" label="Previous" variant="raised" onPress={onPrevious} disabled={disabled} />
+      <IconButton icon="skipPrevious" label={t('Previous')} variant="raised" onPress={onPrevious} disabled={disabled} />
       <IconButton
         icon={playIcon}
         label={playLabel}
@@ -107,7 +112,7 @@ export function TransportControls({
         disabled={disabled}
         busy={pending}
       />
-      <IconButton icon="skipNext" label="Next" variant="raised" onPress={onNext} disabled={disabled} />
+      <IconButton icon="skipNext" label={t('Next')} variant="raised" onPress={onNext} disabled={disabled} />
       {onCycleRepeat ? (
         <Animated.View style={repeatPop}>
           <IconButton
@@ -135,8 +140,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   centered: {
-    justifyContent: 'center',
-    gap: Space.lg,
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: Size.controlMd * 4 + Size.controlLg + Space.lg * 4,
+    justifyContent: 'space-between',
   },
   spread: {
     justifyContent: 'space-between',

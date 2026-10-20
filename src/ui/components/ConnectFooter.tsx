@@ -5,6 +5,7 @@ import { Radius, Size, Space } from '../tokens';
 import { AppText } from './AppText';
 import { Button } from './Button';
 import { Spinner } from './Spinner';
+import { useI18n } from '../../i18n';
 
 export interface ConnectFooterProps {
   label: string;
@@ -28,6 +29,7 @@ export function ConnectFooter({
   onCancel,
 }: ConnectFooterProps) {
   const palette = usePalette();
+  const { t } = useI18n();
   if (!connecting && !showButton && !notice) return null;
 
   return (
@@ -50,7 +52,7 @@ export function ConnectFooter({
               {connectingLabel}
             </AppText>
           </View>
-          <Button label="Cancel" variant="plain" onPress={onCancel} />
+          <Button label={t('Cancel')} variant="plain" onPress={onCancel} />
         </>
       ) : showButton ? (
         <Button label={label} size="lg" disabled={disabled} onPress={onConnect} />

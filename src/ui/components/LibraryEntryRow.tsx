@@ -1,4 +1,6 @@
 import React from 'react';
+import { useI18n } from '../../i18n';
+import { localizedEntrySubtitle } from '../localizedLabels';
 import { StyleSheet, View } from 'react-native';
 import { LibraryEntry } from '../../data/types';
 import { usePalette } from '../PaletteProvider';
@@ -22,22 +24,27 @@ export interface LibraryEntryRowProps {
   onPress: (entry: LibraryEntry, kind: LibraryEntryKind) => void;
   onLongPress?: (entry: LibraryEntry, kind: LibraryEntryKind) => void;
   onMore?: (entry: LibraryEntry) => void;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onSelect?: (entry: LibraryEntry) => void;
 }
 
 const CHEVRON_SIZE = 18;
 
-function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress, onLongPress, onMore }: LibraryEntryRowProps) {
+function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress, onLongPress, onMore, selectionMode = false, selected = false, onSelect }: LibraryEntryRowProps) {
   const palette = usePalette();
+  const { t } = useI18n();
+  const subtitle = localizedEntrySubtitle(entry, t);
   const artworkUri = useEntryArtwork(entry);
-  const press = () => onPress(entry, kind);
-  const longPress = onLongPress ? () => onLongPress(entry, kind) : undefined;
+  const press = () => selectionMode ? onSelect?.(entry) : onPress(entry, kind);
+  const longPress = selectionMode ? () => onSelect?.(entry) : onLongPress ? () => onLongPress(entry, kind) : undefined;
 
   if (kind === 'song') {
     return (
       <FlipView flipKey={entry.id}>
         <TrackRow
           title={entry.title}
-          subtitle={displaySubtitle(entry) || undefined}
+          subtitle={subtitle || undefined}
           artworkUri={artworkUri}
           number={number}
           placeholderIcon="music"
@@ -45,8 +52,10 @@ function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress
           playing={playing}
           onPress={press}
           onLongPress={longPress}
-          onMore={onMore ? () => onMore(entry) : undefined}
-          moreLabel={`Song options for ${entry.title}`}
+          onMore={!selectionMode && onMore ? () => onMore(entry) : undefined}
+          selected={selectionMode ? selected : undefined}
+          accessory={selectionMode ? <Icon name={selected ? 'check' : 'selectionCircle'} /> : undefined}
+          moreLabel={t('Song options for {title}', { title: entry.title })}
         />
       </FlipView>
     );
@@ -55,7 +64,9 @@ function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress
   const isPlaylist = kind === 'playlist';
   const showsChevron = opensCollection(kind);
   const readOnly = isPlaylist && !entry.writable;
-  const trailing = showsChevron || readOnly ? (
+  const trailing = selectionMode ? (
+    <Icon name={selected ? 'check' : 'selectionCircle'} />
+  ) : showsChevron || readOnly ? (
     <View style={styles.trailing}>
       {readOnly ? <ReadOnlyBadge /> : null}
       {showsChevron ? <Icon name="chevronRight" size={CHEVRON_SIZE} color={palette.inkMuted} /> : null}
@@ -68,7 +79,7 @@ function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress
     <FlipView flipKey={entry.id}>
       <ListRow
         title={isPlaylist ? playlistDisplayName(entry.title) : entry.title}
-        subtitle={displaySubtitle(entry) || undefined}
+        subtitle={subtitle || undefined}
         leading={
           <FlipView flipKey={entry.id} part="art" artwork={{ uri: artworkUri, radius, placeholderIcon }}>
             <ArtworkThumb uri={artworkUri} radius={radius} placeholderIcon={placeholderIcon} />
@@ -77,7 +88,8 @@ function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress
         trailing={trailing}
         onPress={press}
         onLongPress={longPress}
-        accessibilityLabel={entry.subtitle ? `${entry.title}, ${displaySubtitle(entry)}` : entry.title}
+        selected={selectionMode && selected}
+        accessibilityLabel={entry.subtitle ? `${entry.title}, ${subtitle}` : entry.title}
       />
     </FlipView>
   );

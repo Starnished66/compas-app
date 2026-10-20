@@ -1,8 +1,7 @@
-import { registerRootComponent } from 'expo';
+// Capture import-time failures before loading the app's module graph.
+const { installJavaScriptCrashCapture } = require('./modules/compas-diagnostics/src');
+installJavaScriptCrashCapture();
 
-import AppRoot from './AppRoot';
-
-// registerRootComponent calls AppRegistry.registerComponent('main', () => AppRoot);
-// It also ensures that whether you load the app in Expo Go or in a native build,
-// the environment is set up appropriately
+const { registerRootComponent } = require('expo');
+const AppRoot = require('./AppRoot').default;
 registerRootComponent(AppRoot);

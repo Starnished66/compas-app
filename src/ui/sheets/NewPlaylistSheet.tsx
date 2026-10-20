@@ -6,6 +6,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import { SheetActionRow } from '../components/SheetActionRow';
 import { SheetStepTitle } from '../components/SheetStepTitle';
 import { Space } from '../tokens';
+import { useI18n } from '../../i18n';
 import { PlaylistNameStep } from './PlaylistNameStep';
 import { useSheetStep } from './useSheetStep';
 
@@ -28,6 +29,7 @@ export function NewPlaylistSheet({
   canCreateEmpty = true,
   takenNames,
 }: NewPlaylistSheetProps) {
+  const { t } = useI18n();
   const { step, setStep, sheetKey } = useSheetStep<SheetStep>(visible, 'options');
 
   const submitName = (name: string) => {
@@ -39,23 +41,23 @@ export function NewPlaylistSheet({
     if (step === 'options') {
       return (
         <>
-          <SheetStepTitle title="New playlist" />
+          <SheetStepTitle title={t('New playlist')} />
           <SheetActionRow
             icon="playlistAdd"
-            label="Empty playlist"
-            subtitle={canCreateEmpty ? 'Name it now, add songs later' : 'This player can’t create empty playlists'}
+            label={t('Empty playlist')}
+            subtitle={t(canCreateEmpty ? 'Name it now, add songs later' : 'This player can’t create empty playlists')}
             disabled={!canCreateEmpty}
             onPress={() => setStep('empty')}
           />
           <SheetActionRow
             icon="import"
-            label="Import a playlist file"
-            subtitle={canImport ? 'M3U or M3U8 from this phone, up to 256 KB' : 'This player can’t import playlist files'}
+            label={t('Import a playlist file')}
+            subtitle={t(canImport ? 'M3U or M3U8 from this phone, up to 256 KB' : 'This player can’t import playlist files')}
             disabled={!canImport}
             onPress={() => setStep('import')}
           />
           <AppText variant="caption" tone="inkMuted" style={styles.footnote}>
-            You can also start a playlist from any song. Open its menu and choose Add to playlist.
+            {t('You can also start a playlist from any song. Open its menu and choose Add to playlist.')}
           </AppText>
         </>
       );
@@ -63,9 +65,9 @@ export function NewPlaylistSheet({
     const importing = step === 'import';
     return (
       <PlaylistNameStep
-        title={importing ? 'Name the playlist' : 'New playlist'}
-        message={importing ? 'Next, choose an M3U or M3U8 file. Songs are matched to what’s on the player.' : undefined}
-        confirmLabel={importing ? 'Choose file' : 'Create'}
+        title={t(importing ? 'Name the playlist' : 'New playlist')}
+        message={importing ? t('Next, choose an M3U or M3U8 file. Songs are matched to what’s on the player.') : undefined}
+        confirmLabel={t(importing ? 'Choose file' : 'Create')}
         takenNames={takenNames}
         onSubmit={submitName}
         onCancel={onClose}

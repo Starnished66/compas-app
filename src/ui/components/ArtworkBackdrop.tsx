@@ -10,6 +10,7 @@ import { useReducedMotion } from '../useReducedMotion';
 export interface ArtworkBackdropProps {
   artworkUri?: string | null;
   prominent: boolean;
+  paused?: boolean;
 }
 
 interface BackdropLayer {
@@ -58,7 +59,7 @@ function renderLayerContent(source: ImageSourcePropType | null, palette: Palette
   ));
 }
 
-export function ArtworkBackdrop({ artworkUri, prominent }: ArtworkBackdropProps) {
+export function ArtworkBackdrop({ artworkUri, prominent, paused = false }: ArtworkBackdropProps) {
   const palette = usePalette();
   const reducedMotion = useReducedMotion();
   const key = artworkUri ?? '';
@@ -74,8 +75,8 @@ export function ArtworkBackdrop({ artworkUri, prominent }: ArtworkBackdropProps)
   if (layers.current.key !== key) {
     setLayers({
       current: { id: layers.current.id + 1, key, source },
-      previous: reducedMotion ? null : layers.current,
-      fade: new Animated.Value(reducedMotion ? 1 : 0),
+      previous: reducedMotion || paused ? null : layers.current,
+      fade: new Animated.Value(reducedMotion || paused ? 1 : 0),
     });
   }
 
@@ -83,6 +84,11 @@ export function ArtworkBackdrop({ artworkUri, prominent }: ArtworkBackdropProps)
   fadeRef.current = layers.fade;
 
   useEffect(() => {
+    if (paused) {
+      layers.fade.setValue(1);
+      if (layers.previous) setLayers((value) => ({ ...value, previous: null }));
+      return;
+    }
     if (!layers.previous) return;
     const fade = layers.fade;
     const animation = Animated.timing(fade, {
@@ -95,7 +101,7 @@ export function ArtworkBackdrop({ artworkUri, prominent }: ArtworkBackdropProps)
       if (finished && fadeRef.current === fade) setLayers((value) => ({ ...value, previous: null }));
     });
     return () => animation.stop();
-  }, [layers.fade, layers.previous]);
+  }, [layers.fade, layers.previous, paused]);
 
   return (
     <View pointerEvents="none" style={[styles.root, { backgroundColor: palette.background }]}>

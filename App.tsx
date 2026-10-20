@@ -31,7 +31,11 @@ import { ConnectionScreen } from './src/ui/screens/ConnectionScreen';
 import { NowPlayingScreen } from './src/ui/screens/NowPlayingScreen';
 import { SettingsSheet } from './src/ui/sheets/SettingsSheet';
 import { SongActionsSheet } from './src/ui/sheets/SongActionsSheet';
+import { UpdatesProvider } from './src/updates/UpdatesProvider';
+import { UpdateAnnouncements } from './src/ui/components/UpdateAnnouncements';
+import { UpdatesSheet } from './src/ui/sheets/UpdatesSheet';
 import { useScreenInsets } from './src/ui/useScreenInsets';
+import CrashReportRecovery from './src/diagnostics/CrashReportRecovery';
 
 const TAB_ORDER: TabKey[] = ['home', 'library', 'playlists'];
 
@@ -47,16 +51,22 @@ function tabFor(screen: MainScreen): TabKey {
 const accentStatuses = new Set<ConnectionStatus>([ConnectionStatus.Connected, ConnectionStatus.Connecting]);
 
 function accentSourceFor(state: RemoteUiState, accentStyle: AccentStyle): AccentSource {
-  // TODO: use the player's accent color for 'player' once the Remote API exposes it.
+  if (accentStyle === 'player') {
+    if (state.connectionStatus === ConnectionStatus.Connected && state.supportedFeatures.includes('player_accent') && state.playerAccentColor) {
+      return { kind: 'player', color: state.playerAccentColor };
+    }
+    return { kind: 'neutral' };
+  }
   if (!accentFollowsArtwork(accentStyle)) return { kind: 'neutral' };
   if (!accentStatuses.has(state.connectionStatus) || !state.currentTrack) return { kind: 'neutral' };
   return state.currentTrack.artwork ? { kind: 'artwork', uri: state.currentTrack.artwork } : { kind: 'pending' };
 }
 
 export default function App() {
-  const { state, onAction, playbackPosition, libraryArtwork } = useRemoteSession();
+  const { state, onAction, playbackPosition, libraryArtwork, wifiImportStatus, wifiImportOwnerKey, cancelWifiImportOperation, startWifiImport, stopWifiImport, startWifiImportUpgrade, listWifiImportFiles, uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile } = useRemoteSession();
   const [nowPlayingVisible, setNowPlayingVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
+  const [updatesVisible, setUpdatesVisible] = useState(false);
   const lastBrowseCategoryRef = useRef<LibraryCategory>(LibraryCategory.Albums);
   const lastMainScreenRef = useRef<MainScreen>({ type: 'Home' });
   const [connectionReturnCount, setConnectionReturnCount] = useState(0);
@@ -117,6 +127,7 @@ export default function App() {
     if (nowPlayingAllowed) setNowPlayingVisible(true);
   }, [nowPlayingAllowed]);
   const openSettings = useCallback(() => setSettingsVisible(true), []);
+  const openUpdates = useCallback(() => setUpdatesVisible(true), []);
 
   const [visitedTabs] = useState(() => new Set<TabKey>());
   visitedTabs.add(activeTab);
@@ -133,6 +144,7 @@ export default function App() {
   };
 
   return (
+    <UpdatesProvider>
     <PlaybackPositionContext.Provider value={playbackPosition}>
       <LibraryArtworkContext.Provider value={libraryArtwork}>
         <PaletteProvider palette={palette}>
@@ -148,7 +160,13 @@ export default function App() {
                   <AppSnackbarProvider activeTab={activeTab} showMiniPlayer={showMiniPlayer} chromeHidden={connectionVisible}>
                     <StatusBar style={isDark ? 'light' : 'dark'} />
                     <SessionSnackbars state={state} />
-                    <View style={[styles.root, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
+                    <UpdateAnnouncements onOpenUpdates={openUpdates} />
+                    <CrashReportRecovery />
+                    <View
+                      importantForAccessibility={nowPlayingVisible ? 'no-hide-descendants' : 'auto'}
+                      accessibilityElementsHidden={nowPlayingVisible}
+                      style={[styles.root, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}
+                    >
                       <View style={styles.root}>
                         <PageTransition style={styles.content} transitionKey={`${activeTab}:${connectionReturnCount}`} kind="fade">
                           {TAB_ORDER.filter((tab) => visitedTabs.has(tab)).map((tab) => (
@@ -182,7 +200,19 @@ export default function App() {
                       visible={settingsVisible}
                       onClose={() => setSettingsVisible(false)}
                       onOpenConnection={() => onAction({ type: 'OpenConnection' })}
+                      onOpenUpdates={openUpdates}
+                      wifiImportStatus={wifiImportStatus}
+                      wifiImportOwnerKey={wifiImportOwnerKey}
+                      onCancelWifiImportOperation={cancelWifiImportOperation}
+                      onStartWifiImport={startWifiImport}
+                      onStopWifiImport={stopWifiImport}
+                      onStartWifiImportUpgrade={startWifiImportUpgrade}
+                      onListWifiImportFiles={listWifiImportFiles}
+                      onUploadWifiImportFile={uploadWifiImportFile}
+                      onRenameWifiImportFile={renameWifiImportFile}
+                      onDeleteWifiImportFile={deleteWifiImportFile}
                     />
+                    <UpdatesSheet visible={updatesVisible} onClose={() => setUpdatesVisible(false)} playerVersion={state.supportedFeatures.includes('device_info') ? state.playerVersion : null} />
                     <SongActionsSheet state={state} onAction={onAction} />
                     <PinDialog state={state} onAction={onAction} />
                   </AppSnackbarProvider>
@@ -193,6 +223,7 @@ export default function App() {
         </PaletteProvider>
       </LibraryArtworkContext.Provider>
     </PlaybackPositionContext.Provider>
+    </UpdatesProvider>
   );
 }
 

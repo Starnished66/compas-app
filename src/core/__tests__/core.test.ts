@@ -149,6 +149,24 @@ describe('RemoteApi', () => {
     });
   });
 
+  test('parses optional player accent and device information defensively', async () => {
+    mockTransport.execute.mockResolvedValueOnce(
+      new HttpResponse(200, 'OK', { 'content-type': 'application/json' }, new TextEncoder().encode(JSON.stringify({
+        accent_color: '#a1B2c3', device_model: '  Compás DAP  ', player_version: '  2.4.1  ',
+      })))
+    );
+    await expect(api.status()).resolves.toMatchObject({
+      accentColor: '#A1B2C3', deviceModel: 'Compás DAP', playerVersion: '2.4.1',
+    });
+
+    mockTransport.execute.mockResolvedValueOnce(
+      new HttpResponse(200, 'OK', { 'content-type': 'application/json' }, new TextEncoder().encode(JSON.stringify({
+        accent_color: '#abcd', device_model: ' ', player_version: 3,
+      })))
+    );
+    await expect(api.status()).resolves.toMatchObject({ accentColor: null, deviceModel: null, playerVersion: null });
+  });
+
   test('handles 401 pin_required exception', async () => {
     const errBody = JSON.stringify({ error: 'unauthorized', code: 'pin_required' });
     mockTransport.execute.mockResolvedValueOnce(

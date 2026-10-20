@@ -42,7 +42,7 @@ export function ShaderBackdrop({ style, artworkUri, prominent, paused }: ShaderB
     () => backdropUniforms({ palette: album.palette, seed: album.seed, theme, focus, width, height }),
     [album, theme, focus, width, height],
   );
-  const colors = useUniformCrossfade(target, PALETTE_CROSSFADE_MS, !reducedMotion);
+  const colors = useUniformCrossfade(target, PALETTE_CROSSFADE_MS, !reducedMotion && !paused);
   const uniforms = useDerivedValue(() => ({ ...colors.value, uTime: animates ? time.value : 0 }));
 
   return (

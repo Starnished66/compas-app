@@ -5,6 +5,8 @@ import { Space } from '../tokens';
 import { AppText } from './AppText';
 import { Button } from './Button';
 import { IconButton } from './IconButton';
+import { useI18n } from '../../i18n';
+import { localizedCountLabel } from '../localizedLabels';
 
 export interface LibraryToolbarProps {
   countLabel: string;
@@ -26,15 +28,16 @@ export function LibraryToolbar({
   insetRight,
 }: LibraryToolbarProps) {
   const palette = usePalette();
+  const { t } = useI18n();
   return (
     <View style={[styles.row, insetRight != null && { paddingRight: insetRight }]}>
       <AppText variant="caption" tone="inkMuted" numberOfLines={1} style={styles.count}>
-        {countLabel}
+        {localizedCountLabel(countLabel, t)}
       </AppText>
       {onToggleSort ? (
         <Button
-          label={ascending ? 'A–Z' : 'Z–A'}
-          accessibilityLabel={ascending ? 'Sort order: A to Z' : 'Sort order: Z to A'}
+          label={t(ascending ? 'A–Z' : 'Z–A')}
+          accessibilityLabel={t(ascending ? 'Sort order: A to Z' : 'Sort order: Z to A')}
           icon="sort"
           variant="plain"
           size="sm"
@@ -44,7 +47,7 @@ export function LibraryToolbar({
       {onToggleGrid ? (
         <IconButton
           icon={grid ? 'listView' : 'grid'}
-          label={grid ? 'Show as list' : 'Show as grid'}
+          label={t(grid ? 'Show as list' : 'Show as grid')}
           size="sm"
           iconSize={TOOLBAR_ICON_SIZE}
           color={palette.ink}

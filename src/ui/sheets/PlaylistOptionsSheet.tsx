@@ -10,6 +10,7 @@ import { useSnackbar } from '../snackbar/useSnackbar';
 import { PlaylistNameStep } from './PlaylistNameStep';
 import { useOptimisticErrorSnackbar } from './useOptimisticErrorSnackbar';
 import { useSheetStep } from './useSheetStep';
+import { useI18n } from '../../i18n';
 
 export interface PlaylistOptionsSheetProps {
   visible: boolean;
@@ -30,6 +31,7 @@ export function PlaylistOptionsSheet({
   takenNames,
   errorMessage,
 }: PlaylistOptionsSheetProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const snackbar = useSnackbar();
   const watchForError = useOptimisticErrorSnackbar(errorMessage);
@@ -64,9 +66,9 @@ export function PlaylistOptionsSheet({
       <BottomSheet key={sheetKey} visible={open} onClose={onClose} contentKey={step}>
         {step === 'rename' ? (
           <PlaylistNameStep
-            title="Rename playlist"
+            title={t('Rename playlist')}
             initialName={name}
-            confirmLabel="Rename"
+            confirmLabel={t('Rename')}
             takenNames={takenNames}
             onSubmit={rename}
             onCancel={onClose}
@@ -74,11 +76,11 @@ export function PlaylistOptionsSheet({
         ) : (
           <>
             <SheetStepTitle title={name} />
-            <SheetActionRow icon="pencil" label="Rename" onPress={() => setStep('rename')} />
+            <SheetActionRow icon="pencil" label={t('Rename')} onPress={() => setStep('rename')} />
             <SheetActionRow
               icon="trash"
               iconColor={palette.statusError}
-              label="Delete playlist"
+              label={t('Delete playlist')}
               onPress={() => setConfirmingDelete(true)}
             />
           </>
@@ -86,9 +88,9 @@ export function PlaylistOptionsSheet({
       </BottomSheet>
       <ConfirmDialog
         visible={open && confirmingDelete}
-        title={`Delete “${name}”?`}
-        message="The playlist is removed from the player. The songs stay in your library."
-        confirmLabel="Delete playlist"
+        title={t('Delete “{name}”?', { name })}
+        message={t('The playlist is removed from the player. The songs stay in your library.')}
+        confirmLabel={t('Delete playlist')}
         destructive
         onConfirm={remove}
         onClose={() => setConfirmingDelete(false)}

@@ -1,9 +1,13 @@
+import { translate as translateEnglish } from '../../i18n/translate';
+
 export interface LibrarySyncProgress {
   title: string;
   detail: string;
   progress: number | null;
   paused: boolean;
 }
+
+type Translate = (source: string, variables?: Record<string, string | number>) => string;
 
 const COUNT_PATTERN = /(\d+)\/(\d+)\s*$/;
 
@@ -13,27 +17,27 @@ function countsOf(message: string): { done: number; total: number } | null {
   return { done: Number(match[1]), total: Number(match[2]) };
 }
 
-export function describeLibrarySync(message: string): LibrarySyncProgress {
+export function describeLibrarySync(message: string, t: Translate = (source, variables) => translateEnglish(source, 'en', variables)): LibrarySyncProgress {
   const counts = countsOf(message);
   const progress = counts && counts.total > 0 ? counts.done / counts.total : null;
   const lower = message.toLowerCase();
   if (lower.startsWith('waiting')) {
-    return { title: 'Library sync paused', detail: message, progress: null, paused: true };
+    return { title: t('Library sync paused'), detail: message, progress: null, paused: true };
   }
   if (lower.startsWith('syncing songs')) {
     return {
-      title: 'Copying your library…',
+      title: t('Copying your library…'),
       detail: counts
-        ? `${counts.done} of ${counts.total} songs · you can browse while this runs`
-        : 'You can browse while this runs',
+        ? t('{done} of {total} songs · you can browse while this runs', { done: counts.done, total: counts.total })
+        : t('You can browse while this runs'),
       progress,
       paused: false,
     };
   }
   if (lower.includes('cover')) {
     return {
-      title: 'Copying album covers…',
-      detail: counts ? `${counts.done} of ${counts.total} covers` : 'You can browse while this runs',
+      title: t('Copying album covers…'),
+      detail: counts ? t('{done} of {total} covers', { done: counts.done, total: counts.total }) : t('You can browse while this runs'),
       progress,
       paused: false,
     };
@@ -46,7 +50,7 @@ export function syncedSongTotal(message: string | null | undefined): number | nu
   return countsOf(message)?.total ?? null;
 }
 
-export function upToDateLabel(songCount: number | null): string {
-  if (songCount == null) return 'Library up to date';
-  return `Library up to date · ${songCount} ${songCount === 1 ? 'song' : 'songs'}`;
+export function upToDateLabel(songCount: number | null, t: Translate = (source, variables) => translateEnglish(source, 'en', variables)): string {
+  if (songCount == null) return t('Library up to date');
+  return t('Library up to date · {count} song', { count: songCount });
 }

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useI18n } from '../../i18n';
 import { StyleSheet, TextInput, View } from 'react-native';
 import { LibraryCategory, LibraryEntry, RemoteAction, RemoteUiState } from '../../data/types';
 import { Button } from '../components/Button';
@@ -15,6 +16,7 @@ import { inlineLibraryError, libraryStateMessage } from '../library/libraryState
 import { SEARCH_FILTER_OPTIONS, SearchFilter, SearchSection, searchSections } from '../library/searchSections';
 import { useAlbumGrid } from '../library/useAlbumGrid';
 import { LibraryListScroll } from '../library/useLibraryListScroll';
+import { BulkSelectionBar } from '../components/BulkSelectionBar';
 
 export interface SearchScreenProps {
   state: RemoteUiState;
@@ -23,6 +25,12 @@ export interface SearchScreenProps {
   onClose: () => void;
   contentBottomInset: number;
   scroll?: LibraryListScroll;
+  selectionMode?: boolean;
+  selectedIds?: ReadonlySet<string>;
+  onSelectEntry?: (entry: LibraryEntry, kind: LibraryEntryKind) => void;
+  onEntrySelectionLongPress?: (entry: LibraryEntry, kind: LibraryEntryKind) => void;
+  onOpenBulkActions?: () => void;
+  onCancelSelection?: () => void;
 }
 
 const SEARCH_CONTEXT = { category: LibraryCategory.Search, isNested: false };
@@ -32,7 +40,8 @@ function isSearchScreen(state: RemoteUiState): boolean {
   return state.screen.type === 'Library' && state.screen.category === LibraryCategory.Search;
 }
 
-export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBottomInset, scroll }: SearchScreenProps) {
+export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBottomInset, scroll, selectionMode = false, selectedIds, onSelectEntry, onEntrySelectionLongPress, onOpenBulkActions, onCancelSelection }: SearchScreenProps) {
+  const { t } = useI18n();
   const [query, setQuery] = useState(state.libraryQuery);
   const inputRef = useRef<TextInput>(null);
 
@@ -57,8 +66,8 @@ export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBot
           nodeItem(
             `section:${section.filter}`,
             <SectionHeader
-              label={section.label}
-              actionLabel={canExpand ? 'See all' : undefined}
+              label={t(section.label)}
+              actionLabel={canExpand ? t('See all') : undefined}
               onAction={() => {
                 setFilter(section.filter);
                 scrollToTop?.();
@@ -69,7 +78,7 @@ export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBot
           ...entryItems(section.entries, SEARCH_CONTEXT),
         ];
       }),
-    [sections, filter, scrollToTop],
+    [sections, filter, scrollToTop, t],
   );
 
   const changeQuery = (value: string) => {
@@ -83,19 +92,21 @@ export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBot
     items.push(nodeItem('error', <InlineError message={inlineError} style={styles.inlineError} />));
   }
 
+  if (selectionMode) items.push(nodeItem('selection', <BulkSelectionBar count={selectedIds?.size ?? 0} onActions={() => onOpenBulkActions?.()} onCancel={() => onCancelSelection?.()} />));
   items.push(...sectionItems);
 
   const placeholder = !term
-    ? { title: 'Search your library', body: 'Find artists, albums, songs and genres on the player.' }
+    ? { title: t('Search your library'), body: t('Find artists, albums, songs and genres on the player.') }
     : sections.length
       ? null
       : !showingResults
-        ? { title: 'Searching…', loading: true }
+        ? { title: t('Searching…'), loading: true }
         : libraryStateMessage({
+        translate: t,
           state,
           onAction,
           noun: 'results',
-          empty: { title: `No results for “${term}”`, body: 'Try fewer letters, or check the spelling.' },
+          empty: { title: t('No results for “{term}”', { term }), body: t('Try fewer letters, or check the spelling.') },
         });
   if (placeholder) items.push(nodeItem('placeholder', <LibraryPlaceholder {...placeholder} />));
 
@@ -108,15 +119,15 @@ export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBot
           onChangeText={changeQuery}
           onClear={() => changeQuery('')}
           inputRef={inputRef}
-          clearLabel="Clear search"
-          placeholder="Artists, albums, songs, genres"
-          accessibilityLabel="Search library"
+          clearLabel={t('Clear search')}
+          placeholder={t('Artists, albums, songs, genres')}
+          accessibilityLabel={t('Search library')}
           autoFocus
           autoCorrect={false}
           returnKeyType="search"
           style={styles.field}
         />
-        <Button label="Cancel" variant="plain" onPress={onClose} />
+        <Button label={t('Cancel')} variant="plain" onPress={onClose} />
       </View>
       <CategoryChips
         options={SEARCH_FILTER_OPTIONS}
@@ -137,6 +148,10 @@ export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBot
         tileWidth={tileWidth}
         contentBottomInset={contentBottomInset}
         scroll={scroll}
+        selectionMode={selectionMode}
+        selectedIds={selectedIds}
+        onSelectEntry={onSelectEntry}
+        onEntrySelectionLongPress={onEntrySelectionLongPress}
       />
     </View>
   );

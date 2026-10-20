@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { ContentStatus, Playlist } from '../../data/types';
 import { AppText } from '../components/AppText';
 import { ArtworkThumb } from '../components/ArtworkThumb';
+import { useI18n } from '../../i18n';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { ListRow } from '../components/ListRow';
@@ -33,15 +34,16 @@ export function AddToPlaylistStep({
   onRetry,
   busyKey = null,
 }: AddToPlaylistStepProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const loading = status === ContentStatus.Loading;
   const failed = status === ContentStatus.Error;
 
   return (
     <View>
-      <SheetStepTitle title="Add to playlist" />
+      <SheetStepTitle title={t('Add to playlist')} />
       <ListRow
-        title="New playlist"
+        title={t('New playlist')}
         onPress={onNewPlaylist}
         leading={
           <View style={[styles.tile, { backgroundColor: palette.accentContainer }]}>
@@ -49,26 +51,26 @@ export function AddToPlaylistStep({
           </View>
         }
       />
-      <SectionHeader label="Your playlists" tone="muted" style={styles.sectionHeader} />
+      <SectionHeader label={t('Your playlists')} tone="muted" style={styles.sectionHeader} />
       {loading ? (
         <View style={styles.state}>
           <Spinner />
           <AppText variant="body" tone="inkMuted">
-            Loading playlists…
+            {t('Loading playlists…')}
           </AppText>
         </View>
       ) : null}
       {failed ? (
         <View style={styles.state}>
           <AppText variant="body" tone="inkMuted">
-            Couldn’t load your playlists.
+            {t('Couldn’t load your playlists.')}
           </AppText>
-          <Button label="Try again" variant="raised" size="sm" onPress={onRetry} />
+          <Button label={t('Try again')} variant="raised" size="sm" onPress={onRetry} />
         </View>
       ) : null}
       {!loading && !failed && playlists.length === 0 ? (
         <AppText variant="body" tone="inkMuted" style={styles.empty}>
-          No playlists yet. Start one with New playlist.
+          {t('No playlists yet. Start one with New playlist.')}
         </AppText>
       ) : null}
       {playlists.map((playlist) => (
@@ -81,7 +83,7 @@ export function AddToPlaylistStep({
         />
       ))}
       <AppText variant="caption" tone="inkMuted" style={styles.footnote}>
-        Playlists the player made itself, like Most Played, can’t be changed and aren’t listed.
+        {t('Playlists the player made itself, like Most Played, can’t be changed and aren’t listed.')}
       </AppText>
     </View>
   );

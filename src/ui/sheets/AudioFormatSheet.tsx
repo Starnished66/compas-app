@@ -7,6 +7,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import { DetailRow } from '../components/DetailRow';
 import { usePalette } from '../PaletteProvider';
 import { Radius, Space } from '../tokens';
+import { useI18n } from '../../i18n';
 
 export interface AudioFormatSheetProps {
   visible: boolean;
@@ -15,24 +16,21 @@ export interface AudioFormatSheetProps {
   onClose: () => void;
 }
 
-const NOT_REPORTED = 'Not reported';
-
-function routeDescription(transport: ConnectionTransport): string {
-  return transport === ConnectionTransport.Bluetooth
-    ? 'Bluetooth · the player reports every 5 s while it plays over Bluetooth audio'
-    : 'Wi-Fi · the player reports about every 1.5 s';
-}
-
 export function AudioFormatSheet({ visible, track, transport, onClose }: AudioFormatSheetProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const format = describeAudioFormat(track);
+  const notReported = t('Not reported');
+  const routeDescription = transport === ConnectionTransport.Bluetooth
+    ? t('Bluetooth · the player reports every 5 s while it plays over Bluetooth audio')
+    : t('Wi-Fi · the player reports about every 1.5 s');
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Audio format">
+    <BottomSheet visible={visible} onClose={onClose} title={t('Audio format')}>
       <View style={styles.body}>
         <View style={styles.summary}>
           <AppText variant="headline" tabular>
-            {format?.line ?? NOT_REPORTED}
+            {format?.line ?? notReported}
           </AppText>
           {format ? (
             <AppText variant="body" tone="inkMuted">
@@ -42,15 +40,15 @@ export function AudioFormatSheet({ visible, track, transport, onClose }: AudioFo
         </View>
         <View style={[styles.table, { borderColor: palette.outline }]}>
           <DetailRow
-            label="Codec"
-            value={format?.codec ? `${format.codec} · ${format.lossy ? 'Lossy' : 'Lossless'}` : NOT_REPORTED}
+            label={t('Codec')}
+            value={format?.codec ? `${format.codec} · ${format.lossy ? t('Lossy') : t('Lossless')}` : notReported}
           />
-          <DetailRow label="Bit depth" value={format?.bitDepth ?? NOT_REPORTED} divided />
-          <DetailRow label="Sample rate" value={format?.sampleRate ?? NOT_REPORTED} divided />
-          <DetailRow label="Connection" value={routeDescription(transport)} stacked divided />
+          <DetailRow label={t('Bit depth')} value={format?.bitDepth ?? notReported} divided />
+          <DetailRow label={t('Sample rate')} value={format?.sampleRate ?? notReported} divided />
+          <DetailRow label={t('Connection')} value={routeDescription} stacked divided />
         </View>
         <AppText variant="caption" tone="inkMuted">
-          This is the format of the file, as the player reports it.
+          {t('This is the format of the file, as the player reports it.')}
         </AppText>
       </View>
     </BottomSheet>

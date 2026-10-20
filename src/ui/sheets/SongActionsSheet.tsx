@@ -19,6 +19,7 @@ import { PlaylistNameStep } from './PlaylistNameStep';
 import { PendingSongAction, useSongActionPending } from './useSongActionPending';
 import { PlaylistMatch, isViewingPlaylist, usePlaylistViewer } from './usePlaylistViewer';
 import { useSheetStep } from './useSheetStep';
+import { useI18n } from '../../i18n';
 
 export interface SongActionsSheetProps {
   state: RemoteUiState;
@@ -60,6 +61,7 @@ function setFavoriteFor(onAction: (action: RemoteAction) => void, entryId: strin
 }
 
 export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const snackbar = useSnackbar();
   const visible = state.songActionsVisible;
@@ -198,7 +200,7 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
       <Divider />
       <SheetActionRow
         icon="queueAdd"
-        label="Add to queue"
+        label={t('Add to queue')}
         busy={pending?.kind === 'queue'}
         onPress={() => run({ kind: 'queue', title }, { type: 'AddSongToQueue' })}
       />
@@ -207,16 +209,16 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
           icon="heart"
           iconFilled={Boolean(state.songActionFavorite)}
           iconColor={state.songActionFavorite ? palette.accent : undefined}
-          label={state.songActionFavorite ? 'Remove from favorites' : 'Add to favorites'}
+          label={t(state.songActionFavorite ? 'Remove from favorites' : 'Add to favorites')}
           busy={pending?.kind === 'favorite'}
           onPress={toggleFavorite}
         />
       ) : null}
-      <SheetActionRow icon="playlistAdd" label="Add to playlist…" onPress={openPlaylistStep} />
+      <SheetActionRow icon="playlistAdd" label={t('Add to playlist…')} onPress={openPlaylistStep} />
       {canEditPlaylistTrack && hasEarlier ? (
         <SheetActionRow
           icon="arrowUp"
-          label="Move earlier"
+          label={t('Move earlier')}
           busy={pending?.kind === 'move' && pending.direction === -1}
           onPress={() => movePlaylistTrack(-1)}
         />
@@ -224,7 +226,7 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
       {canEditPlaylistTrack && hasLater ? (
         <SheetActionRow
           icon="arrowDown"
-          label="Move later"
+          label={t('Move later')}
           busy={pending?.kind === 'move' && pending.direction === 1}
           onPress={() => movePlaylistTrack(1)}
         />
@@ -233,7 +235,7 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
         <SheetActionRow
           icon="trash"
           iconColor={palette.statusError}
-          label={`Remove from ${playlistName}`}
+          label={t('Remove from {name}', { name: playlistName })}
           busy={pending?.kind === 'remove'}
           onPress={() => {
             if (!busy) setConfirmingRemove(true);
@@ -261,9 +263,9 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
       case 'name':
         return (
           <PlaylistNameStep
-            title="New playlist"
-            message={`Starts with “${title}”`}
-            confirmLabel="Create"
+            title={t('New playlist')}
+            message={t('Starts with “{title}”', { title })}
+            confirmLabel={t('Create')}
             initialName={draftName}
             requireChange={false}
             takenNames={state.playlistOptions.map((option) => playlistDisplayName(option.name))}
@@ -285,9 +287,9 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
       </BottomSheet>
       <ConfirmDialog
         visible={visible && confirmingRemove}
-        title={`Remove from ${playlistName}?`}
-        message={`“${title}” is removed from this playlist. It stays in your library.`}
-        confirmLabel="Remove"
+        title={t('Remove from {name}?', { name: playlistName })}
+        message={t('“{title}” is removed from this playlist. It stays in your library.', { title })}
+        confirmLabel={t('Remove')}
         destructive
         onConfirm={removeFromPlaylist}
         onClose={() => setConfirmingRemove(false)}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Space } from '../tokens';
+import { useI18n } from '../../i18n';
 import { Chip } from './Chip';
 
 export interface CategoryChipOption<T extends string> {
@@ -15,6 +16,7 @@ export interface CategoryChipsProps<T extends string> {
 }
 
 export function CategoryChips<T extends string>({ options, value, onChange }: CategoryChipsProps<T>) {
+  const { t } = useI18n();
   return (
     <View style={styles.frame}>
       <ScrollView
@@ -26,7 +28,7 @@ export function CategoryChips<T extends string>({ options, value, onChange }: Ca
         {options.map((option) => (
           <Chip
             key={option.value}
-            label={option.label}
+            label={t(option.label)}
             selected={option.value === value}
             onPress={() => onChange(option.value)}
           />

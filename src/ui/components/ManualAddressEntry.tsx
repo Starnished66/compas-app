@@ -6,6 +6,7 @@ import { AppText } from './AppText';
 import { Button } from './Button';
 import { StatusIndicator } from './StatusIndicator';
 import { TextField } from './TextField';
+import { useI18n } from '../../i18n';
 
 export interface ManualAddressEntryProps {
   active: boolean;
@@ -18,6 +19,7 @@ export interface ManualAddressEntryProps {
 const ADDRESS_HINT_LINES = 2;
 
 export function ManualAddressEntry({ active, address, onChangeAddress, onSubmit, onCancel }: ManualAddressEntryProps) {
+  const { t } = useI18n();
   const invalid = checkPlayerAddress(address) === 'invalid';
   const inputRef = useRef<TextInput>(null);
 
@@ -30,9 +32,9 @@ export function ManualAddressEntry({ active, address, onChangeAddress, onSubmit,
     <View style={styles.entry}>
       <View style={styles.labelRow}>
         <AppText variant="caption" style={styles.label}>
-          Player address
+          {t('Player address')}
         </AppText>
-        <Button label="Cancel" variant="plain" size="sm" onPress={onCancel} />
+        <Button label={t('Cancel')} variant="plain" size="sm" onPress={onCancel} />
       </View>
       <TextField
         value={address}
@@ -40,7 +42,7 @@ export function ManualAddressEntry({ active, address, onChangeAddress, onSubmit,
         onClear={() => onChangeAddress('')}
         invalid={invalid}
         placeholder="192.168.1.20:8899"
-        accessibilityLabel="Player address"
+        accessibilityLabel={t('Player address')}
         keyboardType="url"
         autoCapitalize="none"
         autoCorrect={false}

@@ -1,5 +1,7 @@
 import { ConnectionStatus, ContentStatus, RemoteAction, RemoteUiState } from '../../data/types';
 import { LibraryPlaceholderProps } from '../components/LibraryPlaceholder';
+import { localizedCountLabel } from '../localizedLabels';
+import { translate as translateEnglish } from '../../i18n/translate';
 
 interface LibraryStateMessageInput {
   state: RemoteUiState;
@@ -7,32 +9,33 @@ interface LibraryStateMessageInput {
   noun: string;
   empty: LibraryPlaceholderProps;
   onRetry?: () => void;
+  translate?: (source: string, variables?: Record<string, string | number>) => string;
 }
 
 export function libraryStateMessage({
   state,
   onAction,
-  noun,
   empty,
   onRetry,
+  translate = (source, variables) => translateEnglish(source, 'en', variables),
 }: LibraryStateMessageInput): LibraryPlaceholderProps | null {
   if (state.connectionStatus !== ConnectionStatus.Connected) {
     return {
-      title: 'Not connected',
-      body: state.connectionMessage || 'Connect to a player to browse its library.',
-      actionLabel: 'Connect a player',
+      title: translate('Not connected'),
+      body: state.connectionMessage ? translate(state.connectionMessage) : translate('Connect to a player to browse its library.'),
+      actionLabel: translate('Connect a player'),
       onAction: () => onAction({ type: 'OpenConnection' }),
     };
   }
   if (state.libraryEntries.length > 0) return null;
   switch (state.libraryStatus) {
     case ContentStatus.Loading:
-      return { title: `Loading ${noun}…`, loading: true };
+      return { title: translate('Loading…'), loading: true };
     case ContentStatus.Error:
       return {
-        title: `Couldn’t load ${noun}`,
-        body: state.connectionMessage || state.libraryCountLabel || undefined,
-        actionLabel: onRetry ? 'Try again' : undefined,
+        title: translate('Couldn’t load this list'),
+        body: state.connectionMessage ? translate(state.connectionMessage) : localizedCountLabel(state.libraryCountLabel, translate) || undefined,
+        actionLabel: onRetry ? translate('Try again') : undefined,
         onAction: onRetry,
       };
     default:

@@ -8,6 +8,7 @@ import { AppText } from './AppText';
 import { Collapsible } from './Collapsible';
 import { Icon } from './Icon';
 import { ListRow } from './ListRow';
+import { useI18n } from '../../i18n';
 
 export interface PlayerFeatureListProps {
   supportedFeatures: string[];
@@ -21,6 +22,8 @@ const FEATURE_LABELS: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'queue_edit', label: 'Edit the queue' },
   { id: 'playlist_edit', label: 'Edit playlists' },
   { id: 'playlist_import', label: 'Import playlist files' },
+  { id: 'player_accent', label: 'Player accent color' },
+  { id: 'device_info', label: 'Device information' },
 ];
 
 const FEATURE_ICON_SIZE = 16;
@@ -50,6 +53,7 @@ function useChevronRotation(expanded: boolean) {
 }
 
 export function PlayerFeatureList({ supportedFeatures }: PlayerFeatureListProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const [expanded, setExpanded] = useState(false);
   const rotate = useChevronRotation(expanded);
@@ -58,9 +62,9 @@ export function PlayerFeatureList({ supportedFeatures }: PlayerFeatureListProps)
     <View>
       <ListRow
         variant="action"
-        title="What this player supports"
+        title={t('What this player supports')}
         onPress={() => setExpanded((open) => !open)}
-        accessibilityLabel={`What this player supports, ${expanded ? 'expanded' : 'collapsed'}`}
+        accessibilityLabel={t('What this player supports, {state}', { state: t(expanded ? 'expanded' : 'collapsed') })}
         trailing={
           <Animated.View style={{ transform: [{ rotate }] }}>
             <Icon name="chevronRight" size={CHEVRON_SIZE} />
@@ -75,7 +79,7 @@ export function PlayerFeatureList({ supportedFeatures }: PlayerFeatureListProps)
               <View
                 key={id}
                 accessible
-                accessibilityLabel={`${label}, ${supported ? 'supported' : 'not supported'}`}
+                accessibilityLabel={t('{feature}, {state}', { feature: t(label), state: t(supported ? 'supported' : 'not supported') })}
                 style={styles.feature}
               >
                 <Icon
@@ -84,10 +88,10 @@ export function PlayerFeatureList({ supportedFeatures }: PlayerFeatureListProps)
                   color={supported ? palette.statusOk : palette.statusIdle}
                 />
                 <AppText variant="caption" style={styles.label}>
-                  {label}
+                  {t(label)}
                 </AppText>
                 <AppText variant="caption" tone="inkMuted">
-                  {supported ? 'Supported' : 'Not supported'}
+                  {t(supported ? 'Supported' : 'Not supported')}
                 </AppText>
               </View>
             );

@@ -1,9 +1,10 @@
 import { RemoteApi } from '../data/RemoteApi';
 import { CatalogGroup, CatalogGroupKind, CatalogIdentity, SyncedCatalogStore } from '../data/SyncedCatalogStore';
-import { CatalogSong, LibraryCategory, LibraryEntry, LibraryGroup, Song } from '../data/types';
+import { CatalogSong, LibraryCategory, LibraryEntry, LibraryGroup, LibrarySortingSnapshot, Song } from '../data/types';
 import { GroupKind, LibraryEntryFactory } from './LibraryEntryFactory';
 import { ExtensionPage, LibraryList } from './LibraryListCache';
 import { sortedByTitle } from './titleOrder';
+import { loadServerOrderedAlbumGroups } from './librarySorting';
 
 export const LIBRARY_PAGE_SIZE = 50;
 
@@ -13,6 +14,7 @@ export interface CategoryLoadContext {
   store: SyncedCatalogStore;
   entries: LibraryEntryFactory;
   features: ReadonlySet<string>;
+  librarySorting?: LibrarySortingSnapshot | null;
 }
 
 interface GroupCategory {
@@ -105,12 +107,12 @@ async function searchList(context: CategoryLoadContext, term: string): Promise<L
   const factory = context.entries;
   const songEntries = factory.songs(songs.songs, {}, context.catalog?.revision ?? null);
   const entries = [
-    ...factory.groups(artists, 'artist').map((entry, i) => ({ ...entry, subtitle: `Artist · ${artists[i].count} tracks` })),
+    ...factory.groups(artists, 'artist').map((entry, i) => ({ ...entry, subtitle: `Artist · ${artists[i].count} tracks`, subtitleTranslation: { source: 'Artist · {count} song', values: { count: artists[i].count } } })),
     ...factory
       .albums(albums, null)
-      .map((entry, i) => ({ ...entry, subtitle: `Album · ${albums[i].albumArtist || albums[i].count + ' tracks'}` })),
-    ...factory.groups(genres, 'genre').map((entry, i) => ({ ...entry, subtitle: `Genre · ${genres[i].count} tracks` })),
-    ...songEntries.map((entry, i) => ({ ...entry, subtitle: `Track · ${songs.songs[i].artist || 'Unknown artist'}` })),
+      .map((entry, i) => ({ ...entry, subtitle: `Album · ${albums[i].albumArtist || albums[i].count + ' tracks'}`, subtitleTranslation: albums[i].albumArtist ? { source: 'Album · {artist}', values: { artist: albums[i].albumArtist! } } : { source: 'Album · {count} song', values: { count: albums[i].count } } })),
+    ...factory.groups(genres, 'genre').map((entry, i) => ({ ...entry, subtitle: `Genre · ${genres[i].count} tracks`, subtitleTranslation: { source: 'Genre · {count} song', values: { count: genres[i].count } } })),
+    ...songEntries.map((entry, i) => ({ ...entry, subtitle: `Track · ${songs.songs[i].artist || 'Unknown artist'}`, subtitleTranslation: songs.songs[i].artist ? undefined : { source: 'Unknown artist' } })),
   ];
   const groupCount = artists.length + albums.length + genres.length;
   return {
@@ -130,7 +132,16 @@ export async function loadCategoryList(
   const { api, entries: factory } = context;
   const group = GROUP_CATEGORIES[category];
   if (group) {
-    const groups = sortedByTitle(await groupList(context, group, query), (item) => item.name);
+    const serverAlbumOrder =
+      category === LibraryCategory.Albums &&
+      !query &&
+      context.features.has('library_sorting') &&
+      !!context.librarySorting &&
+      context.librarySorting.albums.effective !== 0;
+    const loadedGroups = serverAlbumOrder
+      ? await loadServerOrderedAlbumGroups(api, 'albums')
+      : await groupList(context, group, query);
+    const groups = serverAlbumOrder ? loadedGroups : sortedByTitle(loadedGroups, (item) => item.name);
     return list(groupEntries(context, group, groups), groups.length, `${groups.length} ${group.noun}`);
   }
 

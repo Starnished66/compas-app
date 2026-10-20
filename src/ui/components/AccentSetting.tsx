@@ -3,6 +3,7 @@ import { ACCENT_STYLE_HINTS, ACCENT_STYLE_LABELS, ACCENT_STYLES, AccentStyle } f
 import { useAccentPreference } from '../preferences/useAccentPreference';
 import { PreferenceSetting } from './PreferenceSetting';
 import { SegmentedOption } from './SegmentedControl';
+import { useI18n } from '../../i18n';
 
 const OPTIONS: ReadonlyArray<SegmentedOption<AccentStyle>> = ACCENT_STYLES.map((value) => ({
   value,
@@ -10,12 +11,13 @@ const OPTIONS: ReadonlyArray<SegmentedOption<AccentStyle>> = ACCENT_STYLES.map((
 }));
 
 export function AccentSetting() {
+  const { t } = useI18n();
   const { preference, setPreference } = useAccentPreference();
   return (
     <PreferenceSetting
-      title="Accent color"
-      options={OPTIONS}
-      hints={ACCENT_STYLE_HINTS}
+      title={t('Accent color')}
+      options={OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
+      hints={Object.fromEntries(Object.entries(ACCENT_STYLE_HINTS).map(([key, value]) => [key, t(value)])) as typeof ACCENT_STYLE_HINTS}
       value={preference}
       onChange={setPreference}
     />

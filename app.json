@@ -27,6 +27,7 @@
       "expo-sqlite",
       "expo-secure-store",
       "./plugins/withCompasAndroid",
+      "./plugins/withCompasDiagnostics",
       [
         "expo-build-properties",
         {

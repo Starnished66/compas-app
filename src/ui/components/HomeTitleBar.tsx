@@ -5,6 +5,7 @@ import { between, CollapseProgress, fadeOnCollapse } from '../collapse';
 import { Size, Space } from '../tokens';
 import { AppText } from './AppText';
 import { IconButton } from './IconButton';
+import { useI18n } from '../../i18n';
 
 export interface HomeTitleBarProps {
   onOpenSettings: () => void;
@@ -18,6 +19,7 @@ const SETTINGS_LIFT = 56;
 const SETTINGS_TOP = (Size.bar - Size.controlSm) / 2;
 
 export function HomeTitleBar({ onOpenSettings, collapse, compact = false, settingsOpen = false }: HomeTitleBarProps) {
+  const { t } = useI18n();
   const expanded = useSharedValue(0);
   const progress = collapse ?? expanded;
   const titleStyle = useAnimatedStyle(() => ({
@@ -39,7 +41,7 @@ export function HomeTitleBar({ onOpenSettings, collapse, compact = false, settin
       <Animated.View pointerEvents={compact ? 'none' : 'box-none'} style={[styles.settings, settingsStyle]}>
         <IconButton
           icon="settings"
-          label="Settings"
+          label={t('Settings')}
           size="sm"
           variant="outlined"
           active={settingsOpen}

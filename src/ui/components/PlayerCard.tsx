@@ -7,6 +7,7 @@ import { AppText } from './AppText';
 import { Card } from './Card';
 import { Icon } from './Icon';
 import { StatusIndicator } from './StatusIndicator';
+import { useI18n } from '../../i18n';
 
 export interface PlayerCardProps {
   name: string;
@@ -20,7 +21,8 @@ export interface PlayerCardProps {
 
 export function PlayerCard({ name, detail, status, trailing, children, variant = 'card', style }: PlayerCardProps) {
   const palette = usePalette();
-  const subtitle = status ? [status.label, detail].filter(Boolean).join(' · ') : detail;
+  const { t } = useI18n();
+  const subtitle = status ? [t(status.label), detail].filter(Boolean).join(' · ') : detail;
 
   const identity = (
     <View style={styles.identity}>

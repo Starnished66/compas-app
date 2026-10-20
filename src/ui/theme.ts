@@ -241,3 +241,22 @@ export function withArtworkPalette(baseColors: ColorScheme, palette: ArtworkPale
     surfaceTint: primary,
   };
 }
+
+/** Preserve the player color's hue while moving it to an accessible accent value. */
+export function withPlayerAccent(baseColors: ColorScheme, hex: string, dark: boolean): ColorScheme {
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return baseColors;
+  const { r, g, b } = parseHexColor(hex);
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  const delta = max - min;
+  let hue = 0;
+  if (delta > 0) {
+    if (max === r / 255) hue = 60 * (((g - b) / 255 / delta) % 6);
+    else if (max === g / 255) hue = 60 * ((b - r) / 255 / delta + 2);
+    else hue = 60 * ((r - g) / 255 / delta + 4);
+  }
+  hue = (hue + 360) % 360;
+  const saturation = max === 0 ? 0 : delta / max;
+  if (saturation < 0.1) return baseColors;
+  return withArtworkPalette(baseColors, { hue, saturation }, dark);
+}

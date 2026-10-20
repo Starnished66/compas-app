@@ -208,6 +208,24 @@ describe('NowPlayingArtwork', () => {
     expect(env.controller.artwork).toBeNull();
     expect(env.controller.sync(songA, allowed)).toBeNull();
   });
+
+  it('ignores an artwork result from a previous owner after reset to the same track', async () => {
+    const env = setup();
+    env.controller.sync(songA, allowed);
+    const previousLocal = env.local(songA);
+    env.controller.reset();
+    env.controller.sync(songA, allowed);
+    const currentLocal = env.local(songA);
+
+    previousLocal.resolve('file:///previous-player.art');
+    await flushPromises();
+    expect(env.controller.artwork).toBeNull();
+
+    currentLocal.resolve('file:///current-player.art');
+    await flushPromises();
+    expect(env.controller.artwork).toBe('file:///current-player.art');
+    expect(env.changes).toEqual([['file:///current-player.art', trackKey(songA)]]);
+  });
 });
 
 describe('trackWithArtwork', () => {

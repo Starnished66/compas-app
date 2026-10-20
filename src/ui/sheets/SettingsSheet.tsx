@@ -1,7 +1,8 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { ConnectionStatus, RemoteAction, RemoteTheme, RemoteUiState } from '../../data/types';
+import { ConnectionStatus, ConnectionTransport, LibrarySortMode, LibrarySortScope, RemoteAction, RemoteTheme, RemoteUiState, WifiImportStatus } from '../../data/types';
 import { AccentSetting } from '../components/AccentSetting';
+import { AppText } from '../components/AppText';
 import { BackgroundSetting } from '../components/BackgroundSetting';
 import { BottomSheet } from '../components/BottomSheet';
 import { Card } from '../components/Card';
@@ -11,6 +12,7 @@ import { Icon } from '../components/Icon';
 import { LibrarySyncRow } from '../components/LibrarySyncRow';
 import { ListRow } from '../components/ListRow';
 import { MiniProgressSetting } from '../components/MiniProgressSetting';
+import { LibrarySortingSetting } from '../components/LibrarySortingSetting';
 import { PlayerCard } from '../components/PlayerCard';
 import { PlayerFeatureList } from '../components/PlayerFeatureList';
 import { PreferenceSetting } from '../components/PreferenceSetting';
@@ -18,6 +20,13 @@ import { SegmentedOption } from '../components/SegmentedControl';
 import { connectionStatusView } from '../connectionSummary';
 import { Space } from '../tokens';
 import { useConnectedPlayer } from '../useConnectedPlayer';
+import { useUpdates } from '../../updates/UpdatesProvider';
+import { LANGUAGE_OPTIONS, useI18n } from '../../i18n';
+import { Button } from '../components/Button';
+import { WifiImportManager } from '../components/WifiImportManager';
+import type { WifiImportManagerProps } from '../components/WifiImportManager';
+import { WifiImportDirectoryPage } from '../../data/types';
+import { isSameWifiImportOwner } from '../../session/wifiImportOwner';
 
 export interface SettingsSheetProps {
   state: RemoteUiState;
@@ -25,6 +34,17 @@ export interface SettingsSheetProps {
   visible: boolean;
   onClose: () => void;
   onOpenConnection: () => void;
+  onOpenUpdates: () => void;
+  wifiImportStatus: WifiImportStatus;
+  wifiImportOwnerKey: string | null;
+  onCancelWifiImportOperation: () => void;
+  onStartWifiImport: () => Promise<void>;
+  onStopWifiImport: () => Promise<void>;
+  onStartWifiImportUpgrade: () => Promise<void>;
+  onListWifiImportFiles: (path: string, offset: number) => Promise<WifiImportDirectoryPage>;
+  onUploadWifiImportFile: WifiImportManagerProps['onUpload'];
+  onRenameWifiImportFile: (path: string, name: string) => Promise<void>;
+  onDeleteWifiImportFile: (path: string) => Promise<void>;
 }
 
 const THEME_OPTIONS: ReadonlyArray<SegmentedOption<RemoteTheme>> = [
@@ -35,7 +55,14 @@ const THEME_OPTIONS: ReadonlyArray<SegmentedOption<RemoteTheme>> = [
 
 const CHEVRON_SIZE = 18;
 
-export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnection }: SettingsSheetProps) {
+export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnection, onOpenUpdates, wifiImportStatus, wifiImportOwnerKey, onCancelWifiImportOperation, onStartWifiImport, onStopWifiImport, onStartWifiImportUpgrade, onListWifiImportFiles, onUploadWifiImportFile, onRenameWifiImportFile, onDeleteWifiImportFile }: SettingsSheetProps) {
+  const updates = useUpdates();
+  const { t, languagePreference, setLanguage } = useI18n();
+  const [languageOpen, setLanguageOpen] = useState(false);
+  const [sortingOpen, setSortingOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const previousWifiImportOwnerKeyRef = useRef(wifiImportOwnerKey);
+  const librarySorting = state.librarySorting;
   const player = useConnectedPlayer(state);
   const connected = state.connectionStatus === ConnectionStatus.Connected;
   const disconnected = state.connectionStatus === ConnectionStatus.Disconnected;
@@ -46,13 +73,76 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
     if (action) onAction(action);
   };
 
+  React.useEffect(() => {
+    const previous = previousWifiImportOwnerKeyRef.current;
+    previousWifiImportOwnerKeyRef.current = wifiImportOwnerKey;
+    if (previous && !isSameWifiImportOwner(previous, wifiImportOwnerKey)) {
+      onCancelWifiImportOperation();
+      setImportOpen(false);
+    }
+  }, [wifiImportOwnerKey, onCancelWifiImportOperation]);
+
   return (
-    <BottomSheet visible={visible} onClose={onClose} onHidden={runAfterClose} title="Settings">
+    <BottomSheet visible={visible} onClose={() => { onCancelWifiImportOperation(); setLanguageOpen(false); setSortingOpen(false); setImportOpen(false); onClose(); }} onHidden={runAfterClose} title={languageOpen ? t('Choose a language') : sortingOpen ? t('Library sorting') : importOpen ? t('Import via Wi-Fi') : t('Settings')} contentKey={languageOpen ? 'language' : sortingOpen ? 'sorting' : importOpen ? 'wifi-import' : 'settings'}>
+      {languageOpen ? (
+        <View style={styles.content}>
+          <Card variant="surface">
+            <ListRow title={t('Back')} leading={<Icon name="chevronLeft" />} onPress={() => setLanguageOpen(false)} />
+            {LANGUAGE_OPTIONS.map(({ value, label }) => (
+              <ListRow
+                key={value}
+                title={value === 'system' ? t(label) : label}
+                selected={languagePreference === value}
+                accessibilityRole="radio"
+                accessibilityLabel={value === 'system' ? t(label) : label}
+                trailing={languagePreference === value ? <Icon name="check" /> : null}
+                onPress={() => {
+                  void setLanguage(value);
+                  setLanguageOpen(false);
+                }}
+              />
+            ))}
+          </Card>
+        </View>
+      ) : sortingOpen && librarySorting ? (
+        <View style={styles.content}>
+          <Card variant="surface">
+            <ListRow title={t('Back')} leading={<Icon name="chevronLeft" />} onPress={() => setSortingOpen(false)} />
+            <LibrarySortingSetting
+              sorting={librarySorting}
+              onChange={(scope: LibrarySortScope, mode: LibrarySortMode) => {
+                onAction({ type: 'SetLibrarySorting', scope, mode });
+              }}
+            />
+          </Card>
+        </View>
+      ) : importOpen && connected && isSameWifiImportOwner(previousWifiImportOwnerKeyRef.current, wifiImportOwnerKey) ? (
+        <View style={styles.content}>
+          <Card variant="surface">
+            <ListRow title={t('Back')} leading={<Icon name="chevronLeft" />} onPress={() => { onCancelWifiImportOperation(); setImportOpen(false); }} />
+            <WifiImportManager
+              key={wifiImportOwnerKey ?? 'no-import-owner'}
+              transport={state.connectionTransport}
+              supported={state.supportedFeatures.includes('wifi_import') && state.supportedFeatures.includes('wifi_import_files') && state.supportedFeatures.includes('catalog_sync_v1')}
+              status={wifiImportStatus}
+              onEnsureReady={onStartWifiImport}
+              onFinish={onStopWifiImport}
+              onFinished={() => setImportOpen(false)}
+              onCancel={onCancelWifiImportOperation}
+              onStartUpgrade={onStartWifiImportUpgrade}
+              onList={onListWifiImportFiles}
+              onUpload={onUploadWifiImportFile}
+              onRename={onRenameWifiImportFile}
+              onDelete={onDeleteWifiImportFile}
+            />
+          </Card>
+        </View>
+      ) : (
       <View style={styles.content}>
         <Card variant="surface">
           <PlayerCard
             variant="row"
-            name={disconnected ? 'No player' : player.name}
+            name={disconnected ? t('No player') : player.name}
             detail={connected ? player.detail : undefined}
             status={connectionStatusView(state)}
             trailing={
@@ -66,7 +156,31 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
               <Divider />
               <ListRow
                 variant="action"
-                title="Update saved PIN"
+                title={t('Import via Wi-Fi')}
+                leading={<Icon name="import" />}
+                subtitle={t(state.connectionTransport === ConnectionTransport.Bluetooth
+                  ? 'Turn on Wi-Fi on the player to import files.'
+                  : state.supportedFeatures.includes('wifi_import')
+                    ? 'Browse the player SD card and upload files'
+                    : 'Update the player firmware to use Wi-Fi import.')}
+                trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
+                onPress={() => setImportOpen(true)}
+              />
+              {state.supportedFeatures.includes('device_info') && (state.deviceModel || state.playerVersion) ? (
+                <>
+                  <Divider />
+                  <View style={styles.deviceInfo}>
+                    <AppText variant="eyebrow" tone="inkMuted">{t('Device information')}</AppText>
+                    {state.deviceModel ? <AppText variant="caption" tone="inkMuted">{t('Player model')}: {state.deviceModel}</AppText> : null}
+                    {state.playerVersion ? <AppText variant="caption" tone="inkMuted">{t('Player version')}: {state.playerVersion}</AppText> : null}
+                    {state.playerVersion ? <AppText variant="caption" tone="inkMuted">{t('This is the running player software version; firmware is updated separately.')}</AppText> : null}
+                  </View>
+                </>
+              ) : null}
+              <Divider />
+              <ListRow
+                variant="action"
+                title={t('Update saved PIN')}
                 leading={<Icon name="key" />}
                 onPress={() => {
                   afterClose.current = { type: 'ChangePin' };
@@ -78,7 +192,7 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
           <Divider />
           <ListRow
             variant="action"
-            title="Connection and players"
+            title={t('Connection and players')}
             leading={<Icon name="wifi" />}
             trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
             onPress={() => {
@@ -89,12 +203,40 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
         </Card>
 
         <Card variant="surface">
+          <ListRow title={t('Updates')} subtitle={updates.firmware
+            ? (connected && state.playerVersion
+              ? t('Player {playerVersion} · Firmware {firmwareVersion} · App {appVersion}', { playerVersion: state.playerVersion, firmwareVersion: updates.firmware.version, appVersion: updates.appVersion })
+              : t('Firmware {version} · App {appVersion}', { version: updates.firmware.version, appVersion: updates.appVersion }))
+            : (connected && state.playerVersion
+              ? t('Player {playerVersion} · Compás Remote {appVersion}', { playerVersion: state.playerVersion, appVersion: updates.appVersion })
+              : t('Compás Remote {version}', { version: updates.appVersion }))}
+            trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />} onPress={() => { onClose(); onOpenUpdates(); }} />
+        </Card>
+        <Card variant="surface">
           <PreferenceSetting
-            title="Appearance"
-            options={THEME_OPTIONS}
+            title={t('Appearance')}
+            options={THEME_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
             value={state.theme}
             onChange={(theme) => onAction({ type: 'SetTheme', theme })}
           />
+          <Divider />
+          <ListRow
+            title={t('Language')}
+            subtitle={languagePreference === 'system' ? t('System default') : LANGUAGE_OPTIONS.find((option) => option.value === languagePreference)?.label}
+            trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
+            onPress={() => setLanguageOpen(true)}
+          />
+          {state.supportedFeatures.includes('library_sorting') && librarySorting ? (
+            <>
+              <Divider />
+              <ListRow
+                title={t('Sort library')}
+                subtitle={t(['Name (A–Z)', 'Recently Added', 'Release Year (oldest first)'][librarySorting.albums.effective])}
+                trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
+                onPress={() => setSortingOpen(true)}
+              />
+            </>
+          ) : null}
           <Divider />
           <AccentSetting />
           <Divider />
@@ -111,6 +253,7 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
           ) : null}
         </Card>
       </View>
+      )}
     </BottomSheet>
   );
 }
@@ -120,4 +263,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Space.lg,
     gap: Space.md,
   },
+  deviceInfo: { paddingHorizontal: Space.lg, paddingVertical: Space.sm, gap: Space.xs },
+  importHelp: { paddingHorizontal: Space.lg, paddingVertical: Space.md },
+  importStatus: { flexDirection: 'row', alignItems: 'center', gap: Space.sm, paddingHorizontal: Space.lg, paddingVertical: Space.sm },
+  importError: { marginHorizontal: Space.lg, marginVertical: Space.sm },
+  importButtons: { gap: Space.sm, padding: Space.lg },
 });

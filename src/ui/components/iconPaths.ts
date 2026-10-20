@@ -53,6 +53,7 @@ export const iconGlyphs = {
   chevronUp: lines('M5 13.5l6-6 6 6'),
   close: lines('M6.5 6.5l9 9M15.5 6.5l-9 9'),
   check: { elements: [stroke('M5 11.5l4 4 8-9')], strokeWidth: 2 },
+  selectionCircle: { elements: [{ kind: 'circle', cx: 11, cy: 11, r: 7.5 }] },
   plus: { elements: [stroke('M11 5v12M5 11h12')], strokeWidth: 2 },
   minus: lines('M6 11h10'),
   removeCircle: { elements: [{ kind: 'circle', cx: 11, cy: 11, r: 7.5 }, stroke('M7.5 11h7')] },

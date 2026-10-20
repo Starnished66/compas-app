@@ -25,10 +25,11 @@ export function connectionStatusView(
 }
 
 export function connectedPlayerSummary(
-  state: Pick<RemoteUiState, 'connectionTransport' | 'bluetoothPlayers' | 'wifiPlayers' | 'playerName'>,
+  state: Pick<RemoteUiState, 'connectionTransport' | 'connectionAttemptTransport' | 'bluetoothPlayers' | 'wifiPlayers' | 'playerName'>,
   connected: { wifiAddress: string; bluetoothId: string | null | undefined },
 ): PlayerSummary {
-  if (state.connectionTransport === ConnectionTransport.Bluetooth) {
+  const transport = state.connectionAttemptTransport ?? state.connectionTransport;
+  if (transport === ConnectionTransport.Bluetooth) {
     const player = state.bluetoothPlayers.find((candidate) => candidate.id === connected.bluetoothId);
     return { name: player?.name ?? state.playerName, detail: 'Bluetooth' };
   }

@@ -27,6 +27,7 @@ export class NowPlayingArtwork {
   private permission: RemoteArtworkPermission = { allowed: false, commandGeneration: 0 };
   private failedAtMs = 0;
   private holdTimer: ReturnType<typeof setTimeout> | null = null;
+  private requestGeneration = 0;
 
   constructor(
     private readonly lookup: NowPlayingArtworkLookup,
@@ -48,6 +49,7 @@ export class NowPlayingArtwork {
   }
 
   reset(): void {
+    this.requestGeneration++;
     this.clearHold();
     this.track = null;
     this.key = null;
@@ -57,6 +59,7 @@ export class NowPlayingArtwork {
   }
 
   private begin({ title, artist, album }: TrackIdentity, key: string): void {
+    const generation = ++this.requestGeneration;
     const track = { title, artist, album };
     this.track = track;
     this.key = key;
@@ -64,13 +67,13 @@ export class NowPlayingArtwork {
     this.clearHold();
     if (this.shown) this.holdTimer = setTimeout(() => this.releaseHold(key), this.holdMs);
     this.lookup.local(track).then(
-      (artwork) => this.settleLocal(key, artwork),
-      () => this.settleLocal(key, null)
+      (artwork) => this.settleLocal(key, generation, artwork),
+      () => this.settleLocal(key, generation, null)
     );
   }
 
-  private settleLocal(key: string, artwork: string | null): void {
-    if (key !== this.key) return;
+  private settleLocal(key: string, generation: number, artwork: string | null): void {
+    if (key !== this.key || generation !== this.requestGeneration) return;
     if (artwork) {
       this.show(key, artwork);
       return;
@@ -84,14 +87,15 @@ export class NowPlayingArtwork {
     const key = this.key;
     if (!track || !key || !this.permission.allowed || !this.remoteDue()) return;
     this.stage = 'remote';
+    const generation = this.requestGeneration;
     this.lookup.remote(track, this.permission.commandGeneration).then(
       (artwork) => {
-        if (key !== this.key) return;
+        if (key !== this.key || generation !== this.requestGeneration) return;
         if (artwork) this.show(key, artwork);
         else this.showMissing(key);
       },
       () => {
-        if (key !== this.key) return;
+        if (key !== this.key || generation !== this.requestGeneration) return;
         this.stage = 'failed';
         this.failedAtMs = this.now();
       }

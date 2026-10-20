@@ -10,7 +10,7 @@ const ART_SHIFT = 28;
 const META_SHIFT = 16;
 const ART_START_SCALE = 0.96;
 
-export function useTrackChangeMotion(track: RemoteTrack | null | undefined) {
+export function useTrackChangeMotion(track: RemoteTrack | null | undefined, active = true) {
   const reducedMotion = useReducedMotion();
   const key = trackKey(track);
   const previousKey = useRef(key);
@@ -21,7 +21,7 @@ export function useTrackChangeMotion(track: RemoteTrack | null | undefined) {
   useEffect(() => {
     const fromKey = previousKey.current;
     previousKey.current = key;
-    if (!fromKey || !key || fromKey === key || reducedMotion) return;
+    if (!active || !fromKey || !key || fromKey === key || reducedMotion) return;
     direction.setValue(skipDirectionFrom(fromKey));
     art.setValue(1);
     meta.setValue(1);
@@ -41,7 +41,7 @@ export function useTrackChangeMotion(track: RemoteTrack | null | undefined) {
       art.setValue(0);
       meta.setValue(0);
     };
-  }, [art, direction, key, meta, reducedMotion]);
+  }, [active, art, direction, key, meta, reducedMotion]);
 
   return useMemo(() => {
     const fade = (value: Animated.Value) => value.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });

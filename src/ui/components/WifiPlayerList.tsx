@@ -13,6 +13,7 @@ import { ListNotice } from './ListNotice';
 import { ListRow } from './ListRow';
 import { ManualAddressEntry } from './ManualAddressEntry';
 import { PlayerRow } from './PlayerRow';
+import { useI18n } from '../../i18n';
 
 export interface WifiPlayerListProps {
   state: RemoteUiState;
@@ -32,6 +33,7 @@ export function WifiPlayerList({
   onSubmitAddress,
 }: WifiPlayerListProps) {
   const palette = usePalette();
+  const { t } = useI18n();
   const searching = state.wifiDiscoveryStatus === ContentStatus.Loading;
   const nothingFound = !searching && state.wifiPlayers.length === 0;
   const selectedAddress = state.wifiAddress.trim();
@@ -39,7 +41,7 @@ export function WifiPlayerList({
   return (
     <Card variant="surface" style={styles.card}>
       <DiscoveryHeader
-        label="On this network"
+        label={t('On this network')}
         searching={searching}
         onSearch={() => onAction({ type: 'RetryWifiDiscovery' })}
       />
@@ -58,20 +60,20 @@ export function WifiPlayerList({
       ))}
       {nothingFound && state.wifiDiscoveryStatus === ContentStatus.Error ? (
         <ListNotice
-          title="Couldn’t search this network"
-          body="Check that Wi-Fi is on and that Compás Remote may use the local network, then search again."
+          title={t('Couldn’t search this network')}
+          body={t('Check that Wi-Fi is on and that Compás Remote may use the local network, then search again.')}
         />
       ) : nothingFound ? (
         <ListNotice
-          title="No players found"
-          body="Make sure the player is on, on the same Wi-Fi, and has remote control turned on."
+          title={t('No players found')}
+          body={t('Make sure the player is on, on the same Wi-Fi, and has remote control turned on.')}
         />
       ) : null}
       <Divider style={styles.divider} />
       <Collapsible open={!manualOpen}>
         <ListRow
           variant="action"
-          title="Enter an address instead"
+          title={t('Enter an address instead')}
           onPress={() => onManualOpenChange(true)}
           trailing={<Icon name="chevronRight" size={18} color={palette.ink} />}
         />

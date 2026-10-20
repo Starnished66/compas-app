@@ -6,6 +6,7 @@ import { recordSkip } from './skipDirection';
 import { useSnackbar } from './snackbar/useSnackbar';
 import { trackKey } from './trackKey';
 import { usePlaybackPositionStore } from './usePlaybackPosition';
+import { isShuffleMode, toggleRepeatMode } from '../session/playbackModes';
 
 export interface PlayerCommands {
   pendingLabel: string | null;
@@ -31,15 +32,10 @@ const WIFI_FEEDBACK_MS = 800;
 const BLUETOOTH_FEEDBACK_MS = 2600;
 const RESTART_THRESHOLD_MS = 3000;
 
-function nextRepeatMode(mode: PlaybackMode): PlaybackMode {
-  if (mode === PlaybackMode.RepeatAll) return PlaybackMode.RepeatOne;
-  if (mode === PlaybackMode.RepeatOne) return PlaybackMode.Sequential;
-  return PlaybackMode.RepeatAll;
-}
-
 function repeatLabel(mode: PlaybackMode): string {
   if (mode === PlaybackMode.RepeatAll) return 'Repeating the queue…';
   if (mode === PlaybackMode.RepeatOne) return 'Repeating this song…';
+  if (mode === PlaybackMode.ShuffleRepeat) return 'Repeating the queue…';
   return 'Repeat off…';
 }
 
@@ -102,12 +98,14 @@ export function usePlayerCommands(state: RemoteUiState, onAction: (action: Remot
       toggleShuffle: () =>
         run(
           { type: 'ToggleShuffle' },
-          latest.current.state.playbackMode === PlaybackMode.Shuffle ? 'Turning shuffle off…' : 'Turning shuffle on…',
+          isShuffleMode(latest.current.state.playbackMode) ? 'Turning shuffle off…' : 'Turning shuffle on…',
         ),
       cycleRepeat: () => {
         const mode = latest.current.state.playbackMode;
-        const prefix = mode === PlaybackMode.Shuffle ? 'Shuffle off · ' : '';
-        run({ type: 'CycleRepeatMode' }, prefix + repeatLabel(nextRepeatMode(mode)));
+        const supportsShuffleModes = latest.current.state.supportedFeatures.includes('shuffle_modes');
+        const target = toggleRepeatMode(mode, supportsShuffleModes);
+        const prefix = isShuffleMode(mode) && !supportsShuffleModes ? 'Shuffle off · ' : '';
+        run({ type: 'CycleRepeatMode' }, prefix + repeatLabel(target));
       },
       setFavorite: (favorite: boolean) => {
         run({ type: 'SetCurrentFavorite', favorite }, favorite ? 'Adding to favorites…' : 'Removing from favorites…', {

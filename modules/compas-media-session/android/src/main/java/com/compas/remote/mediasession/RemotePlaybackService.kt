@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 
 class RemotePlaybackService : Service() {
     private var foreground = false
@@ -21,15 +22,25 @@ class RemotePlaybackService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
+        if (intent == null) {
+            // A sticky restart has no authorization context from the original app start.
+            // Do not try to promote it back to foreground from the background.
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
+        val action = intent.action
         if (action == ACTION_STOP) {
             stopPlaybackService()
             return START_NOT_STICKY
         }
+        if (action != ACTION_PREPARE) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
 
-        val message = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Connecting to player…"
-        publishWaitingNotification(message)
-        return START_STICKY
+        val message = intent.getStringExtra(EXTRA_MESSAGE) ?: "Connecting to player…"
+        return if (publishWaitingNotification(message)) START_STICKY else START_NOT_STICKY
     }
 
     private fun ensureChannel() {
@@ -47,7 +58,7 @@ class RemotePlaybackService : Service() {
         }
     }
 
-    fun publishWaitingNotification(message: String) {
+    fun publishWaitingNotification(message: String): Boolean {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             this.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -70,21 +81,34 @@ class RemotePlaybackService : Service() {
             .setOngoing(true)
             .build()
 
-        publishNotification(notification)
+        return publishNotification(notification)
     }
 
-    fun publishNotification(notification: Notification) {
+    fun publishNotification(notification: Notification): Boolean {
         if (!foreground) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+                foreground = true
+            } catch (failure: IllegalStateException) {
+                return handleForegroundPromotionDenied(failure)
+            } catch (failure: SecurityException) {
+                return handleForegroundPromotionDenied(failure)
             }
-            foreground = true
         } else {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.notify(NOTIFICATION_ID, notification)
         }
+        return true
+    }
+
+    private fun handleForegroundPromotionDenied(failure: RuntimeException): Boolean {
+        Log.w(TAG, "Foreground promotion was denied; stopping playback service", failure)
+        stopPlaybackService()
+        return false
     }
 
     fun stopPlaybackService() {
@@ -113,6 +137,7 @@ class RemotePlaybackService : Service() {
         const val ACTION_PREPARE = "com.compas.remote.PREPARE_PLAYBACK_SERVICE"
         const val ACTION_STOP = "com.compas.remote.STOP_PLAYBACK_SERVICE"
         const val EXTRA_MESSAGE = "com.compas.remote.EXTRA_MESSAGE"
+        private const val TAG = "RemotePlaybackService"
 
         var instance: RemotePlaybackService? = null
             private set

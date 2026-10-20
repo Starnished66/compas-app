@@ -4,6 +4,7 @@ import { usePalette } from '../PaletteProvider';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
 import { IconButton } from './IconButton';
+import { useI18n } from '../../i18n';
 
 export interface DisconnectButtonProps {
   playerName: string;
@@ -15,6 +16,7 @@ const COMPACT_ICON_SIZE = 20;
 const COMPACT_PRESS_SCALE = 0.92;
 
 export function DisconnectButton({ playerName, onDisconnect, compact = false }: DisconnectButtonProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const [confirming, setConfirming] = useState(false);
 
@@ -23,7 +25,7 @@ export function DisconnectButton({ playerName, onDisconnect, compact = false }: 
       {compact ? (
         <IconButton
           icon="power"
-          label="Disconnect"
+          label={t('Disconnect')}
           variant="raised"
           iconSize={COMPACT_ICON_SIZE}
           pressScale={COMPACT_PRESS_SCALE}
@@ -33,7 +35,7 @@ export function DisconnectButton({ playerName, onDisconnect, compact = false }: 
         />
       ) : (
         <Button
-          label="Disconnect"
+          label={t('Disconnect')}
           icon="power"
           iconColor={palette.statusError}
           variant="raised"
@@ -43,9 +45,9 @@ export function DisconnectButton({ playerName, onDisconnect, compact = false }: 
       )}
       <ConfirmDialog
         visible={confirming}
-        title={`Disconnect from ${playerName}?`}
-        message="Automatic reconnect turns off until you connect again."
-        confirmLabel="Disconnect"
+        title={t('Disconnect from {name}?', { name: playerName })}
+        message={t('Automatic reconnect turns off until you connect again.')}
+        confirmLabel={t('Disconnect')}
         destructive
         onClose={() => setConfirming(false)}
         onConfirm={() => {

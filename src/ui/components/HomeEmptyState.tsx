@@ -5,6 +5,7 @@ import { Size, Space } from '../tokens';
 import { HomeTitleBar } from './HomeTitleBar';
 import { MessageCard } from './MessageCard';
 import { unclippedScroll } from '../unclippedScroll';
+import { useI18n } from '../../i18n';
 
 export interface HomeEmptyStateProps {
   state: RemoteUiState;
@@ -24,46 +25,47 @@ interface EmptyMessage {
   action: RemoteAction;
 }
 
-function emptyMessage(state: RemoteUiState): EmptyMessage {
-  const playerName = state.playerName || 'the player';
+function emptyMessage(state: RemoteUiState, t: (source: string, variables?: { name: string }) => string): EmptyMessage {
+  const playerName = state.playerName || t('the player');
   switch (state.connectionStatus) {
     case ConnectionStatus.Connected:
       return {
-        eyebrow: 'Nothing playing',
-        title: 'The queue on the player is empty',
-        body: 'Pick an album, playlist or song to start playing on the player.',
-        actionLabel: 'Browse library',
+        eyebrow: t('Nothing playing'),
+        title: t('The queue on the player is empty'),
+        body: t('Pick an album, playlist or song to start playing on the player.'),
+        actionLabel: t('Browse library'),
         action: { type: 'OpenLibrary', category: LibraryCategory.Albums },
       };
     case ConnectionStatus.Connecting:
       return {
-        eyebrow: 'Connecting…',
-        title: `Connecting to ${playerName}…`,
-        body: 'Playback controls appear here once the player answers.',
-        actionLabel: 'Connection and players',
+        eyebrow: t('Connecting…'),
+        title: t('Connecting to {name}…', { name: playerName }),
+        body: t('Playback controls appear here once the player answers.'),
+        actionLabel: t('Connection and players'),
         action: { type: 'OpenConnection' },
       };
     case ConnectionStatus.Error:
       return {
-        eyebrow: 'Connection failed',
-        title: `Couldn’t reach ${playerName}`,
-        body: state.connectionMessage || 'Check that the player is on and nearby, then try again.',
-        actionLabel: 'Try again',
+        eyebrow: t('Connection failed'),
+        title: t('Couldn’t reach {name}', { name: playerName }),
+        body: state.connectionMessage || t('Check that the player is on and nearby, then try again.'),
+        actionLabel: t('Try again'),
         action: { type: 'RetryConnection' },
       };
     default:
       return {
-        eyebrow: 'Not connected',
-        title: 'Connect to a player',
-        body: 'Find your player on Wi-Fi or Bluetooth to control what it plays.',
-        actionLabel: 'Choose a player',
+        eyebrow: t('Not connected'),
+        title: t('Connect to a player'),
+        body: t('Find your player on Wi-Fi or Bluetooth to control what it plays.'),
+        actionLabel: t('Choose a player'),
         action: { type: 'OpenConnection' },
       };
   }
 }
 
 export function HomeEmptyState({ state, onAction, onOpenSettings, settingsOpen, bottomInset }: HomeEmptyStateProps) {
-  const message = emptyMessage(state);
+  const { t } = useI18n();
+  const message = emptyMessage(state, t);
   return (
     <View style={styles.root}>
       <ScrollView

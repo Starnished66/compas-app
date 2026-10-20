@@ -49,7 +49,7 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
   useEffect(() => {
     collapse.value = withTiming(minimized ? 1 : 0, {
       duration: motionDuration(reducedMotion, Durations.pill),
-      easing: WorkletEasings.overshootSoft,
+      easing: WorkletEasings.responsive,
     });
   }, [collapse, minimized, reducedMotion]);
 

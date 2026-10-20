@@ -3,6 +3,7 @@ import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { usePalette } from '../PaletteProvider';
 import { Radius, Space } from '../tokens';
 import { AppText } from './AppText';
+import { useI18n } from '../../i18n';
 
 export interface InlineErrorProps {
   message: string;
@@ -13,11 +14,12 @@ const DOT_SIZE = 6;
 
 export function InlineError({ message, style }: InlineErrorProps) {
   const palette = usePalette();
+  const { t } = useI18n();
   return (
     <View style={[styles.row, style]}>
       <View style={[styles.dot, { backgroundColor: palette.statusError }]} />
       <AppText variant="caption" accessibilityLiveRegion="polite" style={styles.text}>
-        {message}
+        {t(message)}
       </AppText>
     </View>
   );

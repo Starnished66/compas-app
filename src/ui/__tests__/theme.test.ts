@@ -6,6 +6,7 @@ import {
   blendColors,
   artworkAccent,
   withArtworkPalette,
+  withPlayerAccent,
   ArtworkPalette,
 } from '../theme';
 
@@ -78,5 +79,15 @@ describe('UI Theme & Palette Engine', () => {
     expect(themed.tertiary).not.toBe(DarkColors.tertiary);
     expect(themed.primaryContainer).toBeDefined();
     expect(themed.onPrimary).toBeDefined();
+  });
+
+  test('withPlayerAccent keeps accessible contrast and rejects malformed colors', () => {
+    for (const [colors, dark] of [[DarkColors, true], [LightColors, false]] as const) {
+      const themed = withPlayerAccent(colors, '#e53935', dark);
+      expect(themed.primary).not.toBe(colors.primary);
+      expect(contrastRatio(themed.primary, colors.surface)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(themed.onPrimary, themed.primary)).toBeGreaterThanOrEqual(4.5);
+      expect(withPlayerAccent(colors, '#fff', dark)).toBe(colors);
+    }
   });
 });

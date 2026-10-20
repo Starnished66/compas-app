@@ -5,6 +5,7 @@ import { PlaylistNameField } from '../components/PlaylistNameField';
 import { SheetStepTitle } from '../components/SheetStepTitle';
 import { Space } from '../tokens';
 import { usePlaylistNameInput } from '../usePlaylistNameInput';
+import { useI18n } from '../../i18n';
 
 export interface PlaylistNameStepProps {
   title: string;
@@ -29,6 +30,7 @@ export function PlaylistNameStep({
   onSubmit,
   onCancel,
 }: PlaylistNameStepProps) {
+  const { t } = useI18n();
   const { name, setName, issue, canSubmit } = usePlaylistNameInput(
     true,
     initialName,
@@ -42,11 +44,11 @@ export function PlaylistNameStep({
 
   return (
     <View style={styles.step}>
-      <SheetStepTitle title={title} caption={message} style={styles.title} />
+      <SheetStepTitle title={t(title)} caption={message} style={styles.title} />
       <PlaylistNameField value={name} issue={issue} onChangeText={setName} onSubmit={submit} editable={!busy} />
       <View style={styles.actions}>
-        <Button label="Cancel" variant="raised" fill onPress={onCancel} />
-        <Button label={confirmLabel} fill disabled={!canSubmit} busy={busy} onPress={submit} />
+        <Button label={t('Cancel')} variant="raised" fill onPress={onCancel} />
+        <Button label={t(confirmLabel)} fill disabled={!canSubmit} busy={busy} onPress={submit} />
       </View>
     </View>
   );

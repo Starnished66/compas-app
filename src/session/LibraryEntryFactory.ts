@@ -81,6 +81,7 @@ export class LibraryEntryFactory {
         id,
         title: album.name,
         subtitle: album.albumArtist || `${album.count} tracks`,
+        subtitleTranslation: album.albumArtist ? undefined : { source: '{count} song', values: { count: album.count } },
         artwork: this.cover(album.albumKey),
       };
     });
@@ -96,6 +97,7 @@ export class LibraryEntryFactory {
         id,
         title: group.name,
         subtitle: `${group.count} tracks`,
+        subtitleTranslation: { source: '{count} song', values: { count: group.count } },
         artwork: this.cover(group.albumKey),
       };
     });
@@ -110,6 +112,7 @@ export class LibraryEntryFactory {
         id,
         title: playlist.name,
         subtitle: 'Playlist',
+        subtitleTranslation: { source: 'Playlist' },
         kind: 'other',
         playlistKey: playlist.key,
         writable: playlist.writable,
@@ -135,6 +138,7 @@ export class LibraryEntryFactory {
         id,
         title: item.title || item.name,
         subtitle: item.type === 'folder' ? 'Folder' : item.type === 'playlist' ? 'Playlist file' : item.artist || 'Track',
+        subtitleTranslation: item.type === 'folder' ? { source: 'Folder' } : item.type === 'playlist' ? { source: 'Playlist file' } : item.artist ? undefined : { source: 'Track' },
         kind: 'other',
       };
     });

@@ -60,7 +60,7 @@ export function SegmentedControl<T extends string>({
       placedRef.current = true;
       return;
     }
-    const config = { duration: motionDuration(reducedMotion, Durations.pill), easing: WorkletEasings.overshoot };
+    const config = { duration: motionDuration(reducedMotion, Durations.pill), easing: WorkletEasings.responsive };
     pillX.value = withTiming(selected.x, config);
     pillWidth.value = withTiming(selected.width, config);
   }, [pillWidth, pillX, reducedMotion, selected]);

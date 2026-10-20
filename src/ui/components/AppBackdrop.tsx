@@ -29,7 +29,7 @@ export function AppBackdrop({ artworkUri = null, prominent = false, paused = fal
   const { preference } = useBackgroundPreference();
   const { preference: accentStyle } = useAccentPreference();
   if (!ShaderBackdrop || !isShaderBackgroundStyle(preference)) {
-    return <ArtworkBackdrop artworkUri={artworkUri} prominent={prominent} />;
+    return <ArtworkBackdrop artworkUri={artworkUri} prominent={prominent} paused={paused} />;
   }
   const colorArtworkUri = accentFollowsArtwork(accentStyle) ? artworkUri : null;
   return <ShaderBackdrop style={preference} artworkUri={colorArtworkUri} prominent={prominent} paused={paused} />;

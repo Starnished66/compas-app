@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { Space } from '../tokens';
 import { AppText } from './AppText';
 import { Button } from './Button';
+import { useI18n } from '../../i18n';
 import { SectionHeader } from './SectionHeader';
 import { Spinner } from './Spinner';
 
@@ -15,6 +16,7 @@ export interface DiscoveryHeaderProps {
 const SEARCH_SPINNER_SIZE = 14;
 
 export function DiscoveryHeader({ label, searching, onSearch }: DiscoveryHeaderProps) {
+  const { t } = useI18n();
   return (
     <SectionHeader
       label={label}
@@ -27,7 +29,7 @@ export function DiscoveryHeader({ label, searching, onSearch }: DiscoveryHeaderP
             </AppText>
           </View>
         ) : (
-          <Button label="Search again" icon="refresh" variant="plain" size="sm" onPress={onSearch} />
+          <Button label={t('Search again')} icon="refresh" variant="plain" size="sm" onPress={onSearch} />
         )
       }
     />

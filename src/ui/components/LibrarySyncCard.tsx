@@ -9,6 +9,7 @@ import { Card } from './Card';
 import { EnterView } from './EnterView';
 import { IconButton } from './IconButton';
 import { ProgressBar } from './ProgressBar';
+import { useI18n } from '../../i18n';
 
 export interface LibrarySyncCardProps {
   message?: string | null;
@@ -21,6 +22,7 @@ const REFRESH_ICON_SIZE = 18;
 
 export function LibrarySyncCard({ message, onRefresh, insetRight }: LibrarySyncCardProps) {
   const palette = usePalette();
+  const { t } = useI18n();
   const songCount = useSyncedSongCount(message);
 
   if (!message) {
@@ -28,11 +30,11 @@ export function LibrarySyncCard({ message, onRefresh, insetRight }: LibrarySyncC
       <View style={[styles.doneLine, insetRight != null && { paddingRight: insetRight }]}>
         <View style={[styles.dot, { backgroundColor: palette.statusOk }]} />
         <AppText variant="caption" tone="inkMuted" style={styles.doneText}>
-          {upToDateLabel(songCount)}
+          {upToDateLabel(songCount, t)}
         </AppText>
         <IconButton
           icon="refresh"
-          label="Reload library"
+          label={t('Reload library')}
           size="sm"
           iconSize={REFRESH_ICON_SIZE}
           color={palette.inkMuted}
@@ -42,15 +44,15 @@ export function LibrarySyncCard({ message, onRefresh, insetRight }: LibrarySyncC
     );
   }
 
-  const sync = describeLibrarySync(message);
+  const sync = describeLibrarySync(message, t);
   return (
     <EnterView style={[styles.card, insetRight != null && { marginRight: insetRight }]}>
       <Card padded style={styles.cardBody} accessibilityLiveRegion="polite">
         <AppText variant="eyebrow" tone="accent">
-          Library sync
+          {t('Library sync')}
         </AppText>
         <AppText variant="bodyStrong">{sync.title}</AppText>
-        {sync.progress != null ? <ProgressBar value={sync.progress} label="Library sync progress" animated /> : null}
+        {sync.progress != null ? <ProgressBar value={sync.progress} label={t('Library sync progress')} animated /> : null}
         <AppText variant="caption" tone="inkMuted" tabular>
           {sync.detail}
         </AppText>

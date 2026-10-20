@@ -2,6 +2,7 @@ import { Easing } from 'react-native-reanimated';
 import { EasingCurves } from './motion';
 
 export const WorkletEasings = {
+  responsive: Easing.bezier(...EasingCurves.responsive),
   standard: Easing.bezier(...EasingCurves.standard),
   exit: Easing.bezier(...EasingCurves.exit),
   overshoot: Easing.bezier(...EasingCurves.overshoot),

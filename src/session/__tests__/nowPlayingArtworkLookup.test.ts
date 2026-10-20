@@ -39,6 +39,7 @@ function sourcesWith(artCache: ArtworkDiskCache, catalog: ArtworkSources['catalo
     coverStore: {} as SyncedCoverStore,
     artCache,
     network: null,
+    playerScope: 'test-player',
   };
 }
 
@@ -69,10 +70,26 @@ describe('now-playing artwork lookup', () => {
     await expect(lookup.local(track)).resolves.toBeNull();
 
     const uri = await lookup.remote(track, api.commandGeneration);
-    expect(nowPlayingCacheKey(track)).toMatch(/^[\x20-\x7e]+$/);
-    expect(uri).toBe(stored.get(nowPlayingCacheKey(track)));
+    const cacheKey = nowPlayingCacheKey(track, null, 'test-player');
+    expect(cacheKey).toMatch(/^[\x20-\x7e]+$/);
+    expect(uri).toBe(stored.get(cacheKey!));
     expect(remoteRequests).toHaveLength(1);
     await expect(lookup.local(track)).resolves.toBe(uri);
+  });
+
+  it('scopes the same track key to its player and catalog revision', () => {
+    const catalog = { libraryId: 'library-one', revision: 'rev-1', total: 1 };
+    const otherPlayer = nowPlayingCacheKey(track, catalog, '192.168.1.211');
+    const samePlayerNewRevision = nowPlayingCacheKey(
+      track,
+      { ...catalog, revision: 'rev-2' },
+      '192.168.1.211',
+    );
+    const differentPlayer = nowPlayingCacheKey(track, catalog, 'bluetooth:device-two');
+
+    expect(otherPlayer).not.toBe(samePlayerNewRevision);
+    expect(otherPlayer).not.toBe(differentPlayer);
+    expect(nowPlayingCacheKey(track)).toBeNull();
   });
 
   it('discards artwork downloaded while a player command was sent', async () => {

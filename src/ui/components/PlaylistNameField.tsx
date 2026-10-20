@@ -5,6 +5,7 @@ import { Space } from '../tokens';
 import { AppText } from './AppText';
 import { InlineError } from './InlineError';
 import { TextField } from './TextField';
+import { useI18n } from '../../i18n';
 
 export interface PlaylistNameFieldProps {
   value: string;
@@ -17,6 +18,7 @@ export interface PlaylistNameFieldProps {
 const FOCUS_DELAY_MS = 50;
 
 export function PlaylistNameField({ value, issue, onChangeText, onSubmit, editable = true }: PlaylistNameFieldProps) {
+  const { t } = useI18n();
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
@@ -30,8 +32,8 @@ export function PlaylistNameField({ value, issue, onChangeText, onSubmit, editab
         inputRef={inputRef}
         value={value}
         onChangeText={onChangeText}
-        placeholder="Playlist name"
-        accessibilityLabel="Playlist name"
+        placeholder={t('Playlist name')}
+        accessibilityLabel={t('Playlist name')}
         invalid={Boolean(issue)}
         editable={editable}
         autoFocus

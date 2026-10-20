@@ -31,7 +31,7 @@ export function Collapsible({ open, children, onOpened, style }: CollapsibleProp
     const grow = Animated.timing(expansion, {
       toValue: target,
       duration: Durations.expand,
-      easing: Easings.overshootSoft,
+      easing: Easings.responsive,
       useNativeDriver: false,
     });
     const fade = Animated.timing(opacity, {

@@ -14,6 +14,7 @@ import { ListRow } from './ListRow';
 import { PlayingIndicator } from './PlayingIndicator';
 import { RemovableRow, RemovableRowHandle } from './RemovableRow';
 import { RemoveDiscButton } from './RemoveDiscButton';
+import { Icon } from './Icon';
 
 export interface PlaylistTrackRowProps {
   entry: LibraryEntry;
@@ -27,6 +28,10 @@ export interface PlaylistTrackRowProps {
   onPress: (entry: LibraryEntry) => void;
   onMore: (entry: LibraryEntry) => void;
   onRemove: (entry: LibraryEntry) => void;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onSelect?: (entry: LibraryEntry) => void;
+  onLongPress?: (entry: LibraryEntry) => void;
 }
 
 const ROW_HEIGHT = 56;
@@ -48,12 +53,32 @@ function PlaylistTrackRowContent({
   onPress,
   onMore,
   onRemove,
+  selectionMode = false,
+  selected = false,
+  onSelect,
+  onLongPress,
 }: PlaylistTrackRowProps) {
   const palette = usePalette();
   const artworkUri = useEntryArtwork(entry);
   const progress = useEditStagger(editing, index);
   const removable = useRef<RemovableRowHandle>(null);
   const subtitle = displaySubtitle(entry) || undefined;
+
+  if (selectionMode) {
+    return (
+      <ListRow
+        title={entry.title}
+        subtitle={subtitle}
+        leading={<ArtworkThumb uri={artworkUri} placeholderIcon="music" style={styles.artwork} />}
+        trailing={<Icon name={selected ? 'check' : 'selectionCircle'} color={selected ? palette.accent : palette.inkMuted} />}
+        selected={selected}
+        onPress={() => onSelect?.(entry)}
+        onLongPress={() => onSelect?.(entry)}
+        accessibilityLabel={subtitle ? `${entry.title}, ${subtitle}` : entry.title}
+        style={styles.row}
+      />
+    );
+  }
 
   const motion = useMemo(
     () => ({
@@ -118,7 +143,7 @@ function PlaylistTrackRowContent({
           trailing={trailing}
           bodyStyle={{ paddingRight: editing ? EDIT_SHIFT : 0, transform: [{ translateX: motion.bodyShift }] }}
           onPress={editing ? undefined : () => onPress(entry)}
-          onLongPress={editing ? undefined : () => onMore(entry)}
+          onLongPress={editing ? undefined : () => onLongPress ? onLongPress(entry) : onMore(entry)}
           accessibilityLabel={subtitle ? `${entry.title}, ${subtitle}` : entry.title}
           style={styles.row}
         />

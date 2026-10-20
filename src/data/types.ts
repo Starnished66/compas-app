@@ -2,6 +2,62 @@ export interface Capabilities {
   version: number;
   transports: string[];
   features: string[];
+  libraryId?: string | null;
+}
+
+export type WifiImportState = 'stopped' | 'starting' | 'ready' | 'stopping' | 'error';
+export interface WifiImportStatus {
+  state: WifiImportState;
+  error: string | null;
+}
+
+export interface WifiImportFileEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number;
+}
+
+export interface WifiImportDirectoryPage {
+  path: string;
+  entries: WifiImportFileEntry[];
+  offset: number;
+  nextOffset: number | null;
+  total: number;
+}
+
+export interface WifiImportUploadResult {
+  ok: true;
+  path: string;
+  name: string;
+  bytes: number;
+}
+
+export type LibrarySortScope = 'albums' | 'artists' | 'album_artists';
+export type LibrarySortMode = 0 | 1 | 2;
+export interface LibrarySortSnapshot {
+  configured: LibrarySortMode;
+  effective: LibrarySortMode;
+  available: readonly [boolean, boolean, boolean];
+}
+export interface LibrarySortingSnapshot {
+  albums: LibrarySortSnapshot;
+  artists: LibrarySortSnapshot;
+  albumArtists: LibrarySortSnapshot;
+}
+export type CollectionScope = 'all' | 'album' | 'artist' | 'album_artist' | 'genre' | 'playlist' | 'favorites' | 'recently_added' | 'recently_played';
+export interface CollectionPlayRequest {
+  scope: CollectionScope;
+  name?: string;
+  artist?: string;
+  albumArtist?: string;
+  mode: number;
+  catalogRevision?: string | null;
+}
+export interface CollectionJob {
+  id: number;
+  state: 'idle' | 'pending' | 'done' | 'error';
+  error: string | null;
 }
 
 export interface PlaybackStatus {
@@ -19,6 +75,10 @@ export interface PlaybackStatus {
   sourceSampleRateHz?: number;
   bluetoothAudioOutput?: boolean | null;
   favorite?: boolean | null;
+  accentColor?: string | null;
+  deviceModel?: string | null;
+  playerVersion?: string | null;
+  collectionJob?: CollectionJob | null;
 }
 
 export interface Song {
@@ -196,6 +256,7 @@ export enum PlaybackMode {
   RepeatAll = 'RepeatAll',
   RepeatOne = 'RepeatOne',
   Shuffle = 'Shuffle',
+  ShuffleRepeat = 'ShuffleRepeat',
 }
 
 export interface RemoteTrack {
@@ -215,6 +276,7 @@ export interface LibraryEntry {
   id: string;
   title: string;
   subtitle: string;
+  subtitleTranslation?: { source: string; values?: Record<string, string | number> };
   artwork?: string | null;
   kind?: 'song' | 'other';
   favorite?: boolean;
@@ -237,6 +299,9 @@ export interface WifiPlayer {
 }
 
 export interface RemoteUiState {
+  connectionAttemptTransport?: ConnectionTransport | null;
+  collectionBusy?: boolean;
+  librarySorting?: LibrarySortingSnapshot | null;
   screen: RemoteScreen;
   theme: RemoteTheme;
   connectionStatus: ConnectionStatus;
@@ -262,6 +327,9 @@ export interface RemoteUiState {
   playbackMode: PlaybackMode;
   currentFavorite: boolean;
   supportedFeatures: string[];
+  playerAccentColor?: string | null;
+  deviceModel?: string | null;
+  playerVersion?: string | null;
   queue: RemoteTrack[];
   queueTotal: number;
   queueHasMore: boolean;
@@ -286,9 +354,26 @@ export interface RemoteUiState {
   playlistRevision?: string | null;
   folderPath: string;
   folderRoot: string;
+  bulkActionProgress?: BulkActionProgress | null;
+  bulkPlaylistOptions?: Playlist[];
+  bulkPlaylistOptionsStatus?: ContentStatus;
+}
+
+export interface BulkActionProgress {
+  action: 'queue' | 'random' | 'favorite' | 'playlist' | 'createPlaylist' | 'queueRemove';
+  completed: number;
+  total: number;
+  succeeded: number;
+  failed: number;
+  processed: number;
+  phase: 'resolving' | 'writing' | 'done' | 'cancelled' | 'error';
+  message?: string | null;
+  messageValues?: Record<string, string | number>;
 }
 
 export type RemoteAction =
+  | { type: 'SetLibrarySorting'; scope: LibrarySortScope; mode: LibrarySortMode }
+  | { type: 'PlayCollection'; shuffle: boolean }
   | { type: 'SetTheme'; theme: RemoteTheme }
   | { type: 'OpenHome' }
   | { type: 'OpenConnection' }
@@ -345,4 +430,8 @@ export type RemoteAction =
   | { type: 'DeletePlaylist'; key: string }
   | { type: 'RemovePlaylistTrack' }
   | { type: 'MovePlaylistTrack'; direction: -1 | 1 }
-  | { type: 'ImportPlaylist'; name: string };
+  | { type: 'ImportPlaylist'; name: string }
+  | { type: 'LoadBulkPlaylists' }
+  | { type: 'RunBulkAction'; ids: string[]; action: 'queue' | 'random' | 'favorite' | 'playlist' | 'createPlaylist'; favorite?: boolean; key?: string; name?: string }
+  | { type: 'CancelBulkAction' }
+  | { type: 'RemoveQueueTracks'; ids: string[] };

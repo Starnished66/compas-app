@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useI18n } from '../../i18n';
 import { StyleSheet, View } from 'react-native';
 import {
   LibraryCategory,
   LibraryEntry,
-  PlaybackMode,
   Playlist,
   RemoteAction,
   RemoteUiState,
@@ -30,6 +30,7 @@ import { useSnackbar } from '../snackbar/useSnackbar';
 import { Space } from '../tokens';
 import { useDragReorder } from '../useDragReorder';
 import { playCollection } from '../library/collectionPlayback';
+import { isShuffleMode } from '../../session/playbackModes';
 import { LibraryEntryKind, isCurrentEntry, opensCollection } from '../library/libraryEntryKind';
 import { LibraryItem, entryItems, nodeItem, playlistTrackItems, songIds } from '../library/libraryItems';
 import { inlineLibraryError, libraryStateMessage } from '../library/libraryStateMessage';
@@ -41,6 +42,8 @@ import { useFirstEntryArtwork } from '../library/useFirstEntryArtwork';
 import { useBackInterceptor } from '../useBackInterceptor';
 import { useStableTrack } from '../useStableTrack';
 import { PlaylistEditOutcome, usePlaylistTrackEdits } from '../library/usePlaylistTrackEdits';
+import { BulkSelectionBar } from '../components/BulkSelectionBar';
+import { BulkActionsSheet } from '../sheets/BulkActionsSheet';
 
 export interface PlaylistsScreenProps {
   state: RemoteUiState;
@@ -59,16 +62,19 @@ function newPlaylistSubtitle(canCreate: boolean, canImport: boolean): string {
   return 'Start with an empty playlist';
 }
 
-function playlistOf(entry: LibraryEntry): Playlist | null {
-  if (!entry.playlistKey) return null;
-  return { key: entry.playlistKey, name: entry.title, writable: Boolean(entry.writable), internal: false };
-}
-
 export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg }: PlaylistsScreenProps) {
+  const { t } = useI18n();
   const [newSheetVisible, setNewSheetVisible] = useState(false);
   const [optionsPlaylist, setOptionsPlaylist] = useState<Playlist | null>(null);
   const [editing, setEditing] = useState(false);
-  useBackInterceptor(editing, () => setEditing(false));
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
+  const exitSelection = useCallback(() => { setSelectionMode(false); setSelectedIds(new Set()); }, []);
+  useBackInterceptor(editing || selectionMode, () => { if (editing) setEditing(false); else exitSelection(); });
+  useEffect(() => {
+    if (!bulkActionsOpen) exitSelection();
+  }, [state.libraryEntries, bulkActionsOpen, exitSelection]);
   const rootNames = useRef<string[]>([]);
   const { tileWidth } = useAlbumGrid();
   const snackbar = useSnackbar();
@@ -95,14 +101,15 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
   const announceEdit = useCallback(
     (outcome: PlaylistEditOutcome) =>
       snackbar.show({
-        text: outcome.kind === 'removed' ? `Removed from ${playlistName}` : `Moved “${outcome.title}”`,
+        text: outcome.kind === 'removed' ? t('Removed from {name}', { name: playlistName }) : t('Moved “{title}”', { title: outcome.title }),
       }),
-    [playlistName, snackbar],
+    [playlistName, snackbar, t],
   );
   const edits = usePlaylistTrackEdits(state, onAction, announceEdit);
   const tracks = playlist ? edits.entries : NO_ENTRIES;
 
   useEffect(() => setEditing(false), [playlist?.key]);
+  useEffect(() => exitSelection(), [playlist?.key, exitSelection]);
   useEffect(() => {
     if (editing && playlist && !edits.busy && tracks.length === 0) setEditing(false);
   }, [editing, edits.busy, playlist, tracks.length]);
@@ -149,15 +156,25 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
 
   const longPressEntry = useCallback(
     (entry: LibraryEntry, kind: LibraryEntryKind) => {
-      if (kind === 'song') {
-        onAction({ type: 'OpenSongActions', id: entry.id });
-        return;
+      if (kind === 'song' || kind === 'playlist') {
+        setSelectedIds(new Set([entry.id]));
+        setSelectionMode(true);
       }
-      const target = playlistOf(entry);
-      if (target?.writable && canEditPlaylists) setOptionsPlaylist(target);
     },
-    [onAction, canEditPlaylists],
+    [],
   );
+  const selectEntry = useCallback((entry: LibraryEntry) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(entry.id)) next.delete(entry.id);
+      else next.add(entry.id);
+      return next;
+    });
+  }, []);
+  const beginTrackSelection = useCallback((entry: LibraryEntry) => {
+    setSelectedIds(new Set([entry.id]));
+    setSelectionMode(true);
+  }, []);
 
   const playTrack = useCallback(
     (entry: LibraryEntry) => onAction({ type: 'SelectLibraryEntry', id: entry.id }),
@@ -170,13 +187,15 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
 
   const items: LibraryItem[] = [];
   const playableIds = songIds(state.libraryEntries);
-  const shuffleActive = state.playbackMode === PlaybackMode.Shuffle;
+  const shuffleActive = isShuffleMode(state.playbackMode);
+  const nativeCollectionPlayback = state.supportedFeatures.includes('collection_playback');
 
   if (playlist) {
-    const playButtons = playableIds.length ? (
+    const playButtons = playableIds.length || nativeCollectionPlayback ? (
       <CollectionPlayButtons
-        onPlay={() => playCollection(onAction, playableIds, false, shuffleActive)}
-        onShuffle={() => playCollection(onAction, playableIds, true, shuffleActive)}
+        busy={state.collectionBusy}
+        onPlay={() => playCollection(onAction, playableIds, false, shuffleActive, nativeCollectionPlayback)}
+        onShuffle={() => playCollection(onAction, playableIds, true, shuffleActive, nativeCollectionPlayback)}
       />
     ) : null;
     const browseActions = (
@@ -184,10 +203,10 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
         {playButtons}
         {canEditTracks ? (
           <>
-            {playableIds.length ? <Button label="Edit" variant="raised" onPress={() => setEditing(true)} /> : null}
+            {playableIds.length ? <Button label={t('Edit')} variant="raised" onPress={() => setEditing(true)} /> : null}
             <IconButton
               icon="moreVertical"
-              label="Playlist options"
+              label={t('Playlist options')}
               variant="raised"
               onPress={() => setOptionsPlaylist(playlist)}
             />
@@ -200,9 +219,9 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
       nodeItem(
         'header',
         <CollectionHeader
-          eyebrow={playlist.writable ? 'Playlist' : 'Made by the player · read only'}
+          eyebrow={playlist.writable ? t('Playlist') : t('Made by the player · read only')}
           title={playlistName}
-          meta={`${state.playlistTrackCount} ${state.playlistTrackCount === 1 ? 'song' : 'songs'}`}
+          meta={t('{count} song', { count: state.playlistTrackCount })}
           artworkUri={playlistArtwork}
           artworkSize={DETAIL_ARTWORK_SIZE}
           placeholderIcon="playlist"
@@ -224,23 +243,25 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
     items.push(
       nodeItem(
         'title',
-        <ScreenTitleBar title={state.libraryNestedTitle ?? 'Playlists'} onBack={() => onAction({ type: 'Back' })} />,
+        <ScreenTitleBar title={state.libraryNestedTitle ?? t('Playlists')} onBack={() => onAction({ type: 'Back' })} />,
       ),
     );
   } else {
-    items.push(nodeItem('title', <ScreenTitleBar title="Playlists" />));
+    items.push(nodeItem('title', <ScreenTitleBar title={t('Playlists')} />));
     if (canEditPlaylists || canImport) {
       items.push(
         nodeItem(
           'new',
           <NewPlaylistRow
-            subtitle={newPlaylistSubtitle(canEditPlaylists, canImport)}
+            subtitle={t(newPlaylistSubtitle(canEditPlaylists, canImport))}
             onPress={() => setNewSheetVisible(true)}
           />,
         ),
       );
     }
   }
+
+  if (selectionMode) items.push(nodeItem('bulk-selection', <BulkSelectionBar count={selectedIds.size} onActions={() => setBulkActionsOpen(true)} onCancel={exitSelection} />));
 
   const inlineError = inlineLibraryError(state);
   if (inlineError) {
@@ -251,6 +272,7 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
     playlist && edits.busy
       ? null
       : libraryStateMessage({
+        translate: t,
         state,
         onAction,
         noun: playlist ? 'songs' : 'playlists',
@@ -289,10 +311,14 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
           onPress={playTrack}
           onMore={showTrackActions}
           onRemove={removeTrack}
+          selectionMode={selectionMode}
+          selected={selectedIds.has(entry.id)}
+          onSelect={selectEntry}
+          onLongPress={beginTrackSelection}
         />
       );
     },
-    [currentSong, isPlaying, editMode, draggingIndex, editBusy, handleProps, playTrack, showTrackActions, removeTrack],
+    [currentSong, isPlaying, editMode, draggingIndex, editBusy, handleProps, playTrack, showTrackActions, removeTrack, selectionMode, selectedIds, selectEntry, beginTrackSelection],
   );
 
   return (
@@ -304,6 +330,10 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
             onAction={onAction}
             onOpenEntry={openEntry}
             onEntryLongPress={longPressEntry}
+            selectionMode={selectionMode}
+            selectedIds={selectedIds}
+            onSelectEntry={(entry) => selectEntry(entry)}
+            onEntrySelectionLongPress={longPressEntry}
             renderPlaylistTrack={playlist ? renderPlaylistTrack : undefined}
             hasMore={state.libraryHasMore}
             status={state.libraryStatus}
@@ -333,6 +363,13 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
         takenNames={rootNames.current.filter(
           (name) => !optionsPlaylist || name !== playlistDisplayName(optionsPlaylist.name),
         )}
+      />
+      <BulkActionsSheet
+        visible={bulkActionsOpen}
+        ids={[...selectedIds]}
+        state={state}
+        onAction={onAction}
+        onClose={() => { setBulkActionsOpen(false); exitSelection(); }}
       />
     </View>
   );

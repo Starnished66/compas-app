@@ -136,6 +136,7 @@ export function useRemoteSession() {
   const syncWorkerRef = useRef(new CatalogSyncWorker());
   const statusGateRef = useRef(new PlaybackStatusGate());
   const apiRef = useRef<RemoteApi | null>(null);
+  const apiArtworkUriByClientRef = useRef(new WeakMap<RemoteApi, string>());
 
   const activeLibraryIdRef = useRef<string | null>(null);
   const activeCatalogRevisionRef = useRef<string | null>(null);
@@ -207,17 +208,21 @@ export function useRemoteSession() {
   const createApiClient = useCallback(
     async (transportType: ConnectionTransport, addressOrMac: string): Promise<RemoteApi> => {
       let transport: any;
+      let artworkUri: string | null = null;
       const playerId = addressOrMac;
 
       if (transportType === 'wifi') {
         const normalized = normalizeWifiAddress(addressOrMac);
         transport = new WifiHttpTransport(normalized);
+        artworkUri = `${normalized}/api/v1/art`;
       } else {
         transport = new BluetoothRfcommTransport(addressOrMac);
       }
 
       const savedPin = await pinStoreRef.current.get(playerId);
-      return new RemoteApi(transport, savedPin);
+      const client = new RemoteApi(transport, savedPin);
+      if (artworkUri) apiArtworkUriByClientRef.current.set(client, artworkUri);
+      return client;
     },
     []
   );
@@ -324,9 +329,7 @@ export function useRemoteSession() {
       if (activeLibraryIdRef.current && status.title) {
         // Check catalog covers
       }
-      if (!artUri && api.transport instanceof WifiHttpTransport) {
-        artUri = `${api.transport.baseUrl}/api/v1/art`;
-      }
+      if (!artUri) artUri = apiArtworkUriByClientRef.current.get(api) ?? null;
 
       const trackUi: RemoteTrackUi = {
         id: 'current',

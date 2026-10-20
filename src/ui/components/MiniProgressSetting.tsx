@@ -8,6 +8,7 @@ import {
 import { useMiniProgressPreference } from '../preferences/useMiniProgressPreference';
 import { PreferenceSetting } from './PreferenceSetting';
 import { SegmentedOption } from './SegmentedControl';
+import { useI18n } from '../../i18n';
 
 const OPTIONS: ReadonlyArray<SegmentedOption<MiniProgressPreference>> = MINI_PROGRESS_PREFERENCES.map((value) => ({
   value,
@@ -15,12 +16,13 @@ const OPTIONS: ReadonlyArray<SegmentedOption<MiniProgressPreference>> = MINI_PRO
 }));
 
 export function MiniProgressSetting() {
+  const { t } = useI18n();
   const { preference, setPreference } = useMiniProgressPreference();
   return (
     <PreferenceSetting
-      title="Mini player progress"
-      options={OPTIONS}
-      hints={MINI_PROGRESS_HINTS}
+      title={t('Mini player progress')}
+      options={OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
+      hints={Object.fromEntries(Object.entries(MINI_PROGRESS_HINTS).map(([key, value]) => [key, t(value)])) as typeof MINI_PROGRESS_HINTS}
       value={preference}
       onChange={setPreference}
     />

@@ -19,8 +19,8 @@ export interface TabBarMotion {
   endDrag(slot: number): void;
 }
 
-const MINIMIZE_SQUASH_MS = 480;
-const DETACH_MS = 300;
+const MINIMIZE_SQUASH_MS = 240;
+const DETACH_MS = 180;
 
 export function useTabBarMotion(activeIndex: number, minimized: boolean, onCollapseSettled: () => void): TabBarMotion {
   const reducedMotion = useReducedMotion();
@@ -64,7 +64,7 @@ export function useTabBarMotion(activeIndex: number, minimized: boolean, onColla
     const minimizedChanged = before.minimized !== minimized;
     if (!tabChanged && !minimizedChanged) return;
     if (!dragging.current) {
-      timing(slot, restSlot, Durations.pill, minimizedChanged ? Easings.overshootSoft : Easings.overshoot).start();
+      timing(slot, restSlot, Durations.pill, Easings.responsive).start();
     }
     if (tabChanged) replay(tabSquash, Durations.tabSquash);
     if (!minimizedChanged) return;
@@ -72,7 +72,7 @@ export function useTabBarMotion(activeIndex: number, minimized: boolean, onColla
     timing(othersOpacity, minimized ? 0 : 1, Durations.chromeFade, Easings.ease).start();
     collapse.value = withTiming(
       minimized ? 1 : 0,
-      { duration: motionDuration(latest.current.reducedMotion, Durations.pill), easing: WorkletEasings.overshootSoft },
+      { duration: motionDuration(latest.current.reducedMotion, Durations.pill), easing: WorkletEasings.responsive },
       (finished) => {
         if (finished) scheduleOnRN(settleCollapse);
       },
@@ -91,7 +91,7 @@ export function useTabBarMotion(activeIndex: number, minimized: boolean, onColla
   const endDrag = (target: number) => {
     dragging.current = false;
     timing(detach, 0, DETACH_MS, Easings.overshoot).start();
-    timing(slot, target, Durations.pill, Easings.overshoot).start();
+    timing(slot, target, Durations.pill, Easings.responsive).start();
     if (latest.current.activeIndex < 0) timing(pillOpacity, 0, Durations.editLabel, Easings.ease).start();
   };
 

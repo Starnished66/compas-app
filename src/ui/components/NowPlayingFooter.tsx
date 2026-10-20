@@ -1,10 +1,10 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { songCount } from '../countLabels';
 import { usePalette } from '../PaletteProvider';
 import { Radius, Size, Space, Type } from '../tokens';
 import { AppText } from './AppText';
 import { Icon } from './Icon';
+import { useI18n } from '../../i18n';
 
 export interface NowPlayingFooterProps {
   playerName: string;
@@ -17,25 +17,27 @@ const PLAYER_ICON_SIZE = 18;
 const QUEUE_ICON_SIZE = 20;
 
 export function NowPlayingFooter({ playerName, queueTotal, onOpenConnection, onOpenQueue }: NowPlayingFooterProps) {
+  const { t } = useI18n();
   const palette = usePalette();
-  const name = playerName || 'the player';
+  const name = playerName || t('the player');
+  const queuedSongs = t('{count} song', { count: queueTotal });
 
   return (
     <View style={styles.row}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Playing on ${name}. Connection and players`}
+        accessibilityLabel={t('Playing on {name}. Connection and players', { name })}
         onPress={onOpenConnection}
         style={({ pressed }) => [styles.player, pressed && styles.pressed]}
       >
         <Icon name="player" size={PLAYER_ICON_SIZE} color={palette.inkMuted} />
         <AppText variant="caption" tone="inkMuted" numberOfLines={1} style={styles.playerText}>
-          {`Playing on ${name}`}
+          {t('Playing on {name}', { name })}
         </AppText>
       </Pressable>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Up next, ${songCount(queueTotal)}`}
+        accessibilityLabel={t('Up next, {songs}', { songs: queuedSongs })}
         onPress={onOpenQueue}
         style={({ pressed }) => [
           styles.queue,
@@ -45,7 +47,7 @@ export function NowPlayingFooter({ playerName, queueTotal, onOpenConnection, onO
       >
         <Icon name="queue" size={QUEUE_ICON_SIZE} />
         <AppText variant="caption" tabular style={styles.queueText}>
-          {songCount(queueTotal)}
+          {queuedSongs}
         </AppText>
       </Pressable>
     </View>

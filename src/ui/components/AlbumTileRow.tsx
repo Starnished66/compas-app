@@ -9,13 +9,16 @@ export interface AlbumTileRowProps {
   entries: LibraryEntry[];
   tileWidth: number;
   onPress: (entry: LibraryEntry) => void;
+  selectionMode?: boolean;
+  selectedIds?: ReadonlySet<string>;
+  onLongPress?: (entry: LibraryEntry) => void;
 }
 
-function AlbumTileRowContent({ entries, tileWidth, onPress }: AlbumTileRowProps) {
+function AlbumTileRowContent({ entries, tileWidth, onPress, selectionMode = false, selectedIds, onLongPress }: AlbumTileRowProps) {
   return (
     <View style={styles.row}>
       {entries.map((entry, column) => (
-        <AlbumTile key={column} entry={entry} width={tileWidth} onPress={onPress} />
+        <AlbumTile key={column} entry={entry} width={tileWidth} onPress={onPress} selectionMode={selectionMode} selected={selectedIds?.has(entry.id)} onLongPress={onLongPress} />
       ))}
     </View>
   );

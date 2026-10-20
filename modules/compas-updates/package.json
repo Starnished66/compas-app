@@ -1,0 +1,8 @@
+{
+  "name": "compas-updates",
+  "version": "1.0.0",
+  "description": "Compas app version and release notifications",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {}
+}

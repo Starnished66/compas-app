@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArtworkPalette, ColorScheme, DarkColors, LightColors, withArtworkPalette } from './theme';
+import { ArtworkPalette, ColorScheme, DarkColors, LightColors, withArtworkPalette, withPlayerAccent } from './theme';
 import { Palette, paletteFrom } from './palette';
 import { artworkColors } from './backdrop/artworkColors';
 
 export type AccentSource =
   | { kind: 'neutral' }
   | { kind: 'pending' }
-  | { kind: 'artwork'; uri: string };
+  | { kind: 'artwork'; uri: string }
+  | { kind: 'player'; color: string };
 
 const PENDING_ARTWORK_HOLD_MS = 2000;
 
@@ -27,11 +28,16 @@ export function useArtworkPalette(source: AccentSource, dark: boolean): Palette 
       setArtworkPalette(null);
       return;
     }
+    if (source.kind === 'player') {
+      setArtworkPalette(null);
+      return;
+    }
     if (source.kind === 'pending') {
       const timer = setTimeout(() => setArtworkPalette(null), PENDING_ARTWORK_HOLD_MS);
       return () => clearTimeout(timer);
     }
     let current = true;
+    if (source.kind !== 'artwork') return;
     artworkColors(source.uri)
       .then((colors) => {
         const extracted = colors?.accent ?? null;
@@ -49,7 +55,9 @@ export function useArtworkPalette(source: AccentSource, dark: boolean): Palette 
 
   return useMemo(() => {
     const base: ColorScheme = dark ? DarkColors : LightColors;
-    const colors = artworkPalette ? withArtworkPalette(base, artworkPalette, dark) : base;
+    const colors = source.kind === 'player'
+      ? withPlayerAccent(base, source.color, dark)
+      : artworkPalette ? withArtworkPalette(base, artworkPalette, dark) : base;
     return paletteFrom(colors, dark);
-  }, [artworkPalette, dark]);
+  }, [artworkPalette, dark, source.kind, source.kind === 'player' ? source.color : null]);
 }

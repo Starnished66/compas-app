@@ -10,6 +10,7 @@ import { EnterView } from './EnterView';
 import { ListNotice } from './ListNotice';
 import { PlayerRow } from './PlayerRow';
 import { Spinner } from './Spinner';
+import { useI18n } from '../../i18n';
 
 export interface BluetoothPlayerListProps {
   state: RemoteUiState;
@@ -18,20 +19,21 @@ export interface BluetoothPlayerListProps {
   onPairAndConnect: (id: string) => void;
 }
 
-function pairingDetail(player: BluetoothPlayer, connected: boolean): string {
-  if (player.bonding) return 'Pairing…';
-  if (!player.paired) return 'Not paired';
-  return connected ? 'Paired · connected' : 'Paired';
+function pairingDetail(player: BluetoothPlayer, connected: boolean, t: (source: string) => string): string {
+  if (player.bonding) return t('Pairing…');
+  if (!player.paired) return t('Not paired');
+  return connected ? t('Paired · connected') : t('Paired');
 }
 
 export function BluetoothPlayerList({ state, onAction, connectedId, onPairAndConnect }: BluetoothPlayerListProps) {
+  const { t } = useI18n();
   const searching = state.bluetoothScanStatus === ContentStatus.Loading;
   const nothingFound = !searching && state.bluetoothPlayers.length === 0;
 
   return (
     <Card variant="surface" style={styles.card}>
       <DiscoveryHeader
-        label="Nearby players"
+        label={t('Nearby players')}
         searching={searching}
         onSearch={() => onAction({ type: 'ScanBluetoothPlayers' })}
       />
@@ -42,7 +44,7 @@ export function BluetoothPlayerList({ state, onAction, connectedId, onPairAndCon
           <EnterView key={player.id} index={index}>
             <PlayerRow
               name={player.name}
-              detail={pairingDetail(player, connected)}
+              detail={pairingDetail(player, connected, t)}
               selected={selected}
               onPress={() => {
                 if (player.paired) onAction({ type: 'SelectBluetoothPlayer', id: player.id });
@@ -53,10 +55,10 @@ export function BluetoothPlayerList({ state, onAction, connectedId, onPairAndCon
                   <Spinner />
                 ) : !player.paired ? (
                   <Button
-                    label="Pair & connect"
+                    label={t('Pair & connect')}
                     variant="container"
                     size="sm"
-                    accessibilityLabel={`Pair and connect to ${player.name}`}
+                    accessibilityLabel={t('Pair and connect to {name}', { name: player.name })}
                     onPress={() => onPairAndConnect(player.id)}
                   />
                 ) : undefined
@@ -67,17 +69,17 @@ export function BluetoothPlayerList({ state, onAction, connectedId, onPairAndCon
       })}
       {nothingFound && state.bluetoothScanStatus === ContentStatus.Error ? (
         <ListNotice
-          title="Couldn’t search for players"
-          body="Turn Bluetooth on and allow Nearby devices for Compás Remote, then search again."
+          title={t('Couldn’t search for players')}
+          body={t('Turn Bluetooth on and allow Nearby devices for Compás Remote, then search again.')}
         />
       ) : nothingFound ? (
         <ListNotice
-          title="No players found"
-          body="Turn on remote control on the player, then search again. If it still doesn’t appear, pair it in Android Settings."
+          title={t('No players found')}
+          body={t('Turn on remote control on the player, then search again. If it still doesn’t appear, pair it in Android Settings.')}
         />
       ) : null}
       <AppText variant="caption" tone="inkMuted" style={styles.footnote}>
-        Only Compás players with remote control turned on are listed.
+        {t('Only Compás players with remote control turned on are listed.')}
       </AppText>
     </Card>
   );

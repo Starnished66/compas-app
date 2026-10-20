@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
 import android.util.Base64
+import android.util.Log
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.Promise
@@ -101,8 +102,17 @@ class CompasBluetoothModule : Module() {
                     private val candidates = LinkedHashMap<String, Pair<BluetoothDevice, String>>()
                     private val awaitingSdp = LinkedHashSet<String>()
                     private val verifiedIds = LinkedHashSet<String>()
+                    private val sdpRequestedIds = LinkedHashSet<String>()
+                    private val inquirySeenIds = LinkedHashSet<String>()
                     private var inquiryComplete = false
                     private var completed = false
+
+                    private fun shortId(id: String) = id.takeLast(5)
+
+                    private fun hasCachedRemoteService(device: BluetoothDevice): Boolean = runCatching {
+                        @Suppress("DEPRECATION")
+                        device.uuids.orEmpty().any { it.uuid == COMPAS_REMOTE_UUID }
+                    }.getOrDefault(false)
 
                     private fun displayName(name: String?, address: String): String? =
                         name?.trim()?.takeIf { it.isNotEmpty() && !it.equals(address, ignoreCase = true) }
@@ -111,19 +121,28 @@ class CompasBluetoothModule : Module() {
                         addCandidate(device, runCatching { device.name }.getOrNull())
                     }
 
-                    private fun addCandidate(device: BluetoothDevice, rawName: String?) {
+                    private fun addCandidate(device: BluetoothDevice, rawName: String?, seenInInquiry: Boolean = false) {
                         val name = displayName(rawName, device.address) ?: return
                         if (completed) return
                         candidates[device.address] = device to name
-                        if (inquiryComplete) requestSdp(device)
+                        if (seenInInquiry) inquirySeenIds.add(device.address)
+                        if (inquiryComplete) {
+                            requestSdp(device)
+                            finishIfReady()
+                        }
                     }
 
                     private fun requestSdp(device: BluetoothDevice) {
                         val id = device.address
-                        if (id in verifiedIds || id in awaitingSdp || completed) return
+                        if (id in verifiedIds || id in sdpRequestedIds || id in awaitingSdp || completed) return
+                        sdpRequestedIds.add(id)
                         awaitingSdp.add(id)
+                        Log.i("CompasBluetooth", "SDP request queued id=${shortId(id)}")
                         val started = runCatching { device.fetchUuidsWithSdp() }.getOrDefault(false)
-                        if (!started) awaitingSdp.remove(id)
+                        if (!started) {
+                            awaitingSdp.remove(id)
+                            Log.w("CompasBluetooth", "SDP request rejected id=${shortId(id)}")
+                        }
                     }
 
                     private fun finishIfReady() {
@@ -144,7 +163,7 @@ class CompasBluetoothModule : Module() {
                                 @Suppress("DEPRECATION")
                                 val device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE) as? BluetoothDevice ?: return
                                 addCandidate(device, intent.getStringExtra(BluetoothDevice.EXTRA_NAME)
-                                    ?: runCatching { device.name }.getOrNull())
+                                    ?: runCatching { device.name }.getOrNull(), seenInInquiry = intent.action == BluetoothDevice.ACTION_FOUND)
                             }
                             BluetoothDevice.ACTION_UUID -> {
                                 @Suppress("DEPRECATION")
@@ -154,7 +173,9 @@ class CompasBluetoothModule : Module() {
                                 @Suppress("DEPRECATION")
                                 val uuids = intent.getParcelableArrayExtra(BluetoothDevice.EXTRA_UUID)
                                     ?.filterIsInstance<ParcelUuid>().orEmpty()
-                                if (uuids.any { it.uuid == COMPAS_REMOTE_UUID }) {
+                                val hasRemoteService = uuids.any { it.uuid == COMPAS_REMOTE_UUID }
+                                Log.i("CompasBluetooth", "SDP result id=${shortId(id)} uuidCount=${uuids.size} remoteService=$hasRemoteService")
+                                if (hasRemoteService) {
                                     val name = candidates[id]?.second
                                     if (name != null) {
                                         verifiedIds.add(id)
@@ -188,11 +209,25 @@ class CompasBluetoothModule : Module() {
                             }
                             BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
                                 inquiryComplete = true
-                                candidates.values.toList().forEach { (device, _) -> requestSdp(device) }
+                                val orderedCandidates = candidates.entries.sortedWith(
+                                    compareByDescending<Map.Entry<String, Pair<BluetoothDevice, String>>> { it.key in inquirySeenIds }
+                                        .thenByDescending { hasCachedRemoteService(it.value.first) }
+                                )
+                                Log.i("CompasBluetooth", "Discovery inquiry complete; SDP candidates=${orderedCandidates.size}")
+                                orderedCandidates.forEach { (id, candidate) ->
+                                    Log.i(
+                                        "CompasBluetooth",
+                                        "SDP priority id=${shortId(id)} inquirySeen=${id in inquirySeenIds} cachedRemoteService=${hasCachedRemoteService(candidate.first)}"
+                                    )
+                                    requestSdp(candidate.first)
+                                }
                                 if (awaitingSdp.isEmpty()) {
                                     finish()
                                 } else {
-                                    val timeout = Runnable { finish() }
+                                    val timeout = Runnable {
+                                        Log.w("CompasBluetooth", "Discovery SDP timeout pending=${awaitingSdp.size}")
+                                        finish()
+                                    }
                                     discoveryTimeout = timeout
                                     mainHandler.postDelayed(timeout, 25_000L)
                                 }

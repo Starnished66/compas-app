@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { usePalette } from '../PaletteProvider';
 import { useReducedMotion } from '../useReducedMotion';
+import { useI18n } from '../../i18n';
 
 export interface PlayingIndicatorProps {
   playing?: boolean;
@@ -30,6 +31,7 @@ function barScale(progress: Animated.Value, phase: number) {
 }
 
 export function PlayingIndicator({ playing = true, color, style }: PlayingIndicatorProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const reducedMotion = useReducedMotion();
   const animate = playing && !reducedMotion;
@@ -54,7 +56,7 @@ export function PlayingIndicator({ playing = true, color, style }: PlayingIndica
   const fill = color ?? palette.accent;
 
   return (
-    <View accessible accessibilityRole="image" accessibilityLabel="Now playing" style={[styles.box, style]}>
+    <View accessible accessibilityRole="image" accessibilityLabel={t('Now playing')} style={[styles.box, style]}>
       {BARS.map((bar, index) => (
         <Animated.View
           key={bar.left}

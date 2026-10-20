@@ -21,6 +21,7 @@ import { AppText } from './AppText';
 import { SheetHandle } from './SheetHandle';
 import { useScreenInsets } from '../useScreenInsets';
 import { insetBeyond } from '../insetBeyond';
+import { useI18n } from '../../i18n';
 
 export interface BottomSheetProps {
   visible: boolean;
@@ -49,6 +50,7 @@ export function BottomSheet({
   onHidden,
 }: BottomSheetProps) {
   const palette = usePalette();
+  const { t } = useI18n();
   const reducedMotion = useReducedMotion();
   const insets = useScreenInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -157,7 +159,7 @@ export function BottomSheet({
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: scrim }]}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Close"
+            accessibilityLabel={t('Close')}
             style={[StyleSheet.absoluteFill, { backgroundColor: palette.scrim }]}
             onPress={requestClose}
           />
@@ -181,7 +183,7 @@ export function BottomSheet({
         >
           <View>
             <SheetHandle
-              label="Drag down to close"
+              label={t('Drag down to close')}
               onClose={requestClose}
               dragHandlers={handleResponder.panHandlers}
             />

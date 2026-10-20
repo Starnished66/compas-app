@@ -27,6 +27,7 @@ import { SeekBar } from './SeekBar';
 import { SLIDER_THUMB_OVERHANG } from './Slider';
 import { TransportControls } from './TransportControls';
 import { VolumeRow } from './VolumeRow';
+import { useI18n } from '../../i18n';
 
 export interface NowPlayingCardProps {
   state: RemoteUiState;
@@ -57,6 +58,7 @@ export function NowPlayingCard({
   onOpenAudioFormat,
   onLayout,
 }: NowPlayingCardProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const { preference } = useMiniProgressPreference();
   const progressStyle = resolveMiniProgressStyle(preference, state.playbackMode);
@@ -67,7 +69,7 @@ export function NowPlayingCard({
   const liveOpacity = useOpacityTransition(dimmed, DIMMED_OPACITY, DIM_DURATION);
   const metaOpacity = useOpacityTransition(commands.skipping, SKIPPING_META_OPACITY, DIM_DURATION);
   const canFavorite = state.supportedFeatures.includes('favorites_edit');
-  const subtitle = track.artist || 'Unknown artist';
+  const subtitle = track.artist || t('Unknown artist');
   const pending = commands.pendingLabel !== null;
   const showCollapsedProgress = compact && !pending;
 
@@ -93,11 +95,11 @@ export function NowPlayingCard({
       >
         <Reanimated.View style={[styles.eyebrowRow, animated.eyebrow]} pointerEvents={compact ? 'none' : 'box-none'}>
           <AppText variant="eyebrow" tone="accent" accessibilityRole="header">
-            Now playing
+            {t('Now playing')}
           </AppText>
           <IconButton
             icon="expand"
-            label="Open Now playing"
+            label={t('Open Now playing')}
             size="sm"
             iconSize={EXPAND_ICON_SIZE}
             color={palette.inkMuted}
@@ -109,7 +111,7 @@ export function NowPlayingCard({
         <Reanimated.View style={[styles.mainRow, animated.mainRow]} pointerEvents="box-none">
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Open Now playing"
+            accessibilityLabel={t('Open Now playing')}
             onPress={onOpenNowPlaying}
             style={({ pressed }) => pressed && styles.artPressed}
           >
