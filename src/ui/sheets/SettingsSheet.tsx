@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { ConnectionStatus, ConnectionTransport, LibrarySortMode, LibrarySortScope, RemoteAction, RemoteTheme, RemoteUiState, WifiImportStatus } from '../../data/types';
+import { ConnectionStatus, ConnectionTransport, LibrarySortMode, LibrarySortScope, RemoteAction, RemoteTheme, RemoteUiState } from '../../data/types';
 import { AccentSetting } from '../components/AccentSetting';
 import { AppText } from '../components/AppText';
 import { BackgroundSetting } from '../components/BackgroundSetting';
@@ -23,10 +23,6 @@ import { useConnectedPlayer } from '../useConnectedPlayer';
 import { useUpdates } from '../../updates/UpdatesProvider';
 import { LANGUAGE_OPTIONS, useI18n } from '../../i18n';
 import { Button } from '../components/Button';
-import { WifiImportManager } from '../components/WifiImportManager';
-import type { WifiImportManagerProps } from '../components/WifiImportManager';
-import { WifiImportDirectoryPage } from '../../data/types';
-import { isSameWifiImportOwner } from '../../session/wifiImportOwner';
 
 export interface SettingsSheetProps {
   state: RemoteUiState;
@@ -35,16 +31,7 @@ export interface SettingsSheetProps {
   onClose: () => void;
   onOpenConnection: () => void;
   onOpenUpdates: () => void;
-  wifiImportStatus: WifiImportStatus;
-  wifiImportOwnerKey: string | null;
-  onCancelWifiImportOperation: () => void;
-  onStartWifiImport: () => Promise<void>;
-  onStopWifiImport: () => Promise<void>;
-  onStartWifiImportUpgrade: () => Promise<void>;
-  onListWifiImportFiles: (path: string, offset: number) => Promise<WifiImportDirectoryPage>;
-  onUploadWifiImportFile: WifiImportManagerProps['onUpload'];
-  onRenameWifiImportFile: (path: string, name: string) => Promise<void>;
-  onDeleteWifiImportFile: (path: string) => Promise<void>;
+  onOpenTransfer: () => void;
 }
 
 const THEME_OPTIONS: ReadonlyArray<SegmentedOption<RemoteTheme>> = [
@@ -55,13 +42,11 @@ const THEME_OPTIONS: ReadonlyArray<SegmentedOption<RemoteTheme>> = [
 
 const CHEVRON_SIZE = 18;
 
-export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnection, onOpenUpdates, wifiImportStatus, wifiImportOwnerKey, onCancelWifiImportOperation, onStartWifiImport, onStopWifiImport, onStartWifiImportUpgrade, onListWifiImportFiles, onUploadWifiImportFile, onRenameWifiImportFile, onDeleteWifiImportFile }: SettingsSheetProps) {
+export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnection, onOpenUpdates, onOpenTransfer }: SettingsSheetProps) {
   const updates = useUpdates();
   const { t, languagePreference, setLanguage } = useI18n();
   const [languageOpen, setLanguageOpen] = useState(false);
   const [sortingOpen, setSortingOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
-  const previousWifiImportOwnerKeyRef = useRef(wifiImportOwnerKey);
   const librarySorting = state.librarySorting;
   const player = useConnectedPlayer(state);
   const connected = state.connectionStatus === ConnectionStatus.Connected;
@@ -73,17 +58,8 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
     if (action) onAction(action);
   };
 
-  React.useEffect(() => {
-    const previous = previousWifiImportOwnerKeyRef.current;
-    previousWifiImportOwnerKeyRef.current = wifiImportOwnerKey;
-    if (previous && !isSameWifiImportOwner(previous, wifiImportOwnerKey)) {
-      onCancelWifiImportOperation();
-      setImportOpen(false);
-    }
-  }, [wifiImportOwnerKey, onCancelWifiImportOperation]);
-
   return (
-    <BottomSheet visible={visible} onClose={() => { onCancelWifiImportOperation(); setLanguageOpen(false); setSortingOpen(false); setImportOpen(false); onClose(); }} onHidden={runAfterClose} title={languageOpen ? t('Choose a language') : sortingOpen ? t('Library sorting') : importOpen ? t('Import via Wi-Fi') : t('Settings')} contentKey={languageOpen ? 'language' : sortingOpen ? 'sorting' : importOpen ? 'wifi-import' : 'settings'}>
+    <BottomSheet visible={visible} onClose={() => { setLanguageOpen(false); setSortingOpen(false); onClose(); }} onHidden={runAfterClose} title={languageOpen ? t('Choose a language') : sortingOpen ? t('Library sorting') : t('Settings')} contentKey={languageOpen ? 'language' : sortingOpen ? 'sorting' : 'settings'}>
       {languageOpen ? (
         <View style={styles.content}>
           <Card variant="surface">
@@ -116,27 +92,6 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
             />
           </Card>
         </View>
-      ) : importOpen && connected && isSameWifiImportOwner(previousWifiImportOwnerKeyRef.current, wifiImportOwnerKey) ? (
-        <View style={styles.content}>
-          <Card variant="surface">
-            <ListRow title={t('Back')} leading={<Icon name="chevronLeft" />} onPress={() => { onCancelWifiImportOperation(); setImportOpen(false); }} />
-            <WifiImportManager
-              key={wifiImportOwnerKey ?? 'no-import-owner'}
-              transport={state.connectionTransport}
-              supported={state.supportedFeatures.includes('wifi_import') && state.supportedFeatures.includes('wifi_import_files') && state.supportedFeatures.includes('catalog_sync_v1')}
-              status={wifiImportStatus}
-              onEnsureReady={onStartWifiImport}
-              onFinish={onStopWifiImport}
-              onFinished={() => setImportOpen(false)}
-              onCancel={onCancelWifiImportOperation}
-              onStartUpgrade={onStartWifiImportUpgrade}
-              onList={onListWifiImportFiles}
-              onUpload={onUploadWifiImportFile}
-              onRename={onRenameWifiImportFile}
-              onDelete={onDeleteWifiImportFile}
-            />
-          </Card>
-        </View>
       ) : (
       <View style={styles.content}>
         <Card variant="surface">
@@ -156,15 +111,18 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
               <Divider />
               <ListRow
                 variant="action"
-                title={t('Import via Wi-Fi')}
+                title={t('Transfer files')}
                 leading={<Icon name="import" />}
                 subtitle={t(state.connectionTransport === ConnectionTransport.Bluetooth
-                  ? 'Turn on Wi-Fi on the player to import files.'
+                  ? 'File transfer works when connected over Wi-Fi.'
                   : state.supportedFeatures.includes('wifi_import')
-                    ? 'Browse the player SD card and upload files'
+                    ? 'Send music from this device to the player SD card'
                     : 'Update the player firmware to use Wi-Fi import.')}
                 trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
-                onPress={() => setImportOpen(true)}
+                onPress={() => {
+                  onClose();
+                  onOpenTransfer();
+                }}
               />
               {state.supportedFeatures.includes('device_info') && (state.deviceModel || state.playerVersion) ? (
                 <>

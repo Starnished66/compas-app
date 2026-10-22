@@ -1,0 +1,8 @@
+{
+  "name": "compas-files",
+  "version": "1.0.0",
+  "description": "Phone storage browsing for Compas file transfer",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {}
+}

@@ -3096,6 +3096,16 @@ export function useRemoteSession() {
     await session.api.deleteImportFile(path);
     if (!ownsWifiImportSession(session)) throw new Error('The Wi-Fi import session ended.');
   };
+  /** Creates an SD card folder; an existing folder of the same name is reused. */
+  const createWifiImportDirectory = async (path: string, name: string) => {
+    const session = requireWifiImportSession();
+    try {
+      await session.api.createImportDirectory(path, name);
+    } catch (err: any) {
+      if (err?.statusCode !== 409 || !String(err?.responseBody ?? '').includes('name_exists')) throw err;
+    }
+    if (!ownsWifiImportSession(session)) throw new Error('The Wi-Fi import session ended.');
+  };
 
   const loadLibraryArtwork = async (entryId: string) => {
     const requestApi = apiRef.current;
@@ -3337,6 +3347,13 @@ export function useRemoteSession() {
           screenBackStackRef.current = [];
           libraryBackStackRef.current = [];
           setState((prev) => ({ ...prev, screen: { type: 'Home' }, libraryIsNested: false }));
+        }
+        break;
+
+      case 'OpenTransfer':
+        if (stateRef.current.screen.type !== 'Transfer') {
+          screenBackStackRef.current.push(stateRef.current.screen);
+          setState((prev) => ({ ...prev, screen: { type: 'Transfer' } }));
         }
         break;
 
@@ -3867,6 +3884,7 @@ export function useRemoteSession() {
     uploadWifiImportFile,
     renameWifiImportFile,
     deleteWifiImportFile,
+    createWifiImportDirectory,
     playbackPosition: positionStoreRef.current,
     currentLibraryCategory: currentLibraryCategoryRef.current,
     libraryArtwork,

@@ -1,6 +1,6 @@
 import { createContext } from 'react';
 
-export type ScrollToTopTarget = 'home' | 'library' | 'playlists';
+export type ScrollToTopTarget = 'home' | 'library' | 'playlists' | 'transfer';
 
 export interface ChromeActions {
   expand(): void;

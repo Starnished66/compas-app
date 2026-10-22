@@ -7,6 +7,7 @@
     "@shopify/react-native-skia": "2.6.2",
     "compas-bluetooth": "file:./modules/compas-bluetooth",
     "compas-diagnostics": "file:./modules/compas-diagnostics",
+    "compas-files": "file:./modules/compas-files",
     "compas-discovery": "file:./modules/compas-discovery",
     "compas-media-session": "file:./modules/compas-media-session",
     "compas-updates": "file:./modules/compas-updates",

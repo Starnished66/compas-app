@@ -57,6 +57,8 @@ function withCompasAndroid(config) {
     if (app) {
       if (!app.$) app.$ = {};
       app.$['android:usesCleartextTraffic'] = 'true';
+      // Android 10 needs legacy storage for direct file reads in the Transfer tab.
+      app.$['android:requestLegacyExternalStorage'] = 'true';
 
       // Ensure MediaActionReceiver
       if (!app.receiver) {

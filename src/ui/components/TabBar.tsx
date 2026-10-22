@@ -10,7 +10,7 @@ import { IconName } from './iconPaths';
 import { TabBarItem } from './TabBarItem';
 import { TabPill } from './TabPill';
 
-export type TabKey = 'library' | 'home' | 'playlists';
+export type TabKey = 'library' | 'home' | 'playlists' | 'transfer';
 
 export interface TabBarProps {
   active: TabKey | null;
@@ -24,6 +24,7 @@ const TABS: { key: TabKey; label: string; icon: IconName }[] = [
   { key: 'library', label: 'Library', icon: 'library' },
   { key: 'home', label: 'Home', icon: 'home' },
   { key: 'playlists', label: 'Playlists', icon: 'playlist' },
+  { key: 'transfer', label: 'Transfer', icon: 'import' },
 ];
 
 const BAR_PADDING = Space.xs;

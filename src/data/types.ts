@@ -211,6 +211,7 @@ export type RemoteScreen =
   | { type: 'Home' }
   | { type: 'Library'; category: LibraryCategory }
   | { type: 'Queue' }
+  | { type: 'Transfer' }
   | { type: 'Connection' };
 
 export enum LibraryCategory {
@@ -376,6 +377,7 @@ export type RemoteAction =
   | { type: 'PlayCollection'; shuffle: boolean }
   | { type: 'SetTheme'; theme: RemoteTheme }
   | { type: 'OpenHome' }
+  | { type: 'OpenTransfer' }
   | { type: 'OpenConnection' }
   | { type: 'StartAutoReconnect' }
   | { type: 'Connect' }

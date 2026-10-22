@@ -27,6 +27,7 @@ import { SessionSnackbars } from './src/ui/components/SessionSnackbars';
 import { HomeScreen } from './src/ui/screens/HomeScreen';
 import { LibraryScreen } from './src/ui/screens/LibraryScreen';
 import { PlaylistsScreen } from './src/ui/screens/PlaylistsScreen';
+import { TransferApi, TransferScreen } from './src/ui/screens/TransferScreen';
 import { ConnectionScreen } from './src/ui/screens/ConnectionScreen';
 import { NowPlayingScreen } from './src/ui/screens/NowPlayingScreen';
 import { SettingsSheet } from './src/ui/sheets/SettingsSheet';
@@ -37,7 +38,7 @@ import { UpdatesSheet } from './src/ui/sheets/UpdatesSheet';
 import { useScreenInsets } from './src/ui/useScreenInsets';
 import CrashReportRecovery from './src/diagnostics/CrashReportRecovery';
 
-const TAB_ORDER: TabKey[] = ['home', 'library', 'playlists'];
+const TAB_ORDER: TabKey[] = ['home', 'library', 'playlists', 'transfer'];
 
 const nonBrowsableLibraryCategories = new Set<LibraryCategory>([LibraryCategory.Playlists, LibraryCategory.Search]);
 
@@ -45,6 +46,7 @@ type MainScreen = Exclude<RemoteScreen, { type: 'Connection' | 'Queue' }>;
 
 function tabFor(screen: MainScreen): TabKey {
   if (screen.type === 'Library') return screen.category === LibraryCategory.Playlists ? 'playlists' : 'library';
+  if (screen.type === 'Transfer') return 'transfer';
   return 'home';
 }
 
@@ -63,7 +65,17 @@ function accentSourceFor(state: RemoteUiState, accentStyle: AccentStyle): Accent
 }
 
 export default function App() {
-  const { state, onAction, playbackPosition, libraryArtwork, wifiImportStatus, wifiImportOwnerKey, cancelWifiImportOperation, startWifiImport, stopWifiImport, startWifiImportUpgrade, listWifiImportFiles, uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile } = useRemoteSession();
+  const { state, onAction, playbackPosition, libraryArtwork, wifiImportStatus, startWifiImport, stopWifiImport, listWifiImportFiles, uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile, createWifiImportDirectory } = useRemoteSession();
+  const transfer: TransferApi = {
+    status: wifiImportStatus,
+    start: startWifiImport,
+    finish: stopWifiImport,
+    list: listWifiImportFiles,
+    upload: uploadWifiImportFile,
+    rename: renameWifiImportFile,
+    remove: deleteWifiImportFile,
+    mkdir: createWifiImportDirectory,
+  };
   const [nowPlayingVisible, setNowPlayingVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [updatesVisible, setUpdatesVisible] = useState(false);
@@ -119,6 +131,7 @@ export default function App() {
     setNowPlayingVisible(false);
     if (tab === 'home') onAction({ type: 'OpenHome' });
     else if (tab === 'playlists') onAction({ type: 'OpenLibrary', category: LibraryCategory.Playlists });
+    else if (tab === 'transfer') onAction({ type: 'OpenTransfer' });
     else onAction({ type: 'OpenLibrary', category: lastBrowseCategoryRef.current });
   }, [onAction]);
 
@@ -140,6 +153,8 @@ export default function App() {
         return mainScreen.category === LibraryCategory.Playlists
           ? <PlaylistsScreen state={state} onAction={onAction} contentBottomInset={contentBottomInset} />
           : <LibraryScreen state={state} onAction={onAction} category={mainScreen.category} contentBottomInset={contentBottomInset} />;
+      case 'Transfer':
+        return null;
     }
   };
 
@@ -171,7 +186,10 @@ export default function App() {
                         <PageTransition style={styles.content} transitionKey={`${activeTab}:${connectionReturnCount}`} kind="fade">
                           {TAB_ORDER.filter((tab) => visitedTabs.has(tab)).map((tab) => (
                             <TabPane key={tab} active={tab === activeTab}>
-                              {tab === activeTab ? renderActiveTab() : null}
+                              {tab === 'transfer'
+                                // Stays mounted once opened so uploads keep running while other tabs are browsed.
+                                ? <TransferScreen state={state} onAction={onAction} transfer={transfer} active={activeTab === 'transfer'} contentBottomInset={contentBottomInset} />
+                                : tab === activeTab ? renderActiveTab() : null}
                             </TabPane>
                           ))}
                         </PageTransition>
@@ -201,16 +219,7 @@ export default function App() {
                       onClose={() => setSettingsVisible(false)}
                       onOpenConnection={() => onAction({ type: 'OpenConnection' })}
                       onOpenUpdates={openUpdates}
-                      wifiImportStatus={wifiImportStatus}
-                      wifiImportOwnerKey={wifiImportOwnerKey}
-                      onCancelWifiImportOperation={cancelWifiImportOperation}
-                      onStartWifiImport={startWifiImport}
-                      onStopWifiImport={stopWifiImport}
-                      onStartWifiImportUpgrade={startWifiImportUpgrade}
-                      onListWifiImportFiles={listWifiImportFiles}
-                      onUploadWifiImportFile={uploadWifiImportFile}
-                      onRenameWifiImportFile={renameWifiImportFile}
-                      onDeleteWifiImportFile={deleteWifiImportFile}
+                      onOpenTransfer={() => onAction({ type: 'OpenTransfer' })}
                     />
                     <UpdatesSheet visible={updatesVisible} onClose={() => setUpdatesVisible(false)} playerVersion={state.supportedFeatures.includes('device_info') ? state.playerVersion : null} />
                     <SongActionsSheet state={state} onAction={onAction} />

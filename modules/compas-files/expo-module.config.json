@@ -1,0 +1,8 @@
+{
+  "name": "compas-files",
+  "platforms": ["android"],
+  "android": {
+    "package": "com.compas.remote.files",
+    "modules": ["com.compas.remote.files.CompasFilesModule"]
+  }
+}

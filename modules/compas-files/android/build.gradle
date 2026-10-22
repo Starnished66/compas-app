@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.compas.remote.files'
+version = '1.0.0'
+
+android {
+  namespace "com.compas.remote.files"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  implementation "org.jetbrains.kotlin:kotlin-stdlib"
+  implementation "androidx.core:core-ktx:1.12.0"
+}
