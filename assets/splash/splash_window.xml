@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The "compás" wordmark on the boot-logo black. Used as the window background so it
+     stays on screen behind React Native's transparent root until the UI first renders. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+  <item android:drawable="@color/splashscreen_background" />
+  <item>
+    <bitmap android:gravity="center" android:src="@drawable/splashscreen_logo" />
+  </item>
+</layer-list>

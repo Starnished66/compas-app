@@ -3,7 +3,7 @@ import { StyleSheet } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { between, CollapseProgress, fadeOnCollapse } from '../collapse';
 import { Size, Space } from '../tokens';
-import { AppText } from './AppText';
+import { Wordmark } from './Wordmark';
 import { IconButton } from './IconButton';
 import { useI18n } from '../../i18n';
 
@@ -34,9 +34,7 @@ export function HomeTitleBar({ onOpenSettings, collapse, compact = false, settin
   return (
     <>
       <Animated.View pointerEvents="none" style={[styles.title, titleStyle]}>
-        <AppText variant="headline" accessibilityRole="header">
-          Compás Remote
-        </AppText>
+        <Wordmark height={26} />
       </Animated.View>
       <Animated.View pointerEvents={compact ? 'none' : 'box-none'} style={[styles.settings, settingsStyle]}>
         <IconButton
