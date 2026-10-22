@@ -15,6 +15,8 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import androidx.core.app.NotificationManagerCompat
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
@@ -25,6 +27,7 @@ import java.net.URL
 import java.util.concurrent.Executors
 
 class CompasMediaSessionModule : Module() {
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val context: Context
         get() = appContext.reactContext ?: throw IllegalStateException("React context is unavailable")
 
@@ -121,34 +124,53 @@ class CompasMediaSessionModule : Module() {
             }
         }
 
+        // Start and stop run on the main thread, where the service's own callbacks run,
+        // so the pending-start bookkeeping in RemotePlaybackService needs no locking.
         AsyncFunction("startPlaybackService") { message: String?, promise: Promise ->
-            try {
-                val intent = Intent(context, RemotePlaybackService::class.java).apply {
-                    action = RemotePlaybackService.ACTION_PREPARE
-                    putExtra(RemotePlaybackService.EXTRA_MESSAGE, message ?: "Connecting to player…")
+            mainHandler.post {
+                try {
+                    val intent = Intent(context, RemotePlaybackService::class.java).apply {
+                        action = RemotePlaybackService.ACTION_PREPARE
+                        putExtra(RemotePlaybackService.EXTRA_MESSAGE, message ?: "Connecting to player…")
+                    }
+                    RemotePlaybackService.pendingStarts++
+                    RemotePlaybackService.stopRequested = false
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            context.startForegroundService(intent)
+                        } else {
+                            context.startService(intent)
+                        }
+                    } catch (e: Exception) {
+                        RemotePlaybackService.pendingStarts--
+                        throw e
+                    }
+                    promise.resolve(true)
+                } catch (e: Exception) {
+                    promise.reject("SERVICE_START_FAILED", e.message, e)
                 }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
-                promise.resolve(true)
-            } catch (e: Exception) {
-                promise.reject("SERVICE_START_FAILED", e.message, e)
             }
         }
 
         AsyncFunction("stopPlaybackService") { promise: Promise ->
-            try {
-                RemotePlaybackService.instance?.stopPlaybackService() ?: run {
-                    val intent = Intent(context, RemotePlaybackService::class.java).apply {
-                        action = RemotePlaybackService.ACTION_STOP
+            mainHandler.post {
+                try {
+                    if (RemotePlaybackService.pendingStarts > 0) {
+                        // Stopping before the service reaches startForeground() crashes the app;
+                        // the service stops itself once every pending start has promoted it.
+                        RemotePlaybackService.stopRequested = true
+                    } else {
+                        RemotePlaybackService.instance?.stopPlaybackService() ?: run {
+                            val intent = Intent(context, RemotePlaybackService::class.java).apply {
+                                action = RemotePlaybackService.ACTION_STOP
+                            }
+                            context.stopService(intent)
+                        }
                     }
-                    context.stopService(intent)
+                    promise.resolve(true)
+                } catch (e: Exception) {
+                    promise.reject("SERVICE_STOP_FAILED", e.message, e)
                 }
-                promise.resolve(true)
-            } catch (e: Exception) {
-                promise.reject("SERVICE_STOP_FAILED", e.message, e)
             }
         }
 

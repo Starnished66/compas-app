@@ -39,8 +39,17 @@ class RemotePlaybackService : Service() {
             return START_NOT_STICKY
         }
 
+        // Every startForegroundService() must reach startForeground(), even when a stop
+        // arrived meanwhile; only then is it safe to honour that stop.
+        if (pendingStarts > 0) pendingStarts--
         val message = intent.getStringExtra(EXTRA_MESSAGE) ?: "Connecting to player…"
-        return if (publishWaitingNotification(message)) START_STICKY else START_NOT_STICKY
+        if (!publishWaitingNotification(message, promote = true)) return START_NOT_STICKY
+        if (stopRequested && pendingStarts == 0) {
+            stopRequested = false
+            stopPlaybackService()
+            return START_NOT_STICKY
+        }
+        return START_STICKY
     }
 
     private fun ensureChannel() {
@@ -58,7 +67,7 @@ class RemotePlaybackService : Service() {
         }
     }
 
-    fun publishWaitingNotification(message: String): Boolean {
+    fun publishWaitingNotification(message: String, promote: Boolean = false): Boolean {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             this.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -81,11 +90,13 @@ class RemotePlaybackService : Service() {
             .setOngoing(true)
             .build()
 
-        return publishNotification(notification)
+        return publishNotification(notification, promote)
     }
 
-    fun publishNotification(notification: Notification): Boolean {
-        if (!foreground) {
+    /** promote forces startForeground(): Android expects it once per startForegroundService(),
+     * even when the service is already in the foreground from an earlier start. */
+    fun publishNotification(notification: Notification, promote: Boolean = false): Boolean {
+        if (!foreground || promote) {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
@@ -141,5 +152,10 @@ class RemotePlaybackService : Service() {
 
         var instance: RemotePlaybackService? = null
             private set
+
+        /** Foreground starts requested but not yet delivered to onStartCommand. Main thread only. */
+        var pendingStarts = 0
+        /** A stop requested while starts were pending; applied after the last one promotes. */
+        var stopRequested = false
     }
 }
