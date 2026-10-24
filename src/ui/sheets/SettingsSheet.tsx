@@ -59,7 +59,19 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
   };
 
   return (
-    <BottomSheet visible={visible} onClose={() => { setLanguageOpen(false); setSortingOpen(false); onClose(); }} onHidden={runAfterClose} title={languageOpen ? t('Choose a language') : sortingOpen ? t('Library sorting') : t('Settings')} contentKey={languageOpen ? 'language' : sortingOpen ? 'sorting' : 'settings'}>
+    <BottomSheet
+      visible={visible}
+      onClose={() => { setLanguageOpen(false); setSortingOpen(false); onClose(); }}
+      onHidden={runAfterClose}
+      onBackPress={() => {
+        if (!languageOpen && !sortingOpen) return false;
+        setLanguageOpen(false);
+        setSortingOpen(false);
+        return true;
+      }}
+      title={languageOpen ? t('Choose a language') : sortingOpen ? t('Library sorting') : t('Settings')}
+      contentKey={languageOpen ? 'language' : sortingOpen ? 'sorting' : 'settings'}
+    >
       {languageOpen ? (
         <View style={styles.content}>
           <Card variant="surface">

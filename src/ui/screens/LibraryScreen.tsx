@@ -83,10 +83,6 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const exitSelection = useCallback(() => { setSelectionMode(false); setSelectedIds(new Set()); }, []);
-  useBackInterceptor(selectionMode || (searchOpen && category !== LibraryCategory.Search), () => {
-    if (selectionMode) exitSelection();
-    else setSearchOpen(false);
-  });
   // Entry IDs belong to the currently loaded results, not the next page or collection.
   useEffect(() => {
     if (!bulkActionsOpen) exitSelection();
@@ -175,6 +171,11 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
     setSearchOpen(false);
     onAction({ type: 'SearchLibrary', query: '' });
   }, [onAction]);
+  // Search must close like Cancel; letting Back reach navigateBack strands the results on a spinner.
+  useBackInterceptor(selectionMode || searchActive, () => {
+    if (selectionMode) exitSelection();
+    else closeSearch();
+  });
 
   useScrollToTopRequest('library', () => {
     if (nested) {
@@ -272,7 +273,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
       nodeItem(
         'title',
         <ScreenTitleBar
-          title={albumDetail ? undefined : step?.entry.title ?? state.libraryNestedTitle ?? undefined}
+          title={albumDetail ? undefined : step?.entry.title ?? (state.libraryNestedTitle === 'Tracks' || state.libraryNestedTitle === NESTED_ALBUMS_TITLE ? t(state.libraryNestedTitle) : state.libraryNestedTitle) ?? undefined}
           onBack={() => onAction({ type: 'Back' })}
         />,
       ),

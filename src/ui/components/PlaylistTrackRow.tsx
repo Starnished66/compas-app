@@ -15,6 +15,7 @@ import { PlayingIndicator } from './PlayingIndicator';
 import { RemovableRow, RemovableRowHandle } from './RemovableRow';
 import { RemoveDiscButton } from './RemoveDiscButton';
 import { Icon } from './Icon';
+import { useI18n } from '../../i18n';
 
 export interface PlaylistTrackRowProps {
   entry: LibraryEntry;
@@ -58,11 +59,21 @@ function PlaylistTrackRowContent({
   onSelect,
   onLongPress,
 }: PlaylistTrackRowProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const artworkUri = useEntryArtwork(entry);
   const progress = useEditStagger(editing, index);
   const removable = useRef<RemovableRowHandle>(null);
   const subtitle = displaySubtitle(entry) || undefined;
+  const motion = useMemo(
+    () => ({
+      bodyShift: editRange(progress, 0, EDIT_SHIFT),
+      removeSlot: { opacity: progress, transform: [{ scale: editRange(progress, REMOVE_START_SCALE, 1) }] },
+      more: { opacity: editRange(progress, 1, 0), transform: [{ translateX: editRange(progress, 0, MORE_EXIT_SHIFT) }] },
+      handle: { opacity: progress, transform: [{ translateX: editRange(progress, HANDLE_ENTER_SHIFT, 0) }] },
+    }),
+    [progress],
+  );
 
   if (selectionMode) {
     return (
@@ -80,23 +91,13 @@ function PlaylistTrackRowContent({
     );
   }
 
-  const motion = useMemo(
-    () => ({
-      bodyShift: editRange(progress, 0, EDIT_SHIFT),
-      removeSlot: { opacity: progress, transform: [{ scale: editRange(progress, REMOVE_START_SCALE, 1) }] },
-      more: { opacity: editRange(progress, 1, 0), transform: [{ translateX: editRange(progress, 0, MORE_EXIT_SHIFT) }] },
-      handle: { opacity: progress, transform: [{ translateX: editRange(progress, HANDLE_ENTER_SHIFT, 0) }] },
-    }),
-    [progress],
-  );
-
   const removeButton = (
     <Animated.View
       pointerEvents={editing ? 'box-none' : 'none'}
       style={[styles.removeSlot, motion.removeSlot]}
     >
       <RemoveDiscButton
-        label={`Remove ${entry.title} from playlist`}
+        label={t('Remove {title} from playlist', { title: entry.title })}
         disabled={!editing || removeDisabled}
         onPress={() => removable.current?.remove()}
       />
@@ -113,7 +114,7 @@ function PlaylistTrackRowContent({
         {current ? <PlayingIndicator playing={playing} /> : null}
         <IconButton
           icon="moreVertical"
-          label={`Song options for ${entry.title}`}
+          label={t('Song options for {title}', { title: entry.title })}
           color={palette.inkMuted}
           onPress={() => onMore(entry)}
         />
@@ -133,7 +134,7 @@ function PlaylistTrackRowContent({
       <RemovableRow
         ref={removable}
         rowHeight={ROW_HEIGHT}
-        removeLabel="Remove from playlist"
+        removeLabel={t('Remove from playlist')}
         onRemove={() => onRemove(entry)}
       >
         <ListRow

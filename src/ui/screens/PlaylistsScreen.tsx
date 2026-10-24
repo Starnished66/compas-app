@@ -191,7 +191,8 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
   const nativeCollectionPlayback = state.supportedFeatures.includes('collection_playback');
 
   if (playlist) {
-    const playButtons = playableIds.length || nativeCollectionPlayback ? (
+    // Native playback covers songs past the loaded page, but an empty playlist has nothing to start.
+    const playButtons = playableIds.length || (nativeCollectionPlayback && state.playlistTrackCount > 0) ? (
       <CollectionPlayButtons
         busy={state.collectionBusy}
         onPlay={() => playCollection(onAction, playableIds, false, shuffleActive, nativeCollectionPlayback)}
@@ -215,7 +216,7 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
       </>
     );
     items.push(
-      nodeItem('title', <ScreenTitleBar backLabel="Playlists" onBack={() => onAction({ type: 'Back' })} />),
+      nodeItem('title', <ScreenTitleBar backLabel={t('Playlists')} onBack={() => onAction({ type: 'Back' })} />),
       nodeItem(
         'header',
         <CollectionHeader

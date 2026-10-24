@@ -22,7 +22,6 @@ import { useSnackbar } from '../snackbar/useSnackbar';
 import { Space } from '../tokens';
 import { useDragReorder } from '../useDragReorder';
 import { useQueueReorder } from '../useQueueReorder';
-import { useBackInterceptor } from '../useBackInterceptor';
 import { useI18n } from '../../i18n';
 import { isShuffleMode } from '../../session/playbackModes';
 
@@ -40,10 +39,6 @@ const QUEUE_ROW_HEIGHT = 56;
 
 let removeHintShown = false;
 
-function songCount(count: number): string {
-  return `${count} ${count === 1 ? 'song' : 'songs'}`;
-}
-
 function repeatLabel(mode: PlaybackMode): string {
   if (mode === PlaybackMode.RepeatAll || mode === PlaybackMode.ShuffleRepeat) return 'Repeat';
   if (mode === PlaybackMode.RepeatOne) return 'Repeat once';
@@ -54,8 +49,8 @@ function keyOf(track: RemoteTrack): string {
   return track.id;
 }
 
-function trackSubtitle(track: RemoteTrack): string {
-  const artist = track.artist || 'Unknown artist';
+function trackSubtitle(track: RemoteTrack, t: (source: string) => string): string {
+  const artist = track.artist || t('Unknown artist');
   return track.duration ? `${artist} · ${track.duration}` : artist;
 }
 
@@ -67,7 +62,6 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [dismissedBulkStatus, setDismissedBulkStatus] = useState(false);
   const selecting = selectedIds.size > 0;
-  useBackInterceptor(visible && selecting, () => setSelectedIds(new Set()));
   useEffect(() => { if (!visible) setSelectedIds(new Set()); }, [visible]);
   const lastPageRequest = useRef('');
   const firstRow = useRef<RemovableRowHandle | null>(null);
@@ -77,7 +71,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
   const queueRemovalFinished = state.bulkActionProgress?.action === 'queueRemove' && !queueRemovalRunning && !dismissedBulkStatus;
   useEffect(() => { if (queueRemovalRunning) setDismissedBulkStatus(false); }, [queueRemovalRunning]);
   const reorder = useQueueReorder(state.queue, onAction, ({ track, from, to }) =>
-    snackbar.show({ text: `Moved “${track.title}”`, actionLabel: 'Undo', onAction: () => reorder.move(to, from) }),
+    snackbar.show({ text: t('Moved “{title}”', { title: track.title }), actionLabel: t('Undo'), onAction: () => reorder.move(to, from) }),
   );
   const rows = reorder.queue;
   const drag = useDragReorder({
@@ -150,7 +144,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
       return (
         <TrackRow
           title={item.title || t('Unknown song')}
-          subtitle={trackSubtitle(item)}
+          subtitle={trackSubtitle(item, t)}
           artworkUri={item.artwork}
           artworkSize={QUEUE_ROW_ARTWORK}
           selected={selectedIds.has(item.id)}
@@ -165,15 +159,15 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
         ref={index === 0 ? firstRow : undefined}
         rowHeight={QUEUE_ROW_HEIGHT}
           swipeToRemove={canEditQueue && !bulkJobRunning}
-        accessibilityLabel={`${item.title}, ${trackSubtitle(item)}`}
-        removeLabel="Remove"
+        accessibilityLabel={`${item.title}, ${trackSubtitle(item, t)}`}
+        removeLabel={t('Remove')}
         onRemove={() => removeTrack(item)}
         onTap={play}
         contentBackground={draggingIndex === index ? palette.surfaceRaised : undefined}
       >
         <TrackRow
           title={item.title || t('Unknown song')}
-          subtitle={trackSubtitle(item)}
+          subtitle={trackSubtitle(item, t)}
           artworkUri={item.artwork}
           artworkSize={QUEUE_ROW_ARTWORK}
           onPress={play}
@@ -188,18 +182,18 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
     state.queueStatus === ContentStatus.Loading ? (
       <View style={styles.message}>
         <Spinner />
-        <AppText tone="inkMuted">Loading queue…</AppText>
+        <AppText tone="inkMuted">{t('Loading queue…')}</AppText>
       </View>
     ) : state.queueStatus === ContentStatus.Error ? (
       <View style={styles.message}>
         <AppText tone="inkMuted" style={styles.centered}>
-          Couldn't load the queue.
+          {t('Couldn’t load the queue.')}
         </AppText>
       </View>
     ) : (
       <View style={styles.message}>
         <AppText tone="inkMuted" style={styles.centered}>
-          Nothing else is queued. Add songs from their menu in the Library.
+          {t('Nothing else is queued. Add songs from their menu in the Library.')}
         </AppText>
       </View>
     );
@@ -210,24 +204,34 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
     </View>
   ) : hasRows && !state.queueHasMore ? (
     <AppText variant="caption" tone="inkMuted" style={[styles.footer, styles.centered]}>
-      End of queue
+      {t('End of queue')}
     </AppText>
   ) : null;
 
   return (
-    <BottomSheet visible={visible} onClose={close} fullHeight scrollable={false}>
+    <BottomSheet
+      visible={visible}
+      onClose={close}
+      onBackPress={() => {
+        if (!selecting) return false;
+        setSelectedIds(new Set());
+        return true;
+      }}
+      fullHeight
+      scrollable={false}
+    >
       <View style={styles.header}>
         <View style={styles.headerTitles}>
           <AppText variant="title" accessibilityRole="header">
-            Queue
+            {t('Queue')}
           </AppText>
           <AppText variant="caption" tone="inkMuted" tabular>
-            {`${songCount(queueCount)} up next`}
+            {t('{count} songs up next', { count: queueCount })}
           </AppText>
         </View>
         <IconButton
           icon="shuffle"
-          label="Shuffle"
+          label={t('Shuffle')}
           size="sm"
           iconSize={MODE_ICON_SIZE}
           active={shuffleOn}
@@ -236,7 +240,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
         />
         <IconButton
           icon={state.playbackMode === PlaybackMode.RepeatOne ? 'repeatOne' : 'repeat'}
-          label={repeatLabel(state.playbackMode)}
+          label={t(repeatLabel(state.playbackMode))}
           size="sm"
           iconSize={MODE_ICON_SIZE}
           active={repeatOn}
@@ -251,9 +255,9 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
           </>
         ) : (
           <Button
-            label="Clear"
+            label={t('Clear')}
             variant="plain"
-            accessibilityLabel="Clear queue"
+            accessibilityLabel={t('Clear queue')}
             disabled={queueCount === 0 || bulkJobRunning}
             onPress={() => setConfirmingClear(true)}
           />
@@ -272,7 +276,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
         <InlineError message={state.connectionMessage} style={styles.error} />
       ) : null}
       <SectionHeader
-        label="Up next"
+        label={t('Up next')}
         tone="muted"
         caption={hasRows ? (canEditQueue ? t('Drag ≡ to reorder · swipe left to remove') : t('Swipe left to remove')) : undefined}
         style={styles.sectionHeader}
@@ -295,9 +299,9 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
       </DragReorderCellContext.Provider>
       <ConfirmDialog
         visible={confirmingClear}
-        title="Clear the queue?"
-        message={`This removes all ${songCount(queueCount)} from the queue on the player.`}
-        confirmLabel="Clear queue"
+        title={t('Clear the queue?')}
+        message={t('This removes all {count} songs from the queue on the player.', { count: queueCount })}
+        confirmLabel={t('Clear queue')}
         destructive
         onConfirm={confirmClear}
         onClose={() => setConfirmingClear(false)}

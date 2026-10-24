@@ -33,6 +33,8 @@ export interface BottomSheetProps {
   contentStyle?: StyleProp<ViewStyle>;
   contentKey?: string;
   onHidden?: () => void;
+  /** Hardware back; return true when handled (e.g. leaving a sub-page) to keep the sheet open. */
+  onBackPress?: () => boolean;
 }
 
 const TOP_GAP = Space.xl + Space.sm;
@@ -48,6 +50,7 @@ export function BottomSheet({
   contentStyle,
   contentKey,
   onHidden,
+  onBackPress,
 }: BottomSheetProps) {
   const palette = usePalette();
   const { t } = useI18n();
@@ -66,6 +69,8 @@ export function BottomSheet({
   const onHiddenRef = useRef(onHidden);
   onHiddenRef.current = onHidden;
   onCloseRef.current = onClose;
+  const onBackPressRef = useRef(onBackPress);
+  onBackPressRef.current = onBackPress;
   const reducedMotionRef = useRef(reducedMotion);
   reducedMotionRef.current = reducedMotion;
 
@@ -113,6 +118,11 @@ export function BottomSheet({
     closingRef.current = true;
     onCloseRef.current();
   };
+  // A Modal swallows BackHandler, so back reaches the sheet only through onRequestClose.
+  const handleBackPress = () => {
+    if (onBackPressRef.current?.()) return;
+    requestClose();
+  };
 
   const settleBack = () =>
     Animated.timing(dragY, {
@@ -154,7 +164,7 @@ export function BottomSheet({
   );
 
   return (
-    <Modal transparent statusBarTranslucent animationType="none" visible onRequestClose={requestClose}>
+    <Modal transparent statusBarTranslucent animationType="none" visible onRequestClose={handleBackPress}>
       <KeyboardAvoidingView style={styles.root} behavior="padding">
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: scrim }]}>
           <Pressable
