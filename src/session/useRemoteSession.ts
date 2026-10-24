@@ -288,6 +288,7 @@ export function useRemoteSession() {
   const wifiDiscoverySourcesRef = useRef(new Map<string, string>());
   const wifiDiscoveryProbesRef = useRef(new Set<string>());
   const pollingTimerRef = useRef<any>(null);
+  const pollLoopTokenRef = useRef(0);
   const pinCooldownTimerRef = useRef<any>(null);
   const autoReconnectTimerRef = useRef<any>(null);
   const autoReconnectEnabledRef = useRef<boolean>(true);
@@ -866,10 +867,15 @@ export function useRemoteSession() {
 
       currentTrackRef.current = track;
       positionStoreRef.current.set((status.positionSeconds || 0) * 1000, (status.durationSeconds || 0) * 1000);
+      // Tokens and collection jobs from the previous link would never settle on this one.
+      gateRef.current.reset();
+      collectionPendingRef.current = null;
+      collectionStartingRef.current = false;
 
       setState((prev) => ({
         ...prev,
         connectionStatus: ConnectionStatus.Connected,
+        collectionBusy: false,
         connectionTransport: transport,
         connectionAttemptTransport: null,
         playerName: 'Compás Player',
@@ -929,6 +935,11 @@ export function useRemoteSession() {
   };
 
   const connect = (explicitPin?: string) => {
+    // A pending auto-reconnect would otherwise fire mid-attempt and replace the user's choice.
+    if (autoReconnectTimerRef.current) {
+      clearTimeout(autoReconnectTimerRef.current);
+      autoReconnectTimerRef.current = null;
+    }
     connectDirect(
       stateRef.current.selectedConnectionTransport,
       stateRef.current.wifiAddress,
@@ -946,6 +957,7 @@ export function useRemoteSession() {
     pendingSeekRef.current = null;
     pendingVolumeRef.current = null;
     if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
+    pollLoopTokenRef.current++;
     if (autoReconnectTimerRef.current) {
       clearTimeout(autoReconnectTimerRef.current);
       autoReconnectTimerRef.current = null;
@@ -960,6 +972,7 @@ export function useRemoteSession() {
     collectionPendingRef.current = null;
     collectionStartingRef.current = false;
     collectionStartTokenRef.current++;
+    gateRef.current.reset();
     connectedPlayerKeyRef.current = null;
     wifiImportOwnerKeyRef.current = null;
     bluetoothAudioOutputRef.current = null;
@@ -988,6 +1001,7 @@ export function useRemoteSession() {
       supportedFeatures: [],
       librarySorting: null,
       collectionBusy: false,
+      bulkActionProgress: null,
       playerAccentColor: null,
       deviceModel: null,
       playerVersion: null,
@@ -1369,6 +1383,11 @@ export function useRemoteSession() {
   // Status Polling Loop
   const startPollingLoop = () => {
     if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
+    // A poll still awaiting status() when the loop restarts must not schedule a second loop.
+    const loopToken = ++pollLoopTokenRef.current;
+    const schedule = (delayMs: number) => {
+      if (loopToken === pollLoopTokenRef.current) pollingTimerRef.current = setTimeout(poll, delayMs);
+    };
 
     const poll = async () => {
       const api = apiRef.current;
@@ -1380,7 +1399,7 @@ export function useRemoteSession() {
         appForegroundRef.current,
         bluetoothAudioOutputRef.current
       )) {
-        pollingTimerRef.current = setTimeout(poll, 1000);
+        schedule(1000);
         return;
       }
 
@@ -1548,7 +1567,7 @@ export function useRemoteSession() {
           const entryId = deferredBluetoothArtworkEntryIdsRef.current.shift();
           if (entryId) setTimeout(() => { void loadLibraryArtwork(entryId); }, 0);
         }
-        pollingTimerRef.current = setTimeout(poll, nextInterval);
+        schedule(nextInterval);
       } catch (err: any) {
         if (apiRef.current !== api) return;
         const playerKey = connectedPlayerKeyRef.current;
@@ -1592,12 +1611,12 @@ export function useRemoteSession() {
             connectionStatus: ConnectionStatus.Error,
             connectionMessage: err?.message || 'Connection to Compás player was lost.',
           }));
-          pollingTimerRef.current = setTimeout(poll, 3000);
+          schedule(3000);
         }
       }
     };
 
-    pollingTimerRef.current = setTimeout(poll, 300);
+    schedule(300);
   };
 
   // Queue Operations

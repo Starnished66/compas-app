@@ -142,6 +142,9 @@ export class SyncedCatalogStore {
         // Try expo-sqlite if available
         const SQLite = require('expo-sqlite');
         const expoDb = SQLite.openDatabaseSync('synced-catalog.db');
+        // withTransactionSync can't wrap async bodies, so transactions are explicit
+        // BEGIN/COMMIT on this connection, one at a time.
+        let transactionTail: Promise<unknown> = Promise.resolve();
         this.db = {
           exec: async (sql) => expoDb.execSync(sql),
           run: async (sql, params = []) => expoDb.runSync(sql, params),
@@ -149,12 +152,20 @@ export class SyncedCatalogStore {
           all: async (sql, params = []) => expoDb.getAllSync(sql, params),
           query: (sql, params = []) => expoDb.getAllAsync(sql, params),
           queryFirst: (sql, params = []) => expoDb.getFirstAsync(sql, params),
-          transaction: async (action) => {
-            let res: any;
-            expoDb.withTransactionSync(() => {
-              // Note: async inside sync transaction is adapted
+          transaction: (action) => {
+            const run = transactionTail.then(async () => {
+              expoDb.execSync('BEGIN IMMEDIATE');
+              try {
+                const result = await action(this.db);
+                expoDb.execSync('COMMIT');
+                return result;
+              } catch (error) {
+                try { expoDb.execSync('ROLLBACK'); } catch {}
+                throw error;
+              }
             });
-            return action(this.db);
+            transactionTail = run.catch(() => {});
+            return run;
           },
         };
       } catch {
@@ -198,6 +209,7 @@ export class SyncedCatalogStore {
       CREATE INDEX IF NOT EXISTS catalog_songs_album_artist ON catalog_songs(library_id, revision, album_artist);
       CREATE INDEX IF NOT EXISTS catalog_songs_genre ON catalog_songs(library_id, revision, genre);
       CREATE INDEX IF NOT EXISTS catalog_songs_title ON catalog_songs(library_id, revision, title COLLATE NOCASE);
+      CREATE INDEX IF NOT EXISTS catalog_songs_rank ON catalog_songs(library_id, revision, catalog_rank);
       CREATE TABLE IF NOT EXISTS catalog_song_artists (
         library_id TEXT NOT NULL,
         revision TEXT NOT NULL,
