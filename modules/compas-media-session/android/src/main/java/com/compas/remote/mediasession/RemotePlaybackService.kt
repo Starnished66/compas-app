@@ -13,7 +13,8 @@ import android.os.IBinder
 import android.util.Log
 
 class RemotePlaybackService : Service() {
-    private var foreground = false
+    // Read by the session module's background executor when it publishes a notification.
+    @Volatile private var foreground = false
 
     override fun onCreate() {
         super.onCreate()
@@ -118,7 +119,7 @@ class RemotePlaybackService : Service() {
 
     private fun handleForegroundPromotionDenied(failure: RuntimeException): Boolean {
         Log.w(TAG, "Foreground promotion was denied; stopping playback service", failure)
-        stopPlaybackService()
+        requestStop(this)
         return false
     }
 
@@ -157,5 +158,18 @@ class RemotePlaybackService : Service() {
         var pendingStarts = 0
         /** A stop requested while starts were pending; applied after the last one promotes. */
         var stopRequested = false
+
+        /** Main thread only. Every stop goes through here: stopping while a start is still
+         * undelivered kills the service before startForeground() and crashes the app. */
+        fun requestStop(context: Context) {
+            if (pendingStarts > 0) {
+                stopRequested = true
+                return
+            }
+            instance?.stopPlaybackService() ?: run {
+                val intent = Intent(context, RemotePlaybackService::class.java).apply { action = ACTION_STOP }
+                context.stopService(intent)
+            }
+        }
     }
 }

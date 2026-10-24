@@ -36,6 +36,7 @@ class CompasMediaSessionModule : Module() {
     private var currentVolume = 0.5f
     private var currentPlaying = false
     private val bgExecutor = Executors.newSingleThreadExecutor()
+    @Volatile private var sessionGeneration = 0
 
     override fun definition() = ModuleDefinition {
         Name("CompasMediaSession")
@@ -78,6 +79,7 @@ class CompasMediaSessionModule : Module() {
                         .build()
                 )
 
+                val generation = sessionGeneration
                 bgExecutor.submit {
                     var bitmap: Bitmap? = null
                     if (!artworkUri.isNullOrBlank()) {
@@ -86,11 +88,17 @@ class CompasMediaSessionModule : Module() {
                                 val cleanPath = artworkUri.removePrefix("file://")
                                 BitmapFactory.decodeFile(cleanPath)
                             } else if (artworkUri.startsWith("http://") || artworkUri.startsWith("https://")) {
-                                val stream: InputStream = URL(artworkUri).openStream()
-                                BitmapFactory.decodeStream(stream)
+                                // A stalled player must not block every later update on this single thread.
+                                val connection = URL(artworkUri).openConnection().apply {
+                                    connectTimeout = ARTWORK_TIMEOUT_MS
+                                    readTimeout = ARTWORK_TIMEOUT_MS
+                                }
+                                connection.getInputStream().use { stream: InputStream -> BitmapFactory.decodeStream(stream) }
                             } else null
                         }
                     }
+                    // clearState ran while the artwork loaded; don't bring the session back.
+                    if (generation != sessionGeneration) return@submit
 
                     val metaBuilder = MediaMetadata.Builder()
                         .putString(MediaMetadata.METADATA_KEY_TITLE, title)
@@ -155,18 +163,7 @@ class CompasMediaSessionModule : Module() {
         AsyncFunction("stopPlaybackService") { promise: Promise ->
             mainHandler.post {
                 try {
-                    if (RemotePlaybackService.pendingStarts > 0) {
-                        // Stopping before the service reaches startForeground() crashes the app;
-                        // the service stops itself once every pending start has promoted it.
-                        RemotePlaybackService.stopRequested = true
-                    } else {
-                        RemotePlaybackService.instance?.stopPlaybackService() ?: run {
-                            val intent = Intent(context, RemotePlaybackService::class.java).apply {
-                                action = RemotePlaybackService.ACTION_STOP
-                            }
-                            context.stopService(intent)
-                        }
-                    }
+                    RemotePlaybackService.requestStop(context)
                     promise.resolve(true)
                 } catch (e: Exception) {
                     promise.reject("SERVICE_STOP_FAILED", e.message, e)
@@ -176,6 +173,7 @@ class CompasMediaSessionModule : Module() {
 
         OnDestroy {
             releaseSessionInternal()
+            bgExecutor.shutdownNow()
         }
     }
 
@@ -308,11 +306,12 @@ class CompasMediaSessionModule : Module() {
     }
 
     private fun clearSessionInternal() {
+        sessionGeneration++
         val ms = session ?: return
         ms.isActive = false
         ms.setMetadata(null)
         ms.setPlaybackState(PlaybackState.Builder().setState(PlaybackState.STATE_NONE, 0, 0f).build())
-        RemotePlaybackService.instance?.stopPlaybackService()
+        mainHandler.post { RemotePlaybackService.requestStop(context) }
         runCatching {
             NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
         }
@@ -338,6 +337,7 @@ class CompasMediaSessionModule : Module() {
 
     companion object {
         const val NOTIFICATION_ID = RemotePlaybackService.NOTIFICATION_ID
+        private const val ARTWORK_TIMEOUT_MS = 5000
         const val CHANNEL_ID = RemotePlaybackService.CHANNEL_ID
         const val ACTION_PREVIOUS = "com.compas.remote.PREVIOUS"
         const val ACTION_TOGGLE = "com.compas.remote.TOGGLE"
