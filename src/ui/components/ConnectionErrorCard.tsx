@@ -5,6 +5,7 @@ import { AppText } from './AppText';
 import { Button } from './Button';
 import { Card } from './Card';
 import { StatusIndicator } from './StatusIndicator';
+import { useI18n } from '../../i18n';
 
 export interface ConnectionErrorCardProps {
   title: string;
@@ -14,6 +15,7 @@ export interface ConnectionErrorCardProps {
 }
 
 export function ConnectionErrorCard({ title, message, retryDelaySeconds, onRetry }: ConnectionErrorCardProps) {
+  const { t } = useI18n();
   const waiting = retryDelaySeconds > 0;
 
   return (
@@ -23,7 +25,7 @@ export function ConnectionErrorCard({ title, message, retryDelaySeconds, onRetry
         {message}
       </AppText>
       <Button
-        label={waiting ? `Wait ${retryDelaySeconds} s` : 'Try again'}
+        label={waiting ? t('Wait {seconds} s', { seconds: retryDelaySeconds }) : t('Try again')}
         icon="refresh"
         variant="container"
         disabled={waiting}

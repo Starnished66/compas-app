@@ -8,6 +8,7 @@ import { Radius, Size } from '../tokens';
 import { CometRing } from './CometRing';
 import { Icon } from './Icon';
 import { statusColor } from './StatusIndicator';
+import { useI18n } from '../../i18n';
 
 export interface PlayerButtonProps {
   status: ConnectionStatus;
@@ -33,11 +34,12 @@ function statusPhase(status: ConnectionStatus, pinRequired: boolean): PlayerStat
 }
 
 export function PlayerButton({ status, transport, playerName, pinRequired = false, onPress, style }: PlayerButtonProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const phase = statusPhase(status, pinRequired);
   const busy = phase === 'busy';
   const color = busy ? palette.statusBusy : statusColor(palette, connectionStatusKind(status));
-  const label = pinRequired ? 'PIN needed' : connectionStatusDescription(status, transport, playerName);
+  const label = pinRequired ? t('PIN needed') : connectionStatusDescription(status, transport, playerName, t);
   const { buttonStyle, iconStyle, rippleStyle } = usePlayerStatusMotion(phase);
   const borderColor = busy || phase === 'connected' ? palette.outline : color;
 

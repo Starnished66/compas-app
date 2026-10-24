@@ -7,6 +7,7 @@ import { trackKey } from '../trackKey';
 import { usePlaybackFraction } from '../usePlaybackPosition';
 import { useProgressLaps } from '../useProgressLaps';
 import { ProgressComet } from './ProgressComet';
+import { useI18n } from '../../i18n';
 
 export interface CardCometProps {
   track: RemoteTrack;
@@ -25,6 +26,7 @@ const HEAD_SIZE = 5;
 const TRACK_OPACITY = 0.6;
 
 export function CardComet({ track, playing, radius, style }: CardCometProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const laps = useProgressLaps(trackKey(track) ?? '', usePlaybackFraction());
   const [size, setSize] = useState<CometSize | null>(null);
@@ -47,7 +49,7 @@ export function CardComet({ track, playing, radius, style }: CardCometProps) {
           trackColor={palette.surfaceRaised}
           trackOpacity={TRACK_OPACITY}
           headSize={HEAD_SIZE}
-          label="Song progress"
+          label={t('Song progress')}
         />
       ) : null}
     </Animated.View>

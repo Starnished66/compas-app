@@ -5,6 +5,7 @@ import { Durations, Easings, motionDuration } from '../motion';
 import { Radius, Space } from '../tokens';
 import { useReducedMotion } from '../useReducedMotion';
 import { AppText } from './AppText';
+import { useI18n } from '../../i18n';
 
 export interface DialogProps {
   visible: boolean;
@@ -23,6 +24,7 @@ const SHADOW_RADIUS = 24;
 const SHADOW_ELEVATION = 16;
 
 export function Dialog({ visible, onClose, title, message, children, actions, dismissable = true }: DialogProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const reducedMotion = useReducedMotion();
   const [mounted, setMounted] = useState(visible);
@@ -60,7 +62,7 @@ export function Dialog({ visible, onClose, title, message, children, actions, di
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: scrim }]}>
           <Pressable
             accessibilityRole={dismissable ? 'button' : undefined}
-            accessibilityLabel={dismissable ? 'Close' : undefined}
+            accessibilityLabel={dismissable ? t('Close') : undefined}
             disabled={!dismissable}
             onPress={onClose}
             style={[StyleSheet.absoluteFill, { backgroundColor: palette.scrim }]}

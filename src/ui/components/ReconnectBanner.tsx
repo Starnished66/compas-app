@@ -4,6 +4,7 @@ import { Space } from '../tokens';
 import { AppText } from './AppText';
 import { Card } from './Card';
 import { Spinner } from './Spinner';
+import { useI18n } from '../../i18n';
 
 export interface ReconnectBannerProps {
   playerName: string;
@@ -14,15 +15,16 @@ export const RECONNECT_BANNER_HEIGHT = 76;
 const TEXT_GAP = 2;
 
 export function ReconnectBanner({ playerName, style }: ReconnectBannerProps) {
+  const { t } = useI18n();
   return (
     <Card accessibilityRole="alert" accessibilityLiveRegion="polite" style={[styles.card, style]}>
       <Spinner />
       <View style={styles.text}>
         <AppText variant="bodyStrong" numberOfLines={1}>
-          {`Reconnecting to ${playerName || 'the player'}…`}
+          {playerName ? t('Reconnecting to {name}…', { name: playerName }) : t('Reconnecting to the player…')}
         </AppText>
         <AppText variant="caption" tone="inkMuted" numberOfLines={2}>
-          Showing the last reading from the player. Controls come back when it answers.
+          {t('Showing the last reading from the player. Controls come back when it answers.')}
         </AppText>
       </View>
     </Card>

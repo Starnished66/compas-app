@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { usePalette } from '../PaletteProvider';
 import { RailLetter } from '../library/alphabetIndex';
 import { AppText } from './AppText';
+import { useI18n } from '../../i18n';
 
 export interface AlphabetRailProps {
   letters: RailLetter[];
@@ -17,6 +18,7 @@ const LETTER_HEIGHT = 18;
 const LETTER_HIT_SLOP = { left: 8, right: 2 };
 
 export function AlphabetRail({ letters, top, bottom, onSelect }: AlphabetRailProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   if (!letters.length) return null;
   return (
@@ -25,7 +27,7 @@ export function AlphabetRail({ letters, top, bottom, onSelect }: AlphabetRailPro
         <Pressable
           key={letter}
           accessibilityRole="button"
-          accessibilityLabel={`Jump to ${letter}`}
+          accessibilityLabel={t('Jump to {letter}', { letter })}
           hitSlop={LETTER_HIT_SLOP}
           onPress={() => onSelect(itemIndex)}
           style={({ pressed }) => [styles.letter, pressed && { backgroundColor: palette.surfaceRaised }]}

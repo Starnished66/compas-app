@@ -6,6 +6,7 @@ import { trackKey } from '../trackKey';
 import { usePlaybackFraction } from '../usePlaybackPosition';
 import { useProgressLaps } from '../useProgressLaps';
 import { cometGlowPad, ProgressComet } from './ProgressComet';
+import { useI18n } from '../../i18n';
 
 export interface PlayButtonRingProps {
   track: RemoteTrack;
@@ -20,6 +21,7 @@ const PAUSED_HEAD_OPACITY = 0.8;
 export const PLAY_BUTTON_RING_OUTSET = RING_GAP + cometGlowPad(HEAD_SIZE);
 
 export function PlayButtonRing({ track, playing, buttonSize }: PlayButtonRingProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const laps = useProgressLaps(trackKey(track) ?? '', usePlaybackFraction());
   const size = buttonSize + RING_GAP * 2;
@@ -36,7 +38,7 @@ export function PlayButtonRing({ track, playing, buttonSize }: PlayButtonRingPro
       trackOpacity={1}
       headOpacity={PAUSED_HEAD_OPACITY}
       headSize={HEAD_SIZE}
-      label="Song progress"
+      label={t('Song progress')}
       style={styles.ring}
     />
   );

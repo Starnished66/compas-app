@@ -5,6 +5,7 @@ import { Radius, Size, Space, Type } from '../tokens';
 import { Icon } from './Icon';
 import { IconButton } from './IconButton';
 import { IconName } from './iconPaths';
+import { useI18n } from '../../i18n';
 
 export interface TextFieldProps extends Omit<TextInputProps, 'style'> {
   icon?: IconName;
@@ -24,7 +25,7 @@ const LARGE_LETTER_SPACING = 8;
 export function TextField({
   icon,
   onClear,
-  clearLabel = 'Clear',
+  clearLabel,
   invalid = false,
   size = 'md',
   inputRef,
@@ -34,6 +35,7 @@ export function TextField({
   editable = true,
   ...inputProps
 }: TextFieldProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const large = size === 'lg';
   const showClear = Boolean(onClear) && Boolean(value) && editable;
@@ -72,7 +74,7 @@ export function TextField({
       {showClear ? (
         <IconButton
           icon="close"
-          label={clearLabel}
+          label={clearLabel ?? t('Clear')}
           size="sm"
           iconSize={CLEAR_ICON_SIZE}
           color={palette.inkMuted}

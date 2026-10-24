@@ -48,7 +48,7 @@ export function PlaylistOptionsSheet({
     if (!playlist) return;
     onAction({ type: 'RenamePlaylist', key: playlist.key, name: newName });
     watchForError();
-    snackbar.show({ text: `Renamed to ${newName.trim()}` });
+    snackbar.show({ text: t('Renamed to {name}', { name: newName.trim() }) });
     onClose();
   };
 
@@ -56,7 +56,7 @@ export function PlaylistOptionsSheet({
     if (!playlist) return;
     onAction({ type: 'DeletePlaylist', key: playlist.key });
     watchForError();
-    snackbar.show({ text: `Deleted ${name}` });
+    snackbar.show({ text: t('Deleted {name}', { name }) });
     setConfirmingDelete(false);
     onClose();
   };

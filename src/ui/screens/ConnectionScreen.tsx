@@ -22,6 +22,7 @@ import { usePairThenConnect } from '../usePairThenConnect';
 import { useScreenInsets } from '../useScreenInsets';
 import { insetBeyond } from '../insetBeyond';
 import { useI18n } from '../../i18n';
+import { localizedMessage } from '../localizedLabels';
 
 export interface ConnectionScreenProps {
   state: RemoteUiState;
@@ -42,9 +43,9 @@ function failureAdvice(transport: ConnectionTransport, t: (source: string) => st
     : t('Check that the player is on, on the same Wi-Fi as this phone, and that remote control is turned on.');
 }
 
-function connectingLabel(target: ConnectTarget | null, message: string | null | undefined, t: (source: string, variables?: { name: string }) => string): string {
+function connectingLabel(target: ConnectTarget | null, message: string | null | undefined, t: (source: string, variables?: Record<string, string | number>) => string): string {
   if (target) return t('Contacting {name}…', { name: target.name });
-  return message || t('Connecting…');
+  return message ? localizedMessage(message, t) : t('Connecting…');
 }
 
 export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
@@ -93,7 +94,7 @@ export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
         <AppText variant="title" accessibilityRole="header" numberOfLines={1} style={styles.title}>
           {t('Connect a player')}
         </AppText>
-        <StatusIndicator status={status.status} label={status.label} strong />
+        <StatusIndicator status={status.status} label={t(status.label)} strong />
       </View>
 
       <ScrollView
@@ -130,7 +131,7 @@ export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
           <EnterView>
             <ConnectionErrorCard
               title={t('Couldn’t connect')}
-              message={state.connectionMessage || failureAdvice(transport, t)}
+              message={state.connectionMessage ? localizedMessage(state.connectionMessage, t) : failureAdvice(transport, t)}
               retryDelaySeconds={retryDelay}
               onRetry={() => onAction({ type: 'RetryConnection' })}
             />

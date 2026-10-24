@@ -3,6 +3,7 @@ import { Animated, StyleProp, ViewStyle } from 'react-native';
 import { usePalette } from '../PaletteProvider';
 import { usePopAnimation } from '../usePopAnimation';
 import { IconButton } from './IconButton';
+import { useI18n } from '../../i18n';
 
 export interface FavoriteButtonProps {
   favorite: boolean;
@@ -14,6 +15,7 @@ export interface FavoriteButtonProps {
 const OPTIMISTIC_HOLD_MS = 4000;
 
 export function FavoriteButton({ favorite, onChange, disabled = false, style }: FavoriteButtonProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const [optimistic, setOptimistic] = useState<boolean | null>(null);
   const shown = optimistic ?? favorite;
@@ -39,7 +41,7 @@ export function FavoriteButton({ favorite, onChange, disabled = false, style }: 
         icon="heart"
         filled={shown}
         color={shown ? palette.accent : palette.ink}
-        label={shown ? 'Remove from favorites' : 'Add to favorites'}
+        label={shown ? t('Remove from favorites') : t('Add to favorites')}
         onPress={toggle}
         disabled={disabled}
       />

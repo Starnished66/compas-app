@@ -52,7 +52,7 @@ export function ManualAddressEntry({ active, address, onChangeAddress, onSubmit,
       />
       <StatusIndicator
         status={invalid ? 'error' : 'idle'}
-        label={playerAddressHint(address)}
+        label={playerAddressHint(address, t)}
         dotSize="sm"
         tone="inkMuted"
         numberOfLines={ADDRESS_HINT_LINES}

@@ -7,6 +7,7 @@ import { useSnackbar } from './snackbar/useSnackbar';
 import { trackKey } from './trackKey';
 import { usePlaybackPositionStore } from './usePlaybackPosition';
 import { isShuffleMode, toggleRepeatMode } from '../session/playbackModes';
+import { useI18n } from '../i18n';
 
 export interface PlayerCommands {
   pendingLabel: string | null;
@@ -40,12 +41,13 @@ function repeatLabel(mode: PlaybackMode): string {
 }
 
 export function usePlayerCommands(state: RemoteUiState, onAction: (action: RemoteAction) => void): PlayerCommands {
+  const { t } = useI18n();
   const snackbar = useSnackbar();
   const positionStore = usePlaybackPositionStore();
   const [pending, setPending] = useState<PendingCommand | null>(null);
   const counter = useRef(0);
-  const latest = useRef({ state, onAction, snackbar, positionStore });
-  latest.current = { state, onAction, snackbar, positionStore };
+  const latest = useRef({ state, onAction, snackbar, positionStore, t });
+  latest.current = { state, onAction, snackbar, positionStore, t };
   const feedbackMs = state.connectionTransport === ConnectionTransport.Bluetooth ? BLUETOOTH_FEEDBACK_MS : WIFI_FEEDBACK_MS;
 
   useEffect(() => {
@@ -69,7 +71,7 @@ export function usePlayerCommands(state: RemoteUiState, onAction: (action: Remot
   const commands = useMemo(() => {
     const run = (action: RemoteAction, label: string, options: Omit<PendingCommand, 'id' | 'label'> = { skipping: false }) => {
       counter.current += 1;
-      setPending({ id: counter.current, label, ...options });
+      setPending({ id: counter.current, label: latest.current.t(label), ...options });
       latest.current.onAction(action);
     };
 
@@ -92,9 +94,10 @@ export function usePlayerCommands(state: RemoteUiState, onAction: (action: Remot
         run({ type: 'TogglePlayback' }, latest.current.state.isPlaying ? 'Pausing…' : 'Starting playback…'),
       next: () => skip(1),
       previous: () => skip(-1),
-      seek: (positionMs: number) => run({ type: 'SeekTo', positionMs }, `Seeking to ${formatPlaybackTime(positionMs)}…`),
+      seek: (positionMs: number) =>
+        run({ type: 'SeekTo', positionMs }, latest.current.t('Seeking to {time}…', { time: formatPlaybackTime(positionMs) })),
       setVolume: (volume: number) =>
-        run({ type: 'SetVolume', volume }, `Setting volume to ${Math.round(Math.max(0, Math.min(1, volume)) * 100)}%…`),
+        run({ type: 'SetVolume', volume }, latest.current.t('Setting volume to {percent}%…', { percent: Math.round(Math.max(0, Math.min(1, volume)) * 100) })),
       toggleShuffle: () =>
         run(
           { type: 'ToggleShuffle' },
@@ -104,8 +107,8 @@ export function usePlayerCommands(state: RemoteUiState, onAction: (action: Remot
         const mode = latest.current.state.playbackMode;
         const supportsShuffleModes = latest.current.state.supportedFeatures.includes('shuffle_modes');
         const target = toggleRepeatMode(mode, supportsShuffleModes);
-        const prefix = isShuffleMode(mode) && !supportsShuffleModes ? 'Shuffle off · ' : '';
-        run({ type: 'CycleRepeatMode' }, prefix + repeatLabel(target));
+        const label = latest.current.t(repeatLabel(target));
+        run({ type: 'CycleRepeatMode' }, isShuffleMode(mode) && !supportsShuffleModes ? `${latest.current.t('Shuffle off')} · ${label}` : label);
       },
       setFavorite: (favorite: boolean) => {
         run({ type: 'SetCurrentFavorite', favorite }, favorite ? 'Adding to favorites…' : 'Removing from favorites…', {
@@ -113,8 +116,8 @@ export function usePlayerCommands(state: RemoteUiState, onAction: (action: Remot
           settled: (current) => current.currentFavorite === favorite,
         });
         latest.current.snackbar.show({
-          text: favorite ? 'Added to favorites' : 'Removed from favorites',
-          actionLabel: 'Undo',
+          text: favorite ? latest.current.t('Added to favorites') : latest.current.t('Removed from favorites'),
+          actionLabel: latest.current.t('Undo'),
           onAction: () => latest.current.onAction({ type: 'SetCurrentFavorite', favorite: !favorite }),
         });
       },

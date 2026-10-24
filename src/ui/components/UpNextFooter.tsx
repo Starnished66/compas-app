@@ -5,6 +5,7 @@ import { Space } from '../tokens';
 import { AppText } from './AppText';
 import { CardSection } from './CardSection';
 import { Spinner } from './Spinner';
+import { useI18n } from '../../i18n';
 
 export interface UpNextFooterProps {
   hasRows: boolean;
@@ -15,19 +16,20 @@ export interface UpNextFooterProps {
 }
 
 export function UpNextFooter({ hasRows, status, loadingMore, hasMore, onLayout }: UpNextFooterProps) {
+  const { t } = useI18n();
   const emptyContent =
     status === ContentStatus.Loading ? (
       <View style={styles.emptyRow}>
         <Spinner />
         <AppText variant="body" tone="inkMuted">
-          Loading the queue…
+          {t('Loading the queue…')}
         </AppText>
       </View>
     ) : (
       <AppText variant="body" tone="inkMuted" style={styles.emptyText}>
         {status === ContentStatus.Error
-          ? 'Couldn’t load the queue from the player.'
-          : 'Nothing else is queued. Add songs from their menu in the Library.'}
+          ? t('Couldn’t load the queue from the player.')
+          : t('Nothing else is queued. Add songs from their menu in the Library.')}
       </AppText>
     );
 
@@ -40,7 +42,7 @@ export function UpNextFooter({ hasRows, status, loadingMore, hasMore, onLayout }
         </View>
       ) : hasRows && !hasMore ? (
         <AppText variant="caption" tone="inkMuted" style={styles.endOfQueue}>
-          End of queue
+          {t('End of queue')}
         </AppText>
       ) : null}
     </CardSection>

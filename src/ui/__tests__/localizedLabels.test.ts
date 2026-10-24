@@ -1,5 +1,5 @@
 import { translate } from '../../i18n/translate';
-import { localizedCountLabel, localizedEntrySubtitle } from '../localizedLabels';
+import { localizedCountLabel, localizedEntrySubtitle, localizedMessage } from '../localizedLabels';
 import { LibraryEntry } from '../../data/types';
 import { describeLibrarySync, upToDateLabel } from '../library/librarySync';
 
@@ -11,6 +11,16 @@ describe('localized library labels', () => {
     expect(localizedCountLabel('4 tracks · Road Songs', french)).toBe('4 pistes · Road Songs');
     expect(localizedCountLabel('4 tracks · Road Songs ', french)).toBe('4 pistes · Road Songs ');
     expect(localizedCountLabel('Failed to load playlist tracks', french)).toBe('Failed to load playlist tracks');
+  });
+
+  it('localizes category counts, folder counts and session messages with embedded values', () => {
+    const spanish = (source: string, variables?: Record<string, string | number>) => translate(source, 'es', variables);
+    expect(localizedCountLabel('37 album artists', spanish)).toBe('37 artistas del álbum');
+    expect(localizedCountLabel('1 favorites', spanish)).toBe('1 favorito');
+    expect(localizedCountLabel('54 items · SD card', spanish)).toBe('54 elementos · SD card');
+    expect(localizedMessage('Too many PIN attempts. Try again in 30s.', spanish)).toBe('Demasiados intentos de PIN. Inténtalo de nuevo en 30 s.');
+    expect(localizedMessage('Could not load library', spanish)).toBe('No se pudo cargar la biblioteca');
+    expect(localizedMessage('Unmapped player error', spanish)).toBe('Unmapped player error');
   });
 
   it('localizes only producer-marked subtitle templates and leaves arbitrary metadata intact', () => {

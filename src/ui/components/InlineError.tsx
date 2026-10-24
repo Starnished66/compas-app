@@ -4,6 +4,7 @@ import { usePalette } from '../PaletteProvider';
 import { Radius, Space } from '../tokens';
 import { AppText } from './AppText';
 import { useI18n } from '../../i18n';
+import { localizedMessage } from '../localizedLabels';
 
 export interface InlineErrorProps {
   message: string;
@@ -19,7 +20,7 @@ export function InlineError({ message, style }: InlineErrorProps) {
     <View style={[styles.row, style]}>
       <View style={[styles.dot, { backgroundColor: palette.statusError }]} />
       <AppText variant="caption" accessibilityLiveRegion="polite" style={styles.text}>
-        {t(message)}
+        {localizedMessage(message, t)}
       </AppText>
     </View>
   );

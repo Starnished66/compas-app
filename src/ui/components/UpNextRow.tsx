@@ -9,6 +9,7 @@ import { AppText } from './AppText';
 import { ArtworkThumb } from './ArtworkThumb';
 import { Icon } from './Icon';
 import { PlayingIndicator } from './PlayingIndicator';
+import { useI18n } from '../../i18n';
 
 export interface UpNextRowProps {
   track: RemoteTrack;
@@ -33,6 +34,7 @@ const ROW_VERTICAL_PADDING = 6;
 const EDIT_SHIFT = Space.xs + REMOVE_SLOT_WIDTH + Space.md - Space.lg;
 
 function UpNextRowContent({ track, index, editing, current, playing, onPress, onRemove, dragHandle }: UpNextRowProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const progress = useEditStagger(editing, index);
   const motion = useMemo(
@@ -47,7 +49,7 @@ function UpNextRowContent({ track, index, editing, current, playing, onPress, on
     }),
     [progress],
   );
-  const subtitle = track.artist || 'Unknown artist';
+  const subtitle = track.artist || t('Unknown artist');
 
   return (
     <Pressable
@@ -77,7 +79,7 @@ function UpNextRowContent({ track, index, editing, current, playing, onPress, on
         >
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Remove ${track.title} from queue`}
+            accessibilityLabel={t('Remove {title} from queue', { title: track.title })}
             accessibilityElementsHidden={!editing}
             importantForAccessibility={editing ? 'auto' : 'no-hide-descendants'}
             onPress={() => onRemove(track)}

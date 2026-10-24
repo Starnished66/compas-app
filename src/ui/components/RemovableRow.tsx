@@ -15,6 +15,7 @@ import { Space } from '../tokens';
 import { useReducedMotion } from '../useReducedMotion';
 import { AppText } from './AppText';
 import { Icon } from './Icon';
+import { useI18n } from '../../i18n';
 
 export interface RowAccessibilityAction {
   name: string;
@@ -68,6 +69,7 @@ export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(fu
   },
   ref,
 ) {
+  const { t } = useI18n();
   const palette = usePalette();
   const reducedMotion = useReducedMotion();
   const [{ offset, contentOpacity, collapse }] = useState(createRowValues);
@@ -269,7 +271,7 @@ export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(fu
       accessible={Boolean(accessibilityLabel)}
       accessibilityRole={accessibilityLabel && onTap ? 'button' : undefined}
       accessibilityLabel={accessibilityLabel}
-      accessibilityHint={swipeToRemove && accessibilityLabel ? 'Swipe left to remove' : undefined}
+      accessibilityHint={swipeToRemove && accessibilityLabel ? t('Swipe left to remove') : undefined}
       accessibilityActions={accessibilityLabel ? actions.map(({ name, label }) => ({ name, label })) : undefined}
       onAccessibilityAction={accessibilityLabel ? handleAccessibilityAction : undefined}
       onLayout={onLayout}

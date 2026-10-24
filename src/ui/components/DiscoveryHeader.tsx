@@ -25,7 +25,7 @@ export function DiscoveryHeader({ label, searching, onSearch }: DiscoveryHeaderP
           <View accessibilityLiveRegion="polite" style={styles.searching}>
             <Spinner size={SEARCH_SPINNER_SIZE} />
             <AppText variant="caption" tone="inkMuted">
-              Searching…
+              {t('Searching…')}
             </AppText>
           </View>
         ) : (

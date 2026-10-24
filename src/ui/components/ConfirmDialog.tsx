@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from './Button';
 import { Dialog } from './Dialog';
+import { useI18n } from '../../i18n';
 
 export interface ConfirmDialogProps {
   visible: boolean;
@@ -18,11 +19,12 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel,
-  cancelLabel = 'Cancel',
+  cancelLabel,
   destructive = false,
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
+  const { t } = useI18n();
   return (
     <Dialog
       visible={visible}
@@ -31,7 +33,7 @@ export function ConfirmDialog({
       message={message}
       actions={
         <>
-          <Button label={cancelLabel} variant="raised" fill onPress={onClose} />
+          <Button label={cancelLabel ?? t('Cancel')} variant="raised" fill onPress={onClose} />
           <Button label={confirmLabel} variant={destructive ? 'destructive' : 'accent'} fill onPress={onConfirm} />
         </>
       }

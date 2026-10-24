@@ -17,6 +17,7 @@ import { FrostFill } from './FrostFill';
 import { IconButton } from './IconButton';
 import { PlayButtonRing } from './PlayButtonRing';
 import { PlaybackProgressBar } from './PlaybackProgressBar';
+import { useI18n } from '../../i18n';
 
 export interface MiniPlayerProps {
   track: RemoteTrack;
@@ -46,9 +47,10 @@ export function MiniPlayer({
   onNext,
   style,
 }: MiniPlayerProps) {
+  const { t } = useI18n();
   const palette = usePalette();
-  const title = track.title || 'Unknown song';
-  const artist = track.artist || 'Unknown artist';
+  const title = track.title || t('Unknown song');
+  const artist = track.artist || t('Unknown artist');
   const { artStyle, metaStyle } = useTrackChangeMotion(track);
   const glyphStyle = usePlayGlyphSwap(isPlaying);
   const reducedMotion = useReducedMotion();
@@ -77,7 +79,7 @@ export function MiniPlayer({
     <Animated.View style={[enterStyle, style]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Now playing ${title}, ${artist}. Open player`}
+        accessibilityLabel={t('Now playing {title}, {artist}. Open player', { title, artist })}
         onPress={onOpen}
         style={[
           styles.bar,
@@ -99,7 +101,7 @@ export function MiniPlayer({
         </Animated.View>
         <IconButton
           icon="skipPrevious"
-          label="Previous"
+          label={t('Previous')}
           size="sm"
           iconSize={SKIP_ICON_SIZE}
           onPress={() => skip(-1, onPrevious)}
@@ -107,7 +109,7 @@ export function MiniPlayer({
         <View style={styles.playButton}>
           <IconButton
             icon={isPlaying ? 'pause' : 'play'}
-            label={isPlaying ? 'Pause' : 'Play'}
+            label={isPlaying ? t('Pause') : t('Play')}
             size="sm"
             variant="container"
             iconSize={PLAY_ICON_SIZE}
@@ -118,7 +120,7 @@ export function MiniPlayer({
             <PlayButtonRing track={track} playing={isPlaying} buttonSize={Size.controlSm} />
           ) : null}
         </View>
-        <IconButton icon="skipNext" label="Next" size="sm" iconSize={SKIP_ICON_SIZE} onPress={() => skip(1, onNext)} />
+        <IconButton icon="skipNext" label={t('Next')} size="sm" iconSize={SKIP_ICON_SIZE} onPress={() => skip(1, onNext)} />
         {progressStyle === 'bar' ? <PlaybackProgressBar style={styles.progress} /> : null}
       </Pressable>
       {progressStyle === 'card' ? (

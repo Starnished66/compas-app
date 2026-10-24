@@ -1,5 +1,7 @@
 import { catalogs, Language } from '../catalogs';
 import { normalizeLanguageTag, resolveLanguage, translate } from '../translate';
+import { LIBRARY_CATEGORY_OPTIONS } from '../../ui/library/libraryCategories';
+import { SEARCH_FILTER_OPTIONS } from '../../ui/library/searchSections';
 import ts from 'typescript';
 
 declare const require: (name: string) => unknown;
@@ -128,6 +130,29 @@ describe('i18n translator', () => {
     }
   });
 
+  it('translates labels that reach t() indirectly through option tables and helpers', () => {
+    const indirect = [
+      ...LIBRARY_CATEGORY_OPTIONS.map((option) => option.label),
+      ...SEARCH_FILTER_OPTIONS.map((option) => option.label),
+      'Library', 'Home', 'Playlists', 'Transfer', 'Tracks',
+      'Connected', 'Connecting…', 'Connection failed', 'Not connected', 'PIN needed',
+      'Hi-res · above CD quality (16-bit · 44.1 kHz)', 'Compressed · smaller files, some detail removed', 'CD quality · lossless', 'Lossless',
+      'Repeat', 'Repeat once', 'Repeat off', 'Repeating the queue…', 'Repeating this song…', 'Repeat off…',
+      'Skipping…', 'Restarting…', 'Going back…', 'Pausing…', 'Starting playback…', 'Turning shuffle off…', 'Turning shuffle on…',
+      'Adding to favorites…', 'Removing from favorites…',
+      'Too long for the player. Shorten it a little.', 'You already have a playlist with this name',
+      'Incorrect PIN. Check the player screen.', 'The saved PIN was rejected. Enter the current PIN.',
+      '{count} album artists', '{count} favorites', '{count} playlists', '{count} folders', '{count} selected on this page',
+    ];
+    const languages: Language[] = ['es', 'de', 'fr', 'it', 'ru'];
+    const missing = languages.flatMap((language) => indirect.filter((source) => !catalogs[language][source]).map((source) => `${language}: ${source}`));
+    expect(missing).toEqual([]);
+    expect(translate('Album artists', 'es')).toBe('Artistas del álbum');
+    expect(translate('Home', 'es')).toBe('Inicio');
+    expect(translate('{count} album artists', 'es', { count: 37 })).toBe('37 artistas del álbum');
+    expect(translate('{count} favorites', 'es', { count: 1 })).toBe('1 favorito');
+  });
+
   it('covers every literal t() source in app code and keeps interpolation placeholders aligned', () => {
     const sources = new Set<string>();
     const visitDirectory = (directory: string) => {
@@ -141,8 +166,15 @@ describe('i18n translator', () => {
         const sourceFile = ts.createSourceFile(absolute, fs.readFileSync(absolute, 'utf8'), ts.ScriptTarget.Latest, true);
         const visitNode = (node: ts.Node) => {
           if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 't') {
-            const argument = node.arguments[0];
-            if (argument && (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument))) sources.add(argument.text);
+            const collect = (argument: ts.Expression | undefined): void => {
+              if (!argument) return;
+              if (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) sources.add(argument.text);
+              else if (ts.isConditionalExpression(argument)) {
+                collect(argument.whenTrue);
+                collect(argument.whenFalse);
+              } else if (ts.isParenthesizedExpression(argument)) collect(argument.expression);
+            };
+            collect(node.arguments[0]);
           }
           ts.forEachChild(node, visitNode);
         };

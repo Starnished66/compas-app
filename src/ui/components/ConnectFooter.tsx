@@ -36,7 +36,7 @@ export function ConnectFooter({
     <View style={[styles.footer, { borderTopColor: palette.outline, backgroundColor: palette.background }]}>
       {notice ? (
         <AppText variant="caption" tone="inkMuted" accessibilityLiveRegion="polite">
-          {notice}
+          {t(notice)}
         </AppText>
       ) : null}
       {connecting ? (

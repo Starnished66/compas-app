@@ -5,6 +5,7 @@ import { useSnackbar } from './snackbar/useSnackbar';
 import { trackKey } from './trackKey';
 import { DragReorder, useDragReorder } from './useDragReorder';
 import { useQueueReorder } from './useQueueReorder';
+import { useI18n } from '../i18n';
 
 export interface UpNextQueue {
   rows: RemoteTrack[];
@@ -21,10 +22,11 @@ export function useUpNextQueue(
   rowHeight: number,
   onReorderActiveChange?: (active: boolean) => void,
 ): UpNextQueue {
+  const { t } = useI18n();
   const snackbar = useSnackbar();
   const canEditQueue = state.supportedFeatures.includes('queue_edit');
   const reorder = useQueueReorder(state.queue, onAction, ({ track, from, to }) =>
-    snackbar.show({ text: `Moved “${track.title}”`, actionLabel: 'Undo', onAction: () => reorder.move(to, from) }),
+    snackbar.show({ text: t('Moved “{title}”', { title: track.title }), actionLabel: t('Undo'), onAction: () => reorder.move(to, from) }),
   );
   const drag = useDragReorder({
     itemCount: reorder.queue.length,
@@ -33,13 +35,13 @@ export function useUpNextQueue(
     onMove: reorder.move,
     onDragStateChange: onReorderActiveChange,
   });
-  const latest = useRef({ state, onAction, snackbar, canEditQueue });
-  latest.current = { state, onAction, snackbar, canEditQueue };
+  const latest = useRef({ state, onAction, snackbar, canEditQueue, t });
+  latest.current = { state, onAction, snackbar, canEditQueue, t };
 
   const playTrack = useCallback((track: RemoteTrack) => {
     const current = latest.current;
     if (!current.canEditQueue) {
-      current.snackbar.show({ text: 'This player can’t jump to a song in the queue.' });
+      current.snackbar.show({ text: current.t('This player can’t jump to a song in the queue.') });
       return;
     }
     recordSkip(1, trackKey(current.state.currentTrack));
@@ -48,7 +50,7 @@ export function useUpNextQueue(
 
   const removeTrack = useCallback((track: RemoteTrack) => {
     latest.current.onAction({ type: 'RemoveQueueTrack', id: track.id });
-    latest.current.snackbar.show({ text: `Removed “${track.title}”` });
+    latest.current.snackbar.show({ text: latest.current.t('Removed “{title}”', { title: track.title }) });
   }, []);
 
   return { rows: reorder.queue, drag, canEditQueue, playTrack, removeTrack };

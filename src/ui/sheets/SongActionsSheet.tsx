@@ -79,22 +79,22 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
     (action: PendingSongAction) => {
       const latest = stateRef.current;
       const view = (match: PlaylistMatch): Pick<SnackbarMessage, 'actionLabel' | 'onAction'> => ({
-        actionLabel: 'View',
+        actionLabel: t('View'),
         onAction: () => viewPlaylist(match),
       });
       switch (action.kind) {
         case 'queue':
-          snackbar.show({ text: 'Added to queue' });
+          snackbar.show({ text: t('Added to queue') });
           return;
         case 'playlist':
           snackbar.show({
-            text: `Added to ${action.playlistName}`,
+            text: t('Added to {name}', { name: action.playlistName }),
             ...(isViewingPlaylist(latest, action.key) ? {} : view({ key: action.key })),
           });
           return;
         case 'create':
           snackbar.show({
-            text: `Created ${action.playlistName} with “${action.title}”`,
+            text: t('Created {name} with “{title}”', { name: action.playlistName, title: action.title }),
             ...view({ name: action.playlistName }),
           });
           return;
@@ -102,10 +102,10 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
           const entryId = action.entryId;
           const undoable = entryId != null && !showsFavorites(latest);
           snackbar.show({
-            text: action.favorite ? 'Added to favorites' : 'Removed from favorites',
+            text: action.favorite ? t('Added to favorites') : t('Removed from favorites'),
             ...(undoable
               ? {
-                  actionLabel: 'Undo',
+                  actionLabel: t('Undo'),
                   onAction: () => {
                     if (stateRef.current.libraryEntries.some((entry) => entry.id === entryId)) {
                       setFavoriteFor(onAction, entryId, !action.favorite);
@@ -117,13 +117,13 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
           return;
         }
         case 'remove':
-          snackbar.show({ text: `Removed from ${action.playlistName}` });
+          snackbar.show({ text: t('Removed from {name}', { name: action.playlistName }) });
           return;
         case 'move':
           return;
       }
     },
-    [onAction, snackbar, viewPlaylist],
+    [onAction, snackbar, viewPlaylist, t],
   );
 
   const { pending, revealed, start, clear } = useSongActionPending(state, onAction, confirmed);

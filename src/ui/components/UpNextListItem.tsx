@@ -5,6 +5,7 @@ import { DragHandleProps } from '../useDragReorder';
 import { CardSection } from './CardSection';
 import { RemovableRow, RemovableRowHandle } from './RemovableRow';
 import { UP_NEXT_ROW_HEIGHT, UpNextRow } from './UpNextRow';
+import { useI18n } from '../../i18n';
 
 export interface UpNextListItemProps {
   track: RemoteTrack;
@@ -29,6 +30,7 @@ function UpNextListItemContent({
   onPlay,
   onRemove,
 }: UpNextListItemProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const removable = useRef<RemovableRowHandle>(null);
   const startRemoval = useCallback(() => removable.current?.remove(), []);
@@ -39,7 +41,7 @@ function UpNextListItemContent({
         ref={removable}
         rowHeight={UP_NEXT_ROW_HEIGHT}
         contentBackground={lifted ? palette.surfaceRaised : undefined}
-        removeLabel={`Remove ${track.title} from queue`}
+        removeLabel={t('Remove {title} from queue', { title: track.title })}
         onRemove={() => onRemove(track)}
       >
         <UpNextRow

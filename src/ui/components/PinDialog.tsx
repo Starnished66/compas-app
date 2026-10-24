@@ -11,6 +11,7 @@ import { Dialog } from './Dialog';
 import { InlineError } from './InlineError';
 import { StatusIndicator } from './StatusIndicator';
 import { TextField } from './TextField';
+import { useI18n } from '../../i18n';
 
 export interface PinDialogProps {
   state: RemoteUiState;
@@ -72,6 +73,7 @@ function useRejectedPinFeedback(
 }
 
 export function PinDialog({ state, onAction }: PinDialogProps) {
+  const { t } = useI18n();
   const player = useConnectedPlayer(state);
   const updating = useOpenedWhileConnected(
     state.pinDialogVisible,
@@ -96,11 +98,11 @@ export function PinDialog({ state, onAction }: PinDialogProps) {
   };
   const dismiss = () => onAction({ type: 'DismissPin' });
 
-  const title = updating ? 'Update saved PIN' : 'Enter the player’s PIN';
+  const title = updating ? t('Update saved PIN') : t('Enter the player’s PIN');
   const message = updating
-    ? `Enter the PIN set on ${player.name}. This changes the PIN this phone sends. It doesn’t change the PIN on the player.`
-    : `${player.name} asks for a PIN before it accepts a remote. You’ll find it in the player’s remote control settings.`;
-  const submitLabel = locked ? `Wait ${lockSeconds} s` : updating ? 'Save' : 'Connect';
+    ? t('Enter the PIN set on {name}. This changes the PIN this phone sends. It doesn’t change the PIN on the player.', { name: player.name })
+    : t('{name} asks for a PIN before it accepts a remote. You’ll find it in the player’s remote control settings.', { name: player.name });
+  const submitLabel = locked ? t('Wait {seconds} s', { seconds: lockSeconds }) : updating ? t('Save') : t('Connect');
 
   return (
     <Dialog
@@ -110,7 +112,7 @@ export function PinDialog({ state, onAction }: PinDialogProps) {
       message={message}
       actions={
         <>
-          <Button label="Cancel" variant="raised" fill onPress={dismiss} />
+          <Button label={t('Cancel')} variant="raised" fill onPress={dismiss} />
           <Button label={submitLabel} fill disabled={!canSubmit} busy={submitting} onPress={submit} />
         </>
       }
@@ -138,7 +140,7 @@ export function PinDialog({ state, onAction }: PinDialogProps) {
           />
         </Animated.View>
         <AppText variant="caption" tone="inkMuted">
-          4–12 digits. Saved on this phone once the player accepts it.
+          {t('4–12 digits. Saved on this phone once the player accepts it.')}
         </AppText>
         {locked ? (
           <StatusIndicator
@@ -146,7 +148,7 @@ export function PinDialog({ state, onAction }: PinDialogProps) {
             pulse={false}
             dotSize="sm"
             numberOfLines={LOCK_MESSAGE_LINES}
-            label={`Too many tries. Try again in ${formatCountdown(lockSeconds)}.`}
+            label={t('Too many tries. Try again in {time}.', { time: formatCountdown(lockSeconds) })}
           />
         ) : state.pinError ? (
           <InlineError message={state.pinError} />

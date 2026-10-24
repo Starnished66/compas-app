@@ -9,6 +9,7 @@ import { FrostFill } from './FrostFill';
 import { IconName } from './iconPaths';
 import { TabBarItem } from './TabBarItem';
 import { TabPill } from './TabPill';
+import { useI18n } from '../../i18n';
 
 export type TabKey = 'library' | 'home' | 'playlists' | 'transfer';
 
@@ -32,6 +33,7 @@ const BAR_BORDER = 1;
 const MINIMIZED_ROW_WIDTH = MinimizedTabBarWidth - 2 * (BAR_PADDING + BAR_BORDER);
 
 export function TabBar({ active, onSelect, minimized = false, onExpand, style }: TabBarProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const rowRef = useRef<View>(null);
   const measuredWidth = useRef(0);
@@ -89,7 +91,7 @@ export function TabBar({ active, onSelect, minimized = false, onExpand, style }:
           return (
             <TabBarItem
               key={tab.key}
-              label={tab.label}
+              label={t(tab.label)}
               icon={tab.icon}
               selected={selected}
               hidden={minimized && !selected}

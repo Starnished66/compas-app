@@ -49,7 +49,7 @@ export function WifiPlayerList({
         <EnterView key={player.id} index={index}>
           <PlayerRow
             name={player.name}
-            detail={player.address === connectedAddress ? `${player.address} · connected` : player.address}
+            detail={player.address === connectedAddress ? `${player.address} · ${t('connected')}` : player.address}
             selected={!manualOpen && player.address === selectedAddress}
             onPress={() => {
               onManualOpenChange(false);

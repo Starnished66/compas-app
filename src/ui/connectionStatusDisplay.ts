@@ -1,5 +1,9 @@
 import { ConnectionStatus, ConnectionTransport } from '../data/types';
 import { ConnectionStatus as StatusKind } from './components/StatusIndicator';
+import { translate as translateEnglish } from '../i18n/translate';
+
+type Translate = (source: string, variables?: Record<string, string | number>) => string;
+const english: Translate = (source, variables) => translateEnglish(source, 'en', variables);
 
 export function connectionStatusKind(status: ConnectionStatus): StatusKind {
   switch (status) {
@@ -35,8 +39,11 @@ export function connectionStatusDescription(
   status: ConnectionStatus,
   transport: ConnectionTransport,
   playerName: string,
+  t: Translate = english,
 ): string {
-  if (status !== ConnectionStatus.Connected) return connectionStatusLabel(status);
+  if (status !== ConnectionStatus.Connected) return t(connectionStatusLabel(status));
   const name = playerName.trim();
-  return name ? `Connected to ${name} · ${transportLabel(transport)}` : `Connected · ${transportLabel(transport)}`;
+  return name
+    ? t('Connected to {name} · {transport}', { name, transport: transportLabel(transport) })
+    : t('Connected · {transport}', { transport: transportLabel(transport) });
 }

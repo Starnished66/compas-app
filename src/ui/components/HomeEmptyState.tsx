@@ -6,6 +6,7 @@ import { HomeTitleBar } from './HomeTitleBar';
 import { MessageCard } from './MessageCard';
 import { unclippedScroll } from '../unclippedScroll';
 import { useI18n } from '../../i18n';
+import { localizedMessage } from '../localizedLabels';
 
 export interface HomeEmptyStateProps {
   state: RemoteUiState;
@@ -25,7 +26,7 @@ interface EmptyMessage {
   action: RemoteAction;
 }
 
-function emptyMessage(state: RemoteUiState, t: (source: string, variables?: { name: string }) => string): EmptyMessage {
+function emptyMessage(state: RemoteUiState, t: (source: string, variables?: Record<string, string | number>) => string): EmptyMessage {
   const playerName = state.playerName || t('the player');
   switch (state.connectionStatus) {
     case ConnectionStatus.Connected:
@@ -48,7 +49,7 @@ function emptyMessage(state: RemoteUiState, t: (source: string, variables?: { na
       return {
         eyebrow: t('Connection failed'),
         title: t('Couldn’t reach {name}', { name: playerName }),
-        body: state.connectionMessage || t('Check that the player is on and nearby, then try again.'),
+        body: state.connectionMessage ? localizedMessage(state.connectionMessage, t) : t('Check that the player is on and nearby, then try again.'),
         actionLabel: t('Try again'),
         action: { type: 'RetryConnection' },
       };

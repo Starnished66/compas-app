@@ -3,6 +3,7 @@ import { usePlaylistNameInput } from '../usePlaylistNameInput';
 import { Button } from './Button';
 import { Dialog } from './Dialog';
 import { PlaylistNameField } from './PlaylistNameField';
+import { useI18n } from '../../i18n';
 
 export interface PlaylistNameDialogProps {
   visible: boolean;
@@ -25,6 +26,7 @@ export function PlaylistNameDialog({
   onSubmit,
   onClose,
 }: PlaylistNameDialogProps) {
+  const { t } = useI18n();
   const { name, setName, issue, canSubmit } = usePlaylistNameInput(visible, initialName, takenNames);
 
   const submit = () => {
@@ -39,7 +41,7 @@ export function PlaylistNameDialog({
       message={message}
       actions={
         <>
-          <Button label="Cancel" variant="raised" fill onPress={onClose} />
+          <Button label={t('Cancel')} variant="raised" fill onPress={onClose} />
           <Button label={confirmLabel} fill disabled={!canSubmit} onPress={submit} />
         </>
       }

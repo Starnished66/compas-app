@@ -1,4 +1,7 @@
 import { RemoteEndpoint } from '../data/RemoteEndpoint';
+import { translate as translateEnglish } from '../i18n/translate';
+
+type Translate = (source: string, variables?: Record<string, string | number>) => string;
 
 export type AddressCheck = 'blank' | 'valid' | 'invalid';
 
@@ -14,15 +17,18 @@ export function checkPlayerAddress(input: string): AddressCheck {
   return plausible ? 'valid' : 'invalid';
 }
 
-export function playerAddressHint(input: string): string {
+export function playerAddressHint(
+  input: string,
+  t: Translate = (source, variables) => translateEnglish(source, 'en', variables),
+): string {
   switch (checkPlayerAddress(input)) {
     case 'blank':
-      return `If you leave out the port, ${RemoteEndpoint.DEFAULT_PLAYER_PORT} is used.`;
+      return t('If you leave out the port, {port} is used.', { port: RemoteEndpoint.DEFAULT_PLAYER_PORT });
     case 'valid': {
       const port = input.trim().split(':')[1] ?? String(RemoteEndpoint.DEFAULT_PLAYER_PORT);
-      return `Looks good. Port ${port}.`;
+      return t('Looks good. Port {port}.', { port });
     }
     default:
-      return 'That doesn’t look like an address. Try something like 192.168.1.20:8899.';
+      return t('That doesn’t look like an address. Try something like 192.168.1.20:8899.');
   }
 }

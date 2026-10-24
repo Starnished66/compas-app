@@ -44,7 +44,7 @@ export function PlaylistNameField({ value, issue, onChangeText, onSubmit, editab
       <View style={styles.hintRow}>
         <View style={styles.issue}>{issue ? <InlineError message={issue} /> : null}</View>
         <AppText variant="caption" tone="inkMuted" tabular>
-          {`${playlistNameBytes(value)} / ${PLAYLIST_NAME_MAX_BYTES} bytes`}
+          {t('{used} / {max} bytes', { used: playlistNameBytes(value), max: PLAYLIST_NAME_MAX_BYTES })}
         </AppText>
       </View>
     </View>

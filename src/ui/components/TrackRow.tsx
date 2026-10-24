@@ -8,6 +8,7 @@ import { IconButton } from './IconButton';
 import { IconName } from './iconPaths';
 import { ListRow } from './ListRow';
 import { PlayingIndicator } from './PlayingIndicator';
+import { useI18n } from '../../i18n';
 
 export interface TrackRowProps {
   title: string;
@@ -53,12 +54,13 @@ export function TrackRow({
   onPress,
   onLongPress,
   onMore,
-  moreLabel = 'Song options',
+  moreLabel,
   onRemove,
-  removeLabel = 'Remove from queue',
+  removeLabel,
   accessory,
   style,
 }: TrackRowProps) {
+  const { t } = useI18n();
   const palette = usePalette();
 
   const leading = (
@@ -66,7 +68,7 @@ export function TrackRow({
       {onRemove ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={removeLabel}
+          accessibilityLabel={removeLabel ?? t('Remove from queue')}
           onPress={onRemove}
           style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
         >
@@ -96,7 +98,7 @@ export function TrackRow({
         </AppText>
       ) : null}
       {onMore ? (
-        <IconButton icon="moreVertical" label={moreLabel} onPress={onMore} color={palette.inkMuted} />
+        <IconButton icon="moreVertical" label={moreLabel ?? t('Song options')} onPress={onMore} color={palette.inkMuted} />
       ) : null}
       {accessory}
     </View>

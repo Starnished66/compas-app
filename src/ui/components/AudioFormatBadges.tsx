@@ -7,6 +7,7 @@ import { usePalette } from '../PaletteProvider';
 import { Radius, Space } from '../tokens';
 import { AppText } from './AppText';
 import { Icon } from './Icon';
+import { useI18n } from '../../i18n';
 
 export interface AudioFormatBadgesProps {
   track: RemoteTrack | null | undefined;
@@ -44,6 +45,7 @@ function renderBadge(key: string, text: string, highlighted: boolean, palette: P
 }
 
 export function AudioFormatBadges({ track, variant = 'chips', onPress, style }: AudioFormatBadgesProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   const format = describeAudioFormat(track);
   if (!format) return null;
@@ -51,14 +53,14 @@ export function AudioFormatBadges({ track, variant = 'chips', onPress, style }: 
   const content =
     variant === 'line' ? (
       <>
-        {renderBadge('line', format.hiRes ? `Hi-res · ${format.line}` : format.line, format.hiRes, palette)}
+        {renderBadge('line', format.hiRes ? `${t('Hi-res')} · ${format.line}` : format.line, format.hiRes, palette)}
         {onPress ? (
           <Icon name="chevronRight" size={CHEVRON_SIZE} strokeWidth={CHEVRON_STROKE} color={palette.inkMuted} />
         ) : null}
       </>
     ) : (
       <>
-        {format.hiRes ? renderBadge('hires', 'Hi-res', true, palette) : null}
+        {format.hiRes ? renderBadge('hires', t('Hi-res'), true, palette) : null}
         {format.parts.map((part) => renderBadge(part, part, false, palette))}
       </>
     );
@@ -70,7 +72,7 @@ export function AudioFormatBadges({ track, variant = 'chips', onPress, style }: 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="Audio format details"
+      accessibilityLabel={t('Audio format details')}
       accessibilityHint={format.line}
       onPress={onPress}
       style={({ pressed }) => [rowStyle, pressed && styles.pressed]}

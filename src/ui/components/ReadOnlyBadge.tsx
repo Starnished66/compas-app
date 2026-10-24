@@ -3,15 +3,17 @@ import { StyleSheet } from 'react-native';
 import { usePalette } from '../PaletteProvider';
 import { Radius } from '../tokens';
 import { AppText } from './AppText';
+import { useI18n } from '../../i18n';
 
 const BADGE_VERTICAL_PADDING = 2;
 const BADGE_HORIZONTAL_PADDING = 6;
 
 export function ReadOnlyBadge() {
+  const { t } = useI18n();
   const palette = usePalette();
   return (
     <AppText variant="micro" tone="inkMuted" style={[styles.badge, { borderColor: palette.outline }]}>
-      Read only
+      {t('Read only')}
     </AppText>
   );
 }

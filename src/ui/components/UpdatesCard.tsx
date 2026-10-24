@@ -34,7 +34,7 @@ export function UpdatesCard({ playerVersion }: { playerVersion?: string | null }
     {Platform.OS === 'android' ? <><Divider /><ListRow title={t('Android update alerts')} subtitle={t('Silent notifications for new releases')} trailing={<Switch accessibilityLabel={t('Android update alerts')} value={updates.alerts}
       trackColor={{ true: palette.accent, false: palette.outline }} onValueChange={(enabled) => { void updates.setAlerts(enabled); }} />} /></> : null}
     <View style={{ padding: Space.lg, paddingTop: Space.sm }}>
-      <AppText variant="caption" tone="inkMuted">{updates.error || (updates.checkedAt ? t('Last checked: {date}', { date: new Date(updates.checkedAt).toLocaleString() }) : t('Checks when you open Compás, at most every six hours.'))}</AppText>
+      <AppText variant="caption" tone="inkMuted">{updates.error ? t(updates.error) : (updates.checkedAt ? t('Last checked: {date}', { date: new Date(updates.checkedAt).toLocaleString() }) : t('Checks when you open Compás, at most every six hours.'))}</AppText>
       {updates.checkedAt ? <AppText variant="caption" tone="inkMuted">{t('Checks while the app is open, at most every six hours.')}</AppText> : null}
     </View>
   </Card>;

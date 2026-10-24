@@ -22,7 +22,7 @@ export function describeLibrarySync(message: string, t: Translate = (source, var
   const progress = counts && counts.total > 0 ? counts.done / counts.total : null;
   const lower = message.toLowerCase();
   if (lower.startsWith('waiting')) {
-    return { title: t('Library sync paused'), detail: message, progress: null, paused: true };
+    return { title: t('Library sync paused'), detail: t(message), progress: null, paused: true };
   }
   if (lower.startsWith('syncing songs')) {
     return {
@@ -42,7 +42,7 @@ export function describeLibrarySync(message: string, t: Translate = (source, var
       paused: false,
     };
   }
-  return { title: `${message}…`, detail: 'You can browse while this runs', progress, paused: false };
+  return { title: `${t(message)}…`, detail: t('You can browse while this runs'), progress, paused: false };
 }
 
 export function syncedSongTotal(message: string | null | undefined): number | null {

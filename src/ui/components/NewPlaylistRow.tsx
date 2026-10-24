@@ -4,6 +4,7 @@ import { usePalette } from '../PaletteProvider';
 import { Radius, Size } from '../tokens';
 import { Icon } from './Icon';
 import { ListRow } from './ListRow';
+import { useI18n } from '../../i18n';
 
 export interface NewPlaylistRowProps {
   subtitle: string;
@@ -13,10 +14,11 @@ export interface NewPlaylistRowProps {
 const PLUS_ICON_SIZE = 20;
 
 export function NewPlaylistRow({ subtitle, onPress }: NewPlaylistRowProps) {
+  const { t } = useI18n();
   const palette = usePalette();
   return (
     <ListRow
-      title="New playlist"
+      title={t('New playlist')}
       subtitle={subtitle}
       onPress={onPress}
       leading={

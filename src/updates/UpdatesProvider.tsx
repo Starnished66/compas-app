@@ -5,6 +5,7 @@ import { getAppVersion, notificationsEnabled, notifyRelease } from '../../module
 import { checkReleaseUpdates, ReleaseNotice } from './releaseUpdates';
 import { emptySaved, noticeKey, parseSavedUpdates } from './updatePreferences';
 import appConfig from '../../app.json';
+import { useI18n } from '../i18n';
 
 const STORAGE_KEY = 'compas.releaseUpdates.v1';
 const CHECK_INTERVAL = 6 * 60 * 60 * 1000;
@@ -27,6 +28,9 @@ interface UpdatesState {
 const UpdatesContext = createContext<UpdatesState | null>(null);
 
 export function UpdatesProvider({ children }: { children: React.ReactNode }) {
+  const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
   const saved = useRef(emptySaved());
   const [revision, setRevision] = useState(0);
   const [ready, setReady] = useState(false);
@@ -119,14 +123,14 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }) {
       if (Platform.OS !== 'android') return;
       if (Number(Platform.Version) >= 33) await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
       if (!(await notificationsEnabled())) {
-        Alert.alert('Notifications are off', 'Allow notifications for Compás in Android Settings. Release notices will still appear in the app.');
+        Alert.alert(tRef.current('Notifications are off'), tRef.current('Allow notifications for Compás in Android Settings. Release notices will still appear in the app.'));
         return;
       }
     }
     saved.current.alerts = enabled;
     persist();
     if (enabled && saved.current.firmware) await deliver([saved.current.firmware]);
-    } catch { Alert.alert('Could not enable notifications', 'Release notices will still appear inside Compás.'); }
+    } catch { Alert.alert(tRef.current('Could not enable notifications'), tRef.current('Release notices will still appear inside Compás.')); }
   }, [deliver, persist]);
   const acknowledge = useCallback((notices: ReleaseNotice[]) => {
     saved.current.seen = [...new Set([...saved.current.seen, ...notices.map(noticeKey)])].slice(-20);
@@ -136,7 +140,7 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }) {
     const repo = notice.kind === 'firmware' ? 'compas-player' : 'compas-app';
     if (notice.releaseUrl !== `https://github.com/Starnished66/${repo}/releases/tag/${encodeURIComponent(notice.version)}`) return;
     try { await Linking.openURL(notice.releaseUrl); }
-    catch { Alert.alert('Could not open release', 'Try again when a browser and internet connection are available.'); }
+    catch { Alert.alert(tRef.current('Could not open release'), tRef.current('Try again when a browser and internet connection are available.')); }
   }, []);
   const notices = [saved.current.firmware, application].filter((n): n is ReleaseNotice => n != null);
   void revision;

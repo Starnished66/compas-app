@@ -34,7 +34,7 @@ export function AudioFormatSheet({ visible, track, transport, onClose }: AudioFo
           </AppText>
           {format ? (
             <AppText variant="body" tone="inkMuted">
-              {format.quality}
+              {t(format.quality)}
             </AppText>
           ) : null}
         </View>

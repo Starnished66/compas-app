@@ -8,6 +8,7 @@ import { usePlaybackPosition } from '../usePlaybackPosition';
 import { AppText } from './AppText';
 import { ArtworkThumb } from './ArtworkThumb';
 import { PlayingIndicator } from './PlayingIndicator';
+import { useI18n } from '../../i18n';
 
 export interface QueueNowPlayingCardProps {
   track: RemoteTrack;
@@ -18,23 +19,24 @@ export interface QueueNowPlayingCardProps {
 const ARTWORK_SIZE = 48;
 
 export function QueueNowPlayingCard({ track, isPlaying, style }: QueueNowPlayingCardProps) {
+  const { t } = useI18n();
   const palette = usePalette();
-  const artist = track.artist || 'Unknown artist';
+  const artist = track.artist || t('Unknown artist');
   const position = formatPlaybackTime(usePlaybackPosition().positionMs);
 
   return (
     <View
       accessible
-      accessibilityLabel={`Now playing ${track.title}, ${artist}, ${position}`}
+      accessibilityLabel={t('Now playing {title}, {artist}, {position}', { title: track.title, artist, position })}
       style={[styles.card, { backgroundColor: palette.surfaceRaised }, style]}
     >
       <ArtworkThumb uri={track.artwork} size={ARTWORK_SIZE} />
       <View style={styles.meta}>
         <AppText variant="eyebrow" tone="accent">
-          Now playing
+          {t('Now playing')}
         </AppText>
         <AppText variant="bodyStrong" numberOfLines={1}>
-          {track.title || 'Unknown song'}
+          {track.title || t('Unknown song')}
         </AppText>
         <AppText variant="caption" tone="inkMuted" tabular numberOfLines={1}>
           {`${artist} · ${position}`}

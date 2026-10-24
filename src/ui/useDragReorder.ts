@@ -12,6 +12,7 @@ import {
 import { shiftUpdates } from './dragShifts';
 import { Durations, Easings, motionDuration } from './motion';
 import { useReducedMotion } from './useReducedMotion';
+import { useI18n } from '../i18n';
 
 export interface DragReorderOptions {
   itemCount: number;
@@ -73,6 +74,7 @@ function indexBounds({ minIndex = 0, maxIndex, itemCount }: DragReorderOptions):
 }
 
 export function useDragReorder(options: DragReorderOptions): DragReorder {
+  const { t } = useI18n();
   const reducedMotion = useReducedMotion();
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [{ shifts, appliedShifts, restingStyles, dragY, lift, responders, handles }] = useState(createDragState);
@@ -203,15 +205,15 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
     const cached = handles.get(index);
     if (cached && cached.min === min && cached.max === max) return cached.props;
     const actions: AccessibilityActionInfo[] = [
-      ...(index > min ? [{ name: 'moveUp', label: 'Move up' }] : []),
-      ...(index < max ? [{ name: 'moveDown', label: 'Move down' }] : []),
+      ...(index > min ? [{ name: 'moveUp', label: t('Move up') }] : []),
+      ...(index < max ? [{ name: 'moveDown', label: t('Move down') }] : []),
     ];
     const props: DragHandleProps = {
       ...responderFor(index).panHandlers,
       accessible: true,
       accessibilityRole: 'button',
-      accessibilityLabel: 'Reorder',
-      accessibilityHint: 'Drag up or down to move',
+      accessibilityLabel: t('Reorder'),
+      accessibilityHint: t('Drag up or down to move'),
       accessibilityActions: actions,
       onAccessibilityAction: (event) => {
         const step = event.nativeEvent.actionName === 'moveUp' ? -1 : event.nativeEvent.actionName === 'moveDown' ? 1 : 0;
@@ -220,7 +222,7 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
     };
     handles.set(index, { min, max, props });
     return props;
-  }, [minBound, maxBound]);
+  }, [minBound, maxBound, t]);
 
   return { rowStyle, handleProps, draggingIndex, scrollEnabled: draggingIndex === null };
 }

@@ -1,5 +1,6 @@
 import { ConnectionStatus, ConnectionTransport, RemoteUiState } from '../data/types';
 import { connectedPlayerSummary } from './connectionSummary';
+import { localizedMessage } from './localizedLabels';
 
 export type SessionSnapshot = Pick<
   RemoteUiState,
@@ -123,11 +124,11 @@ function syncEvent(memory: SessionMemory, state: SessionSnapshot, next: SessionM
   return t ? t('Library synced · {count} song', { count: total }) : `Library synced · ${total} ${total === 1 ? 'song' : 'songs'}`;
 }
 
-function errorEvent(memory: SessionMemory, state: SessionSnapshot, next: SessionMemory): string | null {
+function errorEvent(memory: SessionMemory, state: SessionSnapshot, next: SessionMemory, t?: Translate): string | null {
   const message = state.connectionMessage ?? null;
   next.connectionMessage = message;
   if (!message || message === memory.connectionMessage) return null;
-  return connectionMessageShownInline(state) ? null : message;
+  return connectionMessageShownInline(state) ? null : t ? localizedMessage(message, t) : message;
 }
 
 export function stepSession(memory: SessionMemory, state: SessionSnapshot, t?: Translate): SessionStep {
@@ -137,7 +138,7 @@ export function stepSession(memory: SessionMemory, state: SessionSnapshot, t?: T
     pinDialogVisible: state.pinDialogVisible,
   };
   const connection = connectionEvent(memory, state, next, t);
-  const error = errorEvent(memory, state, next);
+  const error = errorEvent(memory, state, next, t);
   const sync = syncEvent(memory, state, next, t);
   return { memory: next, message: connection ?? error ?? sync };
 }

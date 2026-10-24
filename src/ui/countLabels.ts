@@ -19,16 +19,16 @@ export function localizedCountLabel(label: string | null | undefined, t: Transla
   const groupsTracks = source.match(/^(\d+) groups · (\d+) tracks$/);
   if (groupsTracks) return t('{groups} groups · {tracks} tracks', { groups: Number(groupsTracks[1]), tracks: Number(groupsTracks[2]) });
 
-  const countAndSuffix = source.match(/^(\d+) (tracks|songs|albums|artists|genres|items|recently played tracks|songs?)$/);
+  const countAndSuffix = source.match(/^(\d+) (tracks|songs|albums|artists|album artists|genres|items|folders|playlists|favorites|recently played tracks|recently played songs|songs?)$/);
   if (countAndSuffix) {
     const count = Number(countAndSuffix[1]);
     const suffix = countAndSuffix[2];
-    const sourceTemplate = suffix === 'recently played tracks' ? '{count} recently played tracks' : `{count} ${suffix}`;
+    const sourceTemplate = suffix === 'recently played tracks' || suffix === 'recently played songs' ? '{count} recently played tracks' : `{count} ${suffix}`;
     return t(sourceTemplate, { count });
   }
 
   // Playlist names and other user supplied text after this separator stay verbatim.
-  const withTrailingName = source.match(/^(\d+) (tracks|songs) · (.+)$/);
+  const withTrailingName = source.match(/^(\d+) (tracks|songs|items) · (.+)$/);
   if (withTrailingName) {
     const count = Number(withTrailingName[1]);
     return `${t(`{count} ${withTrailingName[2]}`, { count })} · ${withTrailingName[3]}`;
