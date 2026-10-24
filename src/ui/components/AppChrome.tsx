@@ -15,7 +15,6 @@ import { MiniPlayer } from './MiniPlayer';
 import {
   ChromeInset,
   MiniPlayerBottom,
-  MinimizedMiniPlayerInset,
   minimizedTabBarRightInset,
   TabBarRightInset,
 } from './bottomChromeLayout';
@@ -66,10 +65,6 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
   const tabBarPosition = useAnimatedStyle(() => ({
     right: between(collapse.value, TabBarRightInset, minimizedRight),
   }));
-  const miniPlayerPosition = useAnimatedStyle(() => {
-    const inset = between(collapse.value, ChromeInset, MinimizedMiniPlayerInset);
-    return { left: inset, right: inset, bottom: between(collapse.value, MiniPlayerBottom, ChromeInset) };
-  });
 
   return (
     <View
@@ -78,7 +73,7 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
       onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width)}
     >
       {showMiniPlayer && state.currentTrack ? (
-        <Animated.View style={[styles.miniPlayer, miniPlayerPosition]} pointerEvents="box-none">
+        <View style={styles.miniPlayer} pointerEvents="box-none">
           <MiniPlayer
             track={state.currentTrack}
             isPlaying={state.isPlaying}
@@ -88,7 +83,7 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
             onPrevious={() => onAction({ type: 'Previous' })}
             onNext={() => onAction({ type: 'Next' })}
           />
-        </Animated.View>
+        </View>
       ) : null}
       <Animated.View style={[styles.tabBar, tabBarPosition]} pointerEvents="box-none">
         <TabBar active={activeTab} minimized={minimized} onSelect={selectTab} onExpand={expand} />
@@ -106,7 +101,7 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
 }
 
 const styles = StyleSheet.create({
-  miniPlayer: { position: 'absolute' },
+  miniPlayer: { position: 'absolute', left: ChromeInset, right: ChromeInset, bottom: MiniPlayerBottom },
   tabBar: { position: 'absolute', left: ChromeInset, bottom: ChromeInset },
   playerButton: { position: 'absolute', right: ChromeInset, bottom: ChromeInset },
 });

@@ -172,7 +172,7 @@ export default function App() {
                     prominent={mainScreen.type === 'Home'}
                     paused={nowPlayingVisible}
                   />
-                  <AppSnackbarProvider activeTab={activeTab} showMiniPlayer={showMiniPlayer} chromeHidden={connectionVisible}>
+                  <AppSnackbarProvider showMiniPlayer={showMiniPlayer} chromeHidden={connectionVisible}>
                     <StatusBar style={isDark ? 'light' : 'dark'} />
                     <SessionSnackbars state={state} />
                     <UpdateAnnouncements onOpenUpdates={openUpdates} />

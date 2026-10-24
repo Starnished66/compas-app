@@ -6,7 +6,6 @@ export const ChromeGap = Space.sm;
 export const TabBarRightInset = ChromeInset + Size.bar + ChromeGap;
 export const MiniPlayerBottom = ChromeInset + Size.bar + ChromeGap;
 export const MinimizedTabBarWidth = Size.bar;
-export const MinimizedMiniPlayerInset = ChromeInset + MinimizedTabBarWidth + ChromeGap;
 
 export function chromeContentInset(withMiniPlayer: boolean, safeAreaBottom = 0): number {
   const tabBarSpace = ChromeInset * 2 + Size.bar;
