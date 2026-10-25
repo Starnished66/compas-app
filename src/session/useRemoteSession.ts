@@ -108,6 +108,7 @@ import {
   startPlaybackService,
   stopPlaybackService,
   addMediaActionListener,
+  addBackgroundTickListener,
 } from '../../modules/compas-media-session/src/index';
 import {
   getRequiredPermissionsForAction,
@@ -139,6 +140,8 @@ const MEDIA_ACTION_RECONCILE_DELAY_MS = 1200;
 const QUEUE_ARTWORK_FLUSH_MS = 120;
 const SWIPE_NEXT_ATTEMPTS = 8;
 const SWIPE_NEXT_POLL_MS = 200;
+// In the background the poll only keeps the notification current.
+const BACKGROUND_STATUS_POLL_MS = 5000;
 const QUEUE_REFRESHING_MESSAGE = 'The queue changed. It is being refreshed.';
 
 // Socket and HTTP errors from the transports are developer text; show the user what to check instead.
@@ -457,9 +460,23 @@ export function useRemoteSession() {
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
+      const wasForeground = appForegroundRef.current;
       appForegroundRef.current = nextState === 'active';
+      // The background poll runs slowly; catch up right away when the app comes back.
+      if (!wasForeground && appForegroundRef.current && apiRef.current && stateRef.current.connectionStatus === ConnectionStatus.Connected) {
+        startPollingLoop();
+      }
     });
     return () => sub.remove();
+  }, []);
+
+  // JS timers stop in the background, so the playback service's tick drives the poll there.
+  useEffect(() => {
+    const sub = addBackgroundTickListener(() => {
+      if (appForegroundRef.current || !apiRef.current || stateRef.current.connectionStatus !== ConnectionStatus.Connected) return;
+      startPollingLoop(true);
+    });
+    return () => sub?.remove();
   }, []);
 
   useEffect(() => {
@@ -1472,7 +1489,7 @@ export function useRemoteSession() {
   };
 
   // Status Polling Loop
-  const startPollingLoop = () => {
+  const startPollingLoop = (immediate = false) => {
     if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
     // A poll still awaiting status() when the loop restarts must not schedule a second loop.
     const loopToken = ++pollLoopTokenRef.current;
@@ -1631,17 +1648,17 @@ export function useRemoteSession() {
           return { ...prev, playerAccentColor, deviceModel, playerVersion };
         });
 
-        const nextInterval = BluetoothRequestPolicy.statusPollInterval(
-          transport,
-          1500,
-          status.bluetoothAudioOutput
+        const foreground = appForegroundRef.current;
+        const nextInterval = Math.max(
+          BluetoothRequestPolicy.statusPollInterval(transport, 1500, status.bluetoothAudioOutput),
+          foreground ? 0 : BACKGROUND_STATUS_POLL_MS
         );
-        const queueInterval = BluetoothRequestPolicy.queuePollInterval(
+        const queueInterval = foreground ? BluetoothRequestPolicy.queuePollInterval(
           transport,
           stateRef.current.screen,
           5000,
           status.bluetoothAudioOutput
-        );
+        ) : null;
         if (queueInterval != null && now - lastQueueRefreshAtRef.current >= queueInterval) {
           lastQueueRefreshAtRef.current = now;
           refreshQueueIfChanged(api).catch(() => {});
@@ -1709,7 +1726,8 @@ export function useRemoteSession() {
       }
     };
 
-    schedule(300);
+    if (immediate) void poll();
+    else schedule(300);
   };
 
   // Queue Operations

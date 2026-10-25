@@ -94,6 +94,18 @@ function withCompasAndroid(config) {
           },
         });
       }
+
+      // Names the player as the output device in the media notification.
+      const routeProviderName = 'com.compas.remote.mediasession.PlayerRouteProviderService';
+      if (!app.service.some((s) => s.$?.['android:name'] === routeProviderName)) {
+        app.service.push({
+          $: {
+            'android:name': routeProviderName,
+            'android:exported': 'true',
+          },
+          'intent-filter': [{ action: [{ $: { 'android:name': 'android.media.MediaRoute2ProviderService' } }] }],
+        });
+      }
     }
 
     return config;

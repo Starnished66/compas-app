@@ -4,7 +4,7 @@ import { ConnectionStatus, RemoteUiState } from '../data/types';
 import { PlaybackPositionStore } from './PlaybackPositionStore';
 
 export function useMediaSessionSync(state: RemoteUiState, positionStore: PlaybackPositionStore): void {
-  const { connectionStatus, currentTrack, isPlaying, volume } = state;
+  const { connectionStatus, currentTrack, isPlaying, volume, playerName } = state;
 
   useEffect(() => {
     if (connectionStatus === ConnectionStatus.Disconnected) {
@@ -23,9 +23,10 @@ export function useMediaSessionSync(state: RemoteUiState, positionStore: Playbac
         isPlaying,
         positionMs,
         volume,
+        deviceName: playerName,
       }).catch(() => {});
     };
     publish();
     return positionStore.subscribe(publish);
-  }, [connectionStatus, currentTrack, isPlaying, volume, positionStore]);
+  }, [connectionStatus, currentTrack, isPlaying, volume, playerName, positionStore]);
 }

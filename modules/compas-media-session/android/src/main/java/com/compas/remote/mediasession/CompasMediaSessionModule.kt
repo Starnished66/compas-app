@@ -17,6 +17,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationManagerCompat
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
@@ -38,11 +39,18 @@ class CompasMediaSessionModule : Module() {
     private var currentPlaying = false
     private val bgExecutor = Executors.newSingleThreadExecutor()
     @Volatile private var sessionGeneration = 0
+    private var backgroundTicking = false
+    private val backgroundTick = object : Runnable {
+        override fun run() {
+            sendEvent("onBackgroundTick", emptyMap<String, Any>())
+            mainHandler.postDelayed(this, BACKGROUND_TICK_MS)
+        }
+    }
 
     override fun definition() = ModuleDefinition {
         Name("CompasMediaSession")
 
-        Events("onMediaAction")
+        Events("onMediaAction", "onBackgroundTick")
 
         AsyncFunction("updateState") { update: Map<String, Any?>, promise: Promise ->
             try {
@@ -54,6 +62,7 @@ class CompasMediaSessionModule : Module() {
                 val isPlaying = update["isPlaying"] as? Boolean ?: false
                 val positionMs = (update["positionMs"] as? Number)?.toDouble() ?: 0.0
                 val volume = (update["volume"] as? Number)?.toDouble() ?: 0.5
+                val deviceName = (update["deviceName"] as? String)?.takeIf { it.isNotBlank() }
 
                 currentVolume = volume.toFloat().coerceIn(0f, 1f)
                 currentPlaying = isPlaying
@@ -61,6 +70,9 @@ class CompasMediaSessionModule : Module() {
                 val activeSession = session ?: return@AsyncFunction
 
                 volumeProvider?.setCurrentVolume((currentVolume * 100).toInt())
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    mainHandler.post { PlayerRouteProviderService.setDeviceName(context, deviceName) }
+                }
 
                 val actions = PlaybackState.ACTION_PLAY or
                     PlaybackState.ACTION_PAUSE or
@@ -161,6 +173,7 @@ class CompasMediaSessionModule : Module() {
                         RemotePlaybackService.pendingStarts--
                         throw e
                     }
+                    startBackgroundTicks()
                     promise.resolve(true)
                 } catch (e: Exception) {
                     promise.reject("SERVICE_START_FAILED", e.message, e)
@@ -172,6 +185,7 @@ class CompasMediaSessionModule : Module() {
             mainHandler.post {
                 try {
                     RemotePlaybackService.requestStop(context)
+                    stopBackgroundTicks()
                     promise.resolve(true)
                 } catch (e: Exception) {
                     promise.reject("SERVICE_STOP_FAILED", e.message, e)
@@ -180,6 +194,7 @@ class CompasMediaSessionModule : Module() {
         }
 
         OnDestroy {
+            stopBackgroundTicks()
             releaseSessionInternal()
             bgExecutor.shutdownNow()
         }
@@ -189,21 +204,11 @@ class CompasMediaSessionModule : Module() {
         if (session != null) return
         ensureChannel()
 
-        val vp = object : VolumeProvider(VOLUME_CONTROL_ABSOLUTE, 100, (currentVolume * 100).toInt()) {
-            override fun onAdjustVolume(direction: Int) {
-                if (direction != -1 && direction != 1) return
-                val newVol = ((currentVolume * 100).toInt() + direction * 5).coerceIn(0, 100) / 100f
-                this@CompasMediaSessionModule.currentVolume = newVol
-                setCurrentVolume((newVol * 100).toInt())
-                sendEvent("onMediaAction", mapOf("action" to "setVolume", "volume" to newVol.toDouble()))
-            }
-
-            override fun onSetVolumeTo(volume: Int) {
-                val newVol = volume.coerceIn(0, 100) / 100f
-                this@CompasMediaSessionModule.currentVolume = newVol
-                setCurrentVolume(volume.coerceIn(0, 100))
-                sendEvent("onMediaAction", mapOf("action" to "setVolume", "volume" to newVol.toDouble()))
-            }
+        val initialVolume = (currentVolume * 100).toInt()
+        val vp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            PlayerVolumeProvider(initialVolume, PlayerRouteProviderService.volumeControlId(context))
+        } else {
+            PlayerVolumeProvider(initialVolume)
         }
         volumeProvider = vp
 
@@ -234,6 +239,29 @@ class CompasMediaSessionModule : Module() {
         }
         session = ms
         activeInstance = this
+    }
+
+    private inner class PlayerVolumeProvider : VolumeProvider {
+        constructor(current: Int) : super(VOLUME_CONTROL_ABSOLUTE, 100, current)
+
+        // The id ties the session to PlayerRouteProviderService's routing session.
+        @RequiresApi(Build.VERSION_CODES.R)
+        constructor(current: Int, volumeControlId: String) : super(VOLUME_CONTROL_ABSOLUTE, 100, current, volumeControlId)
+
+        override fun onAdjustVolume(direction: Int) {
+            if (direction != -1 && direction != 1) return
+            val newVol = ((currentVolume * 100).toInt() + direction * 5).coerceIn(0, 100) / 100f
+            this@CompasMediaSessionModule.currentVolume = newVol
+            setCurrentVolume((newVol * 100).toInt())
+            sendEvent("onMediaAction", mapOf("action" to "setVolume", "volume" to newVol.toDouble()))
+        }
+
+        override fun onSetVolumeTo(volume: Int) {
+            val newVol = volume.coerceIn(0, 100) / 100f
+            this@CompasMediaSessionModule.currentVolume = newVol
+            setCurrentVolume(volume.coerceIn(0, 100))
+            sendEvent("onMediaAction", mapOf("action" to "setVolume", "volume" to newVol.toDouble()))
+        }
     }
 
     private fun showNotification(title: String, artist: String, artwork: Bitmap?, isPlaying: Boolean, session: MediaSession) {
@@ -319,10 +347,31 @@ class CompasMediaSessionModule : Module() {
         ms.isActive = false
         ms.setMetadata(null)
         ms.setPlaybackState(PlaybackState.Builder().setState(PlaybackState.STATE_NONE, 0, 0f).build())
-        mainHandler.post { RemotePlaybackService.requestStop(context) }
+        mainHandler.post {
+            RemotePlaybackService.requestStop(context)
+            stopBackgroundTicks()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                PlayerRouteProviderService.setDeviceName(context, null)
+            }
+        }
         runCatching {
             NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
         }
+    }
+
+    // React Native runs JS timers on Choreographer frames, which stop once the app is in the
+    // background (immediately on Samsung). Without them the status poll stops and the notification
+    // stays on the song that was playing. While the playback service is up, this event wakes
+    // the poll instead. Main thread only.
+    private fun startBackgroundTicks() {
+        if (backgroundTicking) return
+        backgroundTicking = true
+        mainHandler.postDelayed(backgroundTick, BACKGROUND_TICK_MS)
+    }
+
+    private fun stopBackgroundTicks() {
+        backgroundTicking = false
+        mainHandler.removeCallbacks(backgroundTick)
     }
 
     private fun releaseSessionInternal() {
@@ -366,6 +415,7 @@ class CompasMediaSessionModule : Module() {
 
     companion object {
         const val NOTIFICATION_ID = RemotePlaybackService.NOTIFICATION_ID
+        private const val BACKGROUND_TICK_MS = 5000L
         private const val ARTWORK_TIMEOUT_MS = 5000
         private const val ARTWORK_TARGET_PX = 512
         private const val ARTWORK_MAX_BYTES = 8 * 1024 * 1024

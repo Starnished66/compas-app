@@ -15,6 +15,8 @@ export interface MediaStateUpdate {
   isPlaying: boolean;
   positionMs: number;
   volume: number;
+  /** Shown by Android as the output device in the media notification. */
+  deviceName?: string | null;
 }
 
 let nativeModule: any = null;
@@ -32,7 +34,7 @@ function getNativeModule() {
 export async function updateMediaState(update: MediaStateUpdate): Promise<boolean> {
   const mod = getNativeModule();
   if (!mod || !mod.updateState) return false;
-  return await mod.updateState({ ...update, artworkUri: update.artworkUri ?? null });
+  return await mod.updateState({ ...update, artworkUri: update.artworkUri ?? null, deviceName: update.deviceName ?? null });
 }
 
 export async function clearMediaState(): Promise<boolean> {
@@ -56,4 +58,13 @@ export async function stopPlaybackService(): Promise<boolean> {
 export function addMediaActionListener(listener: (event: MediaActionEvent) => void): EventSubscription | null {
   const mod = getNativeModule();
   return mod?.addListener ? mod.addListener('onMediaAction', listener) : null;
+}
+
+/**
+ * Fires every few seconds while the playback service runs. JS timers stop in the background,
+ * so the status poll listens to this to keep the notification current.
+ */
+export function addBackgroundTickListener(listener: () => void): EventSubscription | null {
+  const mod = getNativeModule();
+  return mod?.addListener ? mod.addListener('onBackgroundTick', listener) : null;
 }
