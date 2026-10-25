@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { usePalette } from '../PaletteProvider';
 import { ICON_STROKE_WIDTH, ICON_VIEWBOX, IconElement, IconGlyph, IconName, IconPaint, iconGlyphs } from './iconPaths';
 
@@ -11,12 +11,23 @@ export interface IconProps {
   strokeWidth?: number;
 }
 
+interface MergedPath {
+  d: string;
+  paint: IconPaint;
+  strokeWidth: number;
+}
+
+// Every SVG element is its own native view, and list rows mount icons while scrolling.
+// Shapes that share paint are merged into one path, so an icon mounts at most a few views.
+const mergedCache = new Map<string, MergedPath[]>();
+
 function IconContent({ name, size = 22, color, filled = false, strokeWidth }: IconProps) {
   const palette = usePalette();
   const glyph: IconGlyph = iconGlyphs[name];
   const tint = color ?? palette.ink;
-  const elements = filled && glyph.filledElements ? glyph.filledElements : glyph.elements;
+  const useFilled = filled && !!glyph.filledElements;
   const baseStrokeWidth = strokeWidth ?? glyph.strokeWidth ?? ICON_STROKE_WIDTH;
+  const paths = mergedPaths(`${name}|${useFilled}|${baseStrokeWidth}`, useFilled ? glyph.filledElements! : glyph.elements, baseStrokeWidth);
 
   return (
     <Svg
@@ -27,12 +38,53 @@ function IconContent({ name, size = 22, color, filled = false, strokeWidth }: Ic
       importantForAccessibility="no-hide-descendants"
       pointerEvents="none"
     >
-      {elements.map((element, index) => renderElement(element, index, tint, baseStrokeWidth))}
+      {paths.map((path, index) => (
+        <Path key={index} d={path.d} {...paintProps(path.paint, tint, path.strokeWidth)} />
+      ))}
     </Svg>
   );
 }
 
 export const Icon = memo(IconContent);
+
+function mergedPaths(key: string, elements: IconElement[], baseStrokeWidth: number): MergedPath[] {
+  const cached = mergedCache.get(key);
+  if (cached) return cached;
+  const groups = new Map<string, MergedPath>();
+  for (const element of elements) {
+    const paint = element.paint ?? 'stroke';
+    const width = element.kind === 'path' ? element.strokeWidth ?? baseStrokeWidth : baseStrokeWidth;
+    const groupKey = `${paint}|${width}`;
+    const d = elementPath(element);
+    const group = groups.get(groupKey);
+    if (group) group.d += ` ${d}`;
+    else groups.set(groupKey, { d, paint, strokeWidth: width });
+  }
+  const merged = [...groups.values()];
+  mergedCache.set(key, merged);
+  return merged;
+}
+
+function elementPath(element: IconElement): string {
+  switch (element.kind) {
+    case 'path':
+      return element.d;
+    case 'circle': {
+      const { cx, cy, r } = element;
+      return `M${cx - r} ${cy}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0z`;
+    }
+    case 'rect': {
+      const { x, y, width, height } = element;
+      const rx = Math.min(element.rx ?? 0, width / 2, height / 2);
+      if (!rx) return `M${x} ${y}h${width}v${height}h${-width}z`;
+      return (
+        `M${x + rx} ${y}h${width - 2 * rx}a${rx} ${rx} 0 0 1 ${rx} ${rx}v${height - 2 * rx}` +
+        `a${rx} ${rx} 0 0 1 ${-rx} ${rx}h${-(width - 2 * rx)}a${rx} ${rx} 0 0 1 ${-rx} ${-rx}` +
+        `v${-(height - 2 * rx)}a${rx} ${rx} 0 0 1 ${rx} ${-rx}z`
+      );
+    }
+  }
+}
 
 function paintProps(paint: IconPaint, tint: string, strokeWidth: number) {
   const strokes = paint !== 'fill';
@@ -43,26 +95,4 @@ function paintProps(paint: IconPaint, tint: string, strokeWidth: number) {
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
   };
-}
-
-function renderElement(element: IconElement, key: number, tint: string, strokeWidth: number) {
-  const paint = element.paint ?? 'stroke';
-  switch (element.kind) {
-    case 'path':
-      return <Path key={key} d={element.d} {...paintProps(paint, tint, element.strokeWidth ?? strokeWidth)} />;
-    case 'circle':
-      return <Circle key={key} cx={element.cx} cy={element.cy} r={element.r} {...paintProps(paint, tint, strokeWidth)} />;
-    case 'rect':
-      return (
-        <Rect
-          key={key}
-          x={element.x}
-          y={element.y}
-          width={element.width}
-          height={element.height}
-          rx={element.rx}
-          {...paintProps(paint, tint, strokeWidth)}
-        />
-      );
-  }
 }
