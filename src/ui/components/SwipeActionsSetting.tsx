@@ -1,5 +1,5 @@
 import React from 'react';
-import { SWIPE_ACTIONS, SWIPE_ACTION_LABELS, SwipeAction, SwipeDirection } from '../swipeActions';
+import { SWIPE_ACTIONS, SWIPE_ACTION_HINTS, SWIPE_ACTION_SHORT_LABELS, SwipeAction, SwipeDirection } from '../swipeActions';
 import { useSwipeActionsPreference } from '../preferences/useSwipeActionsPreference';
 import { PreferenceSetting } from './PreferenceSetting';
 import { useI18n } from '../../i18n';
@@ -15,7 +15,8 @@ export function SwipeActionSetting({ direction }: { direction: SwipeDirection })
   return (
     <PreferenceSetting<SwipeAction>
       title={t(TITLES[direction])}
-      options={SWIPE_ACTIONS.map((value) => ({ value, label: t(SWIPE_ACTION_LABELS[value]) }))}
+      options={SWIPE_ACTIONS.map((value) => ({ value, label: t(SWIPE_ACTION_SHORT_LABELS[value]) }))}
+      hints={Object.fromEntries(SWIPE_ACTIONS.map((value) => [value, t(SWIPE_ACTION_HINTS[value])])) as Record<SwipeAction, string>}
       value={actions[direction]}
       onChange={(action) => setAction(direction, action)}
     />

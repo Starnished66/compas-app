@@ -6,6 +6,8 @@ export interface Palette {
   surface: string;
   surfaceRaised: string;
   frost: string;
+  /** Frost without a blur behind it (Android): nearly opaque so content underneath doesn't read through. */
+  frostSolid: string;
   scrim: string;
   ink: string;
   inkMuted: string;
@@ -52,6 +54,7 @@ export function paletteFrom(colors: ColorScheme, dark: boolean): Palette {
     surface: base.surface,
     surfaceRaised: base.surfaceContainerHighest,
     frost: dark ? 'rgba(29,30,34,0.56)' : 'rgba(255,255,255,0.62)',
+    frostSolid: dark ? 'rgba(29,30,34,0.94)' : 'rgba(255,255,255,0.95)',
     scrim: 'rgba(0,0,0,0.5)',
     ink: base.onSurface,
     inkMuted: base.onSurfaceVariant,

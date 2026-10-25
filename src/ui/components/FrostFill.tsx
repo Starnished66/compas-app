@@ -23,7 +23,7 @@ export function FrostFill({ radius = 0 }: FrostFillProps) {
           tint={palette.dark ? 'systemUltraThinMaterialDark' : 'systemUltraThinMaterialLight'}
         />
       )}
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: palette.frost }]} />
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: BLUR_SUPPORTED ? palette.frost : palette.frostSolid }]} />
     </View>
   );
 }
