@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../../i18n';
 import { StyleSheet, View } from 'react-native';
 import {
+  ConnectionStatus,
   LibraryCategory,
   LibraryEntry,
   Playlist,
@@ -17,6 +18,7 @@ import { DragReorderCellContext } from '../components/dragReorderCellContext';
 import { IconButton } from '../components/IconButton';
 import { InlineError } from '../components/InlineError';
 import { LibraryList } from '../components/LibraryList';
+import { useSongSwipe } from '../library/useSongSwipe';
 import { LibraryPlaceholder } from '../components/LibraryPlaceholder';
 import { NewPlaylistRow } from '../components/NewPlaylistRow';
 import { PageTransition } from '../components/PageTransition';
@@ -94,6 +96,8 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
   const canImport = state.supportedFeatures.includes('playlist_import');
   const canEditTracks = Boolean(playlist?.writable && canEditPlaylists && state.playlistRevision);
   const editMode = editing && canEditTracks;
+  // Swiping would fight the edit-mode drag handles and remove buttons.
+  const songSwipe = useSongSwipe(onAction, state.connectionMessage, state.queueStatus, state.connectionStatus === ConnectionStatus.Connected && !editMode);
 
   const scroll = useLibraryListScroll();
   const { scrollToTop, restoreOffset } = scroll;
@@ -336,6 +340,7 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
         <DragReorderCellContext.Provider value={cellStyle}>
           <LibraryList
             items={items}
+            songSwipe={songSwipe}
             onAction={onAction}
             onOpenEntry={openEntry}
             onEntryLongPress={longPressEntry}

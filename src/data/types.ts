@@ -420,6 +420,7 @@ export type RemoteAction =
   | { type: 'LoadSongPlaylists' }
   | { type: 'CloseSongActions' }
   | { type: 'AddSongToQueue' }
+  | { type: 'SwipeSongAction'; id: string; action: 'queue' | 'next' }
   | { type: 'AddSongToPlaylist'; key: string }
   | { type: 'CreatePlaylistWithSong'; name: string }
   | { type: 'ClearQueue' }

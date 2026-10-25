@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../i18n';
 import { StyleSheet, TextInput, View } from 'react-native';
-import { LibraryCategory, LibraryEntry, RemoteAction, RemoteUiState } from '../../data/types';
+import { ConnectionStatus, LibraryCategory, LibraryEntry, RemoteAction, RemoteUiState } from '../../data/types';
 import { Button } from '../components/Button';
 import { CategoryChips } from '../components/CategoryChips';
 import { InlineError } from '../components/InlineError';
 import { LibraryList } from '../components/LibraryList';
+import { useSongSwipe } from '../library/useSongSwipe';
 import { LibraryPlaceholder } from '../components/LibraryPlaceholder';
 import { SectionHeader } from '../components/SectionHeader';
 import { TextField } from '../components/TextField';
@@ -42,6 +43,7 @@ function isSearchScreen(state: RemoteUiState): boolean {
 
 export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBottomInset, scroll, selectionMode = false, selectedIds, onSelectEntry, onEntrySelectionLongPress, onOpenBulkActions, onCancelSelection }: SearchScreenProps) {
   const { t } = useI18n();
+  const songSwipe = useSongSwipe(onAction, state.connectionMessage, state.queueStatus, state.connectionStatus === ConnectionStatus.Connected);
   const [query, setQuery] = useState(state.libraryQuery);
   const inputRef = useRef<TextInput>(null);
 
@@ -139,6 +141,7 @@ export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBot
       />
       <LibraryList
         items={items}
+        songSwipe={songSwipe}
         onAction={onAction}
         onOpenEntry={onOpenEntry}
         // Long-press starts multi-select on result rows exactly as in the library lists.

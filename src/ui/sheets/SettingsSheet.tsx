@@ -12,6 +12,7 @@ import { Icon } from '../components/Icon';
 import { LibrarySyncRow } from '../components/LibrarySyncRow';
 import { ListRow } from '../components/ListRow';
 import { MiniProgressSetting } from '../components/MiniProgressSetting';
+import { SwipeActionSetting } from '../components/SwipeActionsSetting';
 import { LibrarySortingSetting } from '../components/LibrarySortingSetting';
 import { PlayerCard } from '../components/PlayerCard';
 import { PlayerFeatureList } from '../components/PlayerFeatureList';
@@ -213,6 +214,10 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
           <BackgroundSetting />
           <Divider />
           <MiniProgressSetting />
+          <Divider />
+          <SwipeActionSetting direction="right" />
+          <Divider />
+          <SwipeActionSetting direction="left" />
           {connected ? (
             <>
               <Divider />

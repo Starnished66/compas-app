@@ -17,6 +17,7 @@ import { CollectionPlayButtons } from '../components/CollectionPlayButtons';
 import { FlipGhostLayer } from '../components/FlipGhostLayer';
 import { InlineError } from '../components/InlineError';
 import { LibraryList } from '../components/LibraryList';
+import { useSongSwipe } from '../library/useSongSwipe';
 import { LibraryPlaceholder, LibraryPlaceholderProps } from '../components/LibraryPlaceholder';
 import { LibrarySyncCard } from '../components/LibrarySyncCard';
 import { LibraryToolbar } from '../components/LibraryToolbar';
@@ -79,6 +80,7 @@ function emptyMessage(category: LibraryCategory, nested: boolean): LibraryPlaceh
 
 export function LibraryScreen({ state, onAction, category, contentBottomInset = Space.lg }: LibraryScreenProps) {
   const { t } = useI18n();
+  const songSwipe = useSongSwipe(onAction, state.connectionMessage, state.queueStatus, state.connectionStatus === ConnectionStatus.Connected);
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -445,6 +447,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   return page(
     <LibraryList
       items={listItems}
+      songSwipe={songSwipe}
       onAction={onAction}
       onOpenEntry={openEntry}
       onEntryLongPress={longPressEntry}

@@ -9,6 +9,7 @@ import { LibraryArtworkContext } from './src/ui/library/libraryArtworkContext';
 import { ChromeProvider } from './src/ui/chrome/ChromeProvider';
 import { AccentSource, useArtworkPalette } from './src/ui/useArtworkPalette';
 import { MiniProgressPreferenceProvider } from './src/ui/preferences/MiniProgressPreferenceProvider';
+import { SwipeActionsPreferenceProvider } from './src/ui/preferences/SwipeActionsPreferenceProvider';
 import { BackgroundPreferenceProvider } from './src/ui/preferences/BackgroundPreferenceProvider';
 import { useAccentPreference } from './src/ui/preferences/useAccentPreference';
 import { AccentStyle, accentFollowsArtwork } from './src/ui/accentStyle';
@@ -168,6 +169,7 @@ export default function App() {
         <PaletteProvider palette={palette}>
           <ChromeProvider>
             <MiniProgressPreferenceProvider>
+            <SwipeActionsPreferenceProvider>
               <BackgroundPreferenceProvider>
                 <View style={[styles.root, { backgroundColor: palette.background }]}>
                   <AppBackdrop
@@ -230,6 +232,7 @@ export default function App() {
                   </AppSnackbarProvider>
                 </View>
               </BackgroundPreferenceProvider>
+            </SwipeActionsPreferenceProvider>
             </MiniProgressPreferenceProvider>
           </ChromeProvider>
         </PaletteProvider>

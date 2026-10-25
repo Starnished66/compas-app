@@ -10,6 +10,8 @@ import { LIBRARY_VIEWABILITY_CONFIG, useLibraryPaging } from '../library/useLibr
 import { AlbumTileRow } from './AlbumTileRow';
 import { LibraryEntryRow } from './LibraryEntryRow';
 import { DragReorderCell } from './DragReorderCell';
+import { SwipeActionRow } from './SwipeActionRow';
+import { SongSwipe } from '../library/useSongSwipe';
 import { SectionHeader } from './SectionHeader';
 import { Spinner } from './Spinner';
 import { unclippedScroll } from '../unclippedScroll';
@@ -41,6 +43,8 @@ export interface LibraryListProps {
   selectedIds?: ReadonlySet<string>;
   onSelectEntry?: (entry: LibraryEntry, kind: LibraryEntryKind) => void;
   onEntrySelectionLongPress?: (entry: LibraryEntry, kind: LibraryEntryKind) => void;
+  /** Swipe actions for song rows; omitted where rows shouldn't swipe (selection, playlist editing). */
+  songSwipe?: SongSwipe | null;
 }
 
 function keyOf(item: LibraryItem): string {
@@ -57,6 +61,14 @@ function itemTypeOf(item: LibraryItem): string {
     default:
       return item.type;
   }
+}
+
+function withSwipe(swipe: SongSwipe, entry: LibraryEntry, row: ReactElement): ReactElement {
+  return (
+    <SwipeActionRow right={swipe.right} left={swipe.left} onSwipe={(direction) => swipe.onSwipe(entry, direction)}>
+      {row}
+    </SwipeActionRow>
+  );
 }
 
 function LibraryListContent({
@@ -79,6 +91,7 @@ function LibraryListContent({
   selectedIds,
   onSelectEntry,
   onEntrySelectionLongPress,
+  songSwipe,
 }: LibraryListProps) {
   const { onEndReached, onViewableItemsChanged } = useLibraryPaging({ hasMore, status, onAction });
   const showMoreSongs = useCallback(
@@ -104,6 +117,7 @@ function LibraryListContent({
   const currentSong = useStableTrack(currentTrack);
   const contentContainerStyle = useMemo(() => ({ paddingBottom: contentBottomInset }), [contentBottomInset]);
 
+  const swipe = selectionMode ? null : songSwipe ?? null;
   const renderItem = useCallback(({ item }: ListRenderItemInfo<LibraryItem>) => {
     switch (item.type) {
       case 'node':
@@ -126,11 +140,13 @@ function LibraryListContent({
             style={styles.letter}
           />
         );
-      case 'playlistTrack':
-        return renderPlaylistTrack ? renderPlaylistTrack(item.entry, item.index) : null;
+      case 'playlistTrack': {
+        const row = renderPlaylistTrack ? renderPlaylistTrack(item.entry, item.index) : null;
+        return row && swipe ? withSwipe(swipe, item.entry, row) : row;
+      }
       case 'entry': {
         const current = isCurrentEntry(item.entry, currentSong);
-        return (
+        const row = (
           <View style={insetStyle}>
             <LibraryEntryRow
               entry={item.entry}
@@ -147,6 +163,7 @@ function LibraryListContent({
             />
           </View>
         );
+        return swipe && item.kind === 'song' ? withSwipe(swipe, item.entry, row) : row;
       }
     }
   }, [
@@ -163,6 +180,7 @@ function LibraryListContent({
     selectedIds,
     onSelectEntry,
     showMoreSongs,
+    swipe,
   ]);
 
   return (

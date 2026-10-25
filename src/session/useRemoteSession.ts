@@ -71,6 +71,7 @@ import {
   canFinishCatalogSyncFromSnapshot,
 } from './CatalogSyncPolicy';
 import { PlaybackStatusGate, CommandOutcome } from './PlaybackStatusGate';
+import { QUEUE_PROBE_SIZE, insertedOffset, queueEnds } from './queueInsertion';
 import { PlaybackPositionStore } from './PlaybackPositionStore';
 import { BulkWriteCounts, queueInsertWindowMatches, queueInsertionOffsets, queueRemovalAmbiguousAt, queueRemovalMatches, readQueueSnapshot, resolveBulkSongs, runPlaylistCreationJob, runSerialBulkWrites, waitForQueueTransition } from './bulkActions';
 import { collectionJobSettled } from './collectionJobState';
@@ -136,6 +137,8 @@ const PREF_AUTO_RECONNECT = 'compas_pref_auto_reconnect';
 const CATALOG_SYNC_RETRY_DELAYS_MS = [2000, 5000, 15000];
 const MEDIA_ACTION_RECONCILE_DELAY_MS = 1200;
 const QUEUE_ARTWORK_FLUSH_MS = 120;
+const SWIPE_NEXT_ATTEMPTS = 8;
+const SWIPE_NEXT_POLL_MS = 200;
 const QUEUE_REFRESHING_MESSAGE = 'The queue changed. It is being refreshed.';
 
 // Socket and HTTP errors from the transports are developer text; show the user what to check instead.
@@ -2687,6 +2690,54 @@ export function useRemoteSession() {
     }
   };
 
+  // Swipe actions on a song row: append it, or append and then move it to the top of Up next.
+  // The player has no insert-next request; one queue edit is accepted per published revision.
+  const swipeSong = async (id: string, kind: 'queue' | 'next') => {
+    const api = apiRef.current;
+    const target = libraryEntriesRef.current.target(id);
+    if (!api || target?.type !== 'Song') return;
+    // Clear first so a repeated failure reads as a new message.
+    setState((prev) => (prev.connectionMessage ? { ...prev, connectionMessage: null } : prev));
+    if (kind === 'next' && !featureSetRef.current.has('queue_edit')) {
+      setState((prev) => ({ ...prev, connectionMessage: 'This player can’t reorder its queue, so songs can only be added to the end.' }));
+      return;
+    }
+    try {
+      const readEnds = async () => {
+        const head = await api.queue(0, QUEUE_PROBE_SIZE);
+        const tail = head.total > QUEUE_PROBE_SIZE ? await api.queue(head.total - QUEUE_PROBE_SIZE, QUEUE_PROBE_SIZE) : null;
+        return { ends: queueEnds(head, tail), revision: tail?.revision ?? head.revision };
+      };
+      const before = kind === 'next' ? await readEnds() : null;
+      await api.addToQueue(target.song.index, target.catalogRevision);
+      if (before) {
+        let placed = false;
+        for (let attempt = 0; attempt < SWIPE_NEXT_ATTEMPTS && !placed; attempt++) {
+          await new Promise<void>((resolve) => setTimeout(resolve, SWIPE_NEXT_POLL_MS));
+          if (api !== apiRef.current) return;
+          const after = await readEnds();
+          if (after.ends.total === before.ends.total) continue;
+          // Move only the copy that was just added; a guess could move another song instead.
+          const offset = insertedOffset(before.ends, after.ends, target.song.index);
+          if (offset == null) break;
+          try {
+            if (offset > 0) await api.moveQueueTrack(offset, 0, after.revision);
+            placed = true;
+          } catch (err: any) {
+            if (err?.statusCode !== 409) throw err;
+            break;
+          }
+        }
+        if (!placed) throw new Error('The song was added to the queue, but couldn’t be moved up next.');
+      }
+      if (api !== apiRef.current) return;
+      setTimeout(() => { if (api === apiRef.current) refreshQueue(api); }, 350);
+    } catch (err: any) {
+      if (api !== apiRef.current) return;
+      setState((prev) => ({ ...prev, connectionMessage: err?.message || 'Could not update the player' }));
+    }
+  };
+
   const loadBulkPlaylists = async () => {
     const api = apiRef.current;
     if (!api || !featureSetRef.current.has('playlist_edit')) return;
@@ -3950,6 +4001,10 @@ export function useRemoteSession() {
 
       case 'AddSongToQueue':
         runSongAction('queue');
+        break;
+
+      case 'SwipeSongAction':
+        swipeSong(action.id, action.action);
         break;
 
       case 'AddSongToPlaylist':
