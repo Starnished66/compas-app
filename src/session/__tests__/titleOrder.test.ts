@@ -24,6 +24,11 @@ describe('sortedByTitle', () => {
     expect(sortedByTitle(items, byTitle).map((item) => item.id)).toEqual([1, 3, 4, 2]);
   });
 
+  it('ignores leading punctuation like the player', () => {
+    const items = [{ title: 'Zed' }, { title: '¿Bolero yo?' }, { title: '[MESSAGE FROM THE CLERGY]' }, { title: '...and Soon' }];
+    expect(sortedByTitle(items, byTitle).map((item) => item.title)).toEqual(['...and Soon', '¿Bolero yo?', '[MESSAGE FROM THE CLERGY]', 'Zed']);
+  });
+
   it('returns already ordered input unchanged', () => {
     const items = [{ title: 'Alpha' }, { title: 'beta' }, { title: 'Gamma' }];
     const sorted = sortedByTitle(items, byTitle);
