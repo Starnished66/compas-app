@@ -37,9 +37,6 @@ const QUEUE_ROW_ARTWORK = 40;
 const MODE_ICON_SIZE = 18;
 const END_REACHED_THRESHOLD = 0.5;
 const QUEUE_ROW_HEIGHT = 56;
-const INITIAL_ROWS = 16;
-const ROWS_PER_BATCH = 10;
-const RENDER_WINDOW = 7;
 
 let removeHintShown = false;
 
@@ -366,10 +363,6 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
           onEndReached={loadMore}
           onEndReachedThreshold={END_REACHED_THRESHOLD}
           showsVerticalScrollIndicator={false}
-          removeClippedSubviews={false}
-          initialNumToRender={INITIAL_ROWS}
-          maxToRenderPerBatch={ROWS_PER_BATCH}
-          windowSize={RENDER_WINDOW}
           style={[styles.list, { backgroundColor: palette.surface }]}
         />
       </DragReorderCellContext.Provider>

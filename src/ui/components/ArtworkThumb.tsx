@@ -47,7 +47,8 @@ function ArtworkThumbContent({
       style={[styles.frame, frame, { backgroundColor: palette.surfaceRaised }, style]}
     >
       {source && !failed ? (
-        <Image source={source} style={frame} resizeMode="cover" onError={() => setFailed(true)} />
+        // Covers are full-size files; decode them at thumbnail size instead of scaling a full bitmap.
+        <Image source={source} style={frame} resizeMode="cover" resizeMethod="resize" onError={() => setFailed(true)} />
       ) : (
         <Icon name={placeholderIcon} size={placeholderIconSize(size)} color={palette.inkMuted} />
       )}
