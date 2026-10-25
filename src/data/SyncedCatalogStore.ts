@@ -125,6 +125,81 @@ export class MemorySqlDatabase implements SqlDatabase {
   }
 }
 
+// Ordered schema steps; index i upgrades user_version i to i + 1. Never edit a shipped step, append a new one.
+const SCHEMA_MIGRATIONS: string[] = [
+  // v1: original schema. Installs from before versioning already have it, so every statement is IF NOT EXISTS.
+  `
+    CREATE TABLE IF NOT EXISTS catalog_state (
+      library_id TEXT PRIMARY KEY NOT NULL,
+      active_revision TEXT,
+      active_total INTEGER NOT NULL DEFAULT 0,
+      stage_revision TEXT,
+      stage_total INTEGER NOT NULL DEFAULT 0,
+      stage_next_offset INTEGER NOT NULL DEFAULT 0,
+      covers_revision TEXT,
+      covers_total INTEGER NOT NULL DEFAULT 0,
+      covers_next_offset INTEGER NOT NULL DEFAULT 0,
+      covers_complete INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS catalog_songs (
+      library_id TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      album TEXT NOT NULL,
+      album_artist TEXT NOT NULL,
+      genre TEXT NOT NULL,
+      track_number INTEGER,
+      disc_number INTEGER,
+      catalog_rank INTEGER NOT NULL DEFAULT 0,
+      album_key TEXT,
+      PRIMARY KEY (library_id, revision, id)
+    );
+    CREATE INDEX IF NOT EXISTS catalog_songs_album ON catalog_songs(library_id, revision, album_key);
+    CREATE INDEX IF NOT EXISTS catalog_songs_artist ON catalog_songs(library_id, revision, artist);
+    CREATE INDEX IF NOT EXISTS catalog_songs_album_artist ON catalog_songs(library_id, revision, album_artist);
+    CREATE INDEX IF NOT EXISTS catalog_songs_genre ON catalog_songs(library_id, revision, genre);
+    CREATE INDEX IF NOT EXISTS catalog_songs_title ON catalog_songs(library_id, revision, title COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS catalog_songs_rank ON catalog_songs(library_id, revision, catalog_rank);
+    CREATE TABLE IF NOT EXISTS catalog_song_artists (
+      library_id TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      song_id INTEGER NOT NULL,
+      artist TEXT NOT NULL,
+      PRIMARY KEY (library_id, revision, song_id, artist)
+    );
+    CREATE INDEX IF NOT EXISTS catalog_song_artists_name ON catalog_song_artists(library_id, revision, artist);
+    CREATE TABLE IF NOT EXISTS catalog_covers (
+      library_id TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      album_key TEXT NOT NULL,
+      representative_id INTEGER NOT NULL,
+      cover_key TEXT NOT NULL,
+      available INTEGER,
+      manifest_seen INTEGER NOT NULL DEFAULT 1,
+      download_state INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (library_id, revision, album_key)
+    );
+  `,
+  // v2: filters compare with COLLATE NOCASE, which binary-collated indexes cannot serve.
+  `
+    DROP INDEX IF EXISTS catalog_songs_artist;
+    DROP INDEX IF EXISTS catalog_songs_album_artist;
+    DROP INDEX IF EXISTS catalog_songs_genre;
+    DROP INDEX IF EXISTS catalog_song_artists_name;
+    CREATE INDEX IF NOT EXISTS catalog_songs_album_artist_nocase ON catalog_songs(library_id, revision, album_artist COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS catalog_songs_genre_nocase ON catalog_songs(library_id, revision, genre COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS catalog_songs_album_name_nocase ON catalog_songs(library_id, revision, album COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS catalog_song_artists_name_nocase ON catalog_song_artists(library_id, revision, artist COLLATE NOCASE);
+    ALTER TABLE catalog_state ADD COLUMN published_at INTEGER NOT NULL DEFAULT 0;
+  `,
+];
+
+/** Libraries (players) whose catalogs stay on device, including the active one. */
+const RETAINED_LIBRARIES = 3;
+const SONG_COUNT_CACHE_LIMIT = 64;
+
 export class SyncedCatalogStore {
   static readonly COVER_PENDING = 0;
   static readonly COVER_STORED = 1;
@@ -133,6 +208,10 @@ export class SyncedCatalogStore {
 
   private db: SqlDatabase;
   private initialized = false;
+  private initializing: Promise<void> | null = null;
+  // Filtered song totals per library/revision/filter; a published revision's rows never change.
+  private songCounts = new Map<string, number>();
+  private songCountGeneration = 0;
 
   constructor(db?: SqlDatabase) {
     if (db) {
@@ -176,61 +255,28 @@ export class SyncedCatalogStore {
 
   async init(): Promise<void> {
     if (this.initialized) return;
-    await this.db.exec(`
-      CREATE TABLE IF NOT EXISTS catalog_state (
-        library_id TEXT PRIMARY KEY NOT NULL,
-        active_revision TEXT,
-        active_total INTEGER NOT NULL DEFAULT 0,
-        stage_revision TEXT,
-        stage_total INTEGER NOT NULL DEFAULT 0,
-        stage_next_offset INTEGER NOT NULL DEFAULT 0,
-        covers_revision TEXT,
-        covers_total INTEGER NOT NULL DEFAULT 0,
-        covers_next_offset INTEGER NOT NULL DEFAULT 0,
-        covers_complete INTEGER NOT NULL DEFAULT 0
-      );
-      CREATE TABLE IF NOT EXISTS catalog_songs (
-        library_id TEXT NOT NULL,
-        revision TEXT NOT NULL,
-        id INTEGER NOT NULL,
-        title TEXT NOT NULL,
-        artist TEXT NOT NULL,
-        album TEXT NOT NULL,
-        album_artist TEXT NOT NULL,
-        genre TEXT NOT NULL,
-        track_number INTEGER,
-        disc_number INTEGER,
-        catalog_rank INTEGER NOT NULL DEFAULT 0,
-        album_key TEXT,
-        PRIMARY KEY (library_id, revision, id)
-      );
-      CREATE INDEX IF NOT EXISTS catalog_songs_album ON catalog_songs(library_id, revision, album_key);
-      CREATE INDEX IF NOT EXISTS catalog_songs_artist ON catalog_songs(library_id, revision, artist);
-      CREATE INDEX IF NOT EXISTS catalog_songs_album_artist ON catalog_songs(library_id, revision, album_artist);
-      CREATE INDEX IF NOT EXISTS catalog_songs_genre ON catalog_songs(library_id, revision, genre);
-      CREATE INDEX IF NOT EXISTS catalog_songs_title ON catalog_songs(library_id, revision, title COLLATE NOCASE);
-      CREATE INDEX IF NOT EXISTS catalog_songs_rank ON catalog_songs(library_id, revision, catalog_rank);
-      CREATE TABLE IF NOT EXISTS catalog_song_artists (
-        library_id TEXT NOT NULL,
-        revision TEXT NOT NULL,
-        song_id INTEGER NOT NULL,
-        artist TEXT NOT NULL,
-        PRIMARY KEY (library_id, revision, song_id, artist)
-      );
-      CREATE INDEX IF NOT EXISTS catalog_song_artists_name ON catalog_song_artists(library_id, revision, artist);
-      CREATE TABLE IF NOT EXISTS catalog_covers (
-        library_id TEXT NOT NULL,
-        revision TEXT NOT NULL,
-        album_key TEXT NOT NULL,
-        representative_id INTEGER NOT NULL,
-        cover_key TEXT NOT NULL,
-        available INTEGER,
-        manifest_seen INTEGER NOT NULL DEFAULT 1,
-        download_state INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (library_id, revision, album_key)
-      );
-    `);
-    this.initialized = true;
+    if (!this.initializing) {
+      const run = this.migrate().then(() => {
+        this.initialized = true;
+      });
+      this.initializing = run;
+      run.catch(() => {
+        if (this.initializing === run) this.initializing = null;
+      });
+    }
+    await this.initializing;
+  }
+
+  /** Applies each pending schema step in its own transaction, bumping PRAGMA user_version with it. */
+  private async migrate(): Promise<void> {
+    const row = await this.db.get<{ user_version?: number }>('PRAGMA user_version');
+    const current = Number(row?.user_version || 0);
+    for (let version = current; version < SCHEMA_MIGRATIONS.length; version++) {
+      await this.db.transaction(async (tx) => {
+        await tx.exec(SCHEMA_MIGRATIONS[version]);
+        await tx.exec(`PRAGMA user_version = ${version + 1}`);
+      });
+    }
   }
 
   async activeIdentity(libraryId: string): Promise<CatalogIdentity | null> {
@@ -262,7 +308,8 @@ export class SyncedCatalogStore {
       throw new Error('Invalid arguments to beginCatalogStage');
     }
 
-    return await this.db.transaction(async (tx) => {
+    // Counts are dropped after commit so a concurrent page read cannot re-cache pre-commit rows.
+    const restarted = await this.db.transaction(async (tx) => {
       await this.ensureState(tx, libraryId);
       const current = await this.stateRow(tx, libraryId);
 
@@ -287,6 +334,8 @@ export class SyncedCatalogStore {
       );
       return 0;
     });
+    if (restarted === 0) this.invalidateSongCounts(libraryId, revision);
+    return restarted;
   }
 
   async writeCatalogPage(page: CatalogPage): Promise<void> {
@@ -341,11 +390,12 @@ export class SyncedCatalogStore {
       const next = Math.max(state.stageNextOffset, page.nextOffset);
       await tx.run('UPDATE catalog_state SET stage_next_offset = ? WHERE library_id = ?', [next, page.libraryId]);
     });
+    this.invalidateSongCounts(page.libraryId, page.revision);
   }
 
   async publishCatalog(libraryId: string, revision: string, total: number): Promise<void> {
     await this.init();
-    await this.db.transaction(async (tx) => {
+    const evicted = await this.db.transaction(async (tx) => {
       const state = await this.stateRow(tx, libraryId);
       if (state.stageRevision !== revision || state.stageTotal !== total || state.stageNextOffset < total) {
         throw new Error('Catalog pages are incomplete');
@@ -369,15 +419,37 @@ export class SyncedCatalogStore {
           covers_revision = NULL,
           covers_total = 0,
           covers_next_offset = 0,
-          covers_complete = 0
+          covers_complete = 0,
+          published_at = ?
          WHERE library_id = ?`,
-        [revision, total, libraryId]
+        [revision, total, Date.now(), libraryId]
       );
 
       await tx.run('DELETE FROM catalog_songs WHERE library_id = ? AND revision != ?', [libraryId, revision]);
       await tx.run('DELETE FROM catalog_song_artists WHERE library_id = ? AND revision != ?', [libraryId, revision]);
       await tx.run('DELETE FROM catalog_covers WHERE library_id = ?', [libraryId]);
+
+      // Keep only the few most recently published players; older ones would otherwise stay forever.
+      const others = await tx.all<{ library_id: string }>(
+        'SELECT library_id FROM catalog_state WHERE library_id != ? ORDER BY published_at DESC, library_id',
+        [libraryId]
+      );
+      const dropped = others.slice(RETAINED_LIBRARIES - 1).map((row) => String(row.library_id));
+      for (const id of dropped) {
+        for (const table of ['catalog_songs', 'catalog_song_artists', 'catalog_covers', 'catalog_state']) {
+          await tx.run(`DELETE FROM ${table} WHERE library_id = ?`, [id]);
+        }
+      }
+      return dropped;
     });
+    for (const id of [libraryId, ...evicted]) this.invalidateSongCounts(id);
+  }
+
+  /** Library ids that still have catalog state; synced cover directories for any other library can be purged. */
+  async retainedLibraryIds(): Promise<string[]> {
+    await this.init();
+    const rows = await this.db.query<{ library_id: string }>('SELECT library_id FROM catalog_state');
+    return rows.map((r) => String(r.library_id));
   }
 
   async beginCovers(
@@ -629,15 +701,30 @@ export class SyncedCatalogStore {
            CASE WHEN track_number IS NULL THEN 1 ELSE 0 END, track_number, catalog_rank`
         : 'catalog_rank';
 
+    // Paging re-reads the same filter repeatedly; count it once per revision instead of on every page.
+    const countKey = `${libraryId}\u0000${revision}\u0000${JSON.stringify(args.slice(2))}`;
+    const cachedTotal = this.songCounts.get(countKey);
+    const generation = this.songCountGeneration;
     const [countRow, rows] = await Promise.all([
-      this.db.queryFirst(`SELECT COUNT(*) as count FROM catalog_songs WHERE ${where}`, args),
+      cachedTotal != null
+        ? null
+        : this.db.queryFirst(`SELECT COUNT(*) as count FROM catalog_songs WHERE ${where}`, args),
       this.db.query(
         `SELECT id, title, artist, album, album_artist, genre, track_number, disc_number, album_key
          FROM catalog_songs WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
         [...args, limit, offset]
       ),
     ]);
-    const total = countRow ? Number(countRow.count || 0) : 0;
+    let total = cachedTotal ?? 0;
+    if (cachedTotal == null) {
+      total = countRow ? Number(countRow.count || 0) : 0;
+      if (generation === this.songCountGeneration) {
+        if (this.songCounts.size >= SONG_COUNT_CACHE_LIMIT) {
+          this.songCounts.delete(this.songCounts.keys().next().value as string);
+        }
+        this.songCounts.set(countKey, total);
+      }
+    }
 
     const songs: CatalogSong[] = rows.map((r: any) => ({
       id: Number(r.id),
@@ -713,13 +800,10 @@ export class SyncedCatalogStore {
 
     if (artist) {
       filter.push(
-        `EXISTS (SELECT 1 FROM catalog_song_artists artist_membership WHERE
-          artist_membership.library_id = catalog_songs.library_id AND
-          artist_membership.revision = catalog_songs.revision AND
-          artist_membership.song_id = catalog_songs.id AND
-          artist_membership.artist = ? COLLATE NOCASE)`
+        `catalog_songs.id IN (SELECT song_id FROM catalog_song_artists WHERE
+          library_id = ? AND revision = ? AND artist = ? COLLATE NOCASE)`
       );
-      args.push(artist);
+      args.push(libraryId, revision, artist);
     }
     if (albumArtist) {
       filter.push('catalog_songs.album_artist = ? COLLATE NOCASE');
@@ -808,14 +892,12 @@ export class SyncedCatalogStore {
     const args: any[] = [libraryId, revision];
 
     if (artist) {
+      // An IN list lets the artist name index drive the lookup instead of probing every song.
       clauses.push(
-        `EXISTS (SELECT 1 FROM catalog_song_artists artist_membership WHERE
-          artist_membership.library_id = catalog_songs.library_id AND
-          artist_membership.revision = catalog_songs.revision AND
-          artist_membership.song_id = catalog_songs.id AND
-          artist_membership.artist = ? COLLATE NOCASE)`
+        `id IN (SELECT song_id FROM catalog_song_artists WHERE
+          library_id = ? AND revision = ? AND artist = ? COLLATE NOCASE)`
       );
-      args.push(artist);
+      args.push(libraryId, revision, artist);
     }
     if (albumArtist) {
       clauses.push('album_artist = ? COLLATE NOCASE');
@@ -843,6 +925,14 @@ export class SyncedCatalogStore {
     }
 
     return [clauses.join(' AND '), args];
+  }
+
+  private invalidateSongCounts(libraryId: string, revision?: string): void {
+    this.songCountGeneration++;
+    const prefix = revision != null ? `${libraryId}\u0000${revision}\u0000` : `${libraryId}\u0000`;
+    for (const key of Array.from(this.songCounts.keys())) {
+      if (key.startsWith(prefix)) this.songCounts.delete(key);
+    }
   }
 
   private async ensureState(tx: SqlDatabase, libraryId: string): Promise<void> {

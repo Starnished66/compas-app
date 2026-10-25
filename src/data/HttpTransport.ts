@@ -67,10 +67,18 @@ export function createHttpResponse(
 const CURRENT_ARTWORK_TARGET = '/api/v1/art';
 
 export class ArtworkRequestPreemptedException extends Error {
-  constructor(message: string = 'Artwork request was preempted', public cause?: unknown) {
+  /** True when a foreground command cancelled the request; false when it only timed out. Preempted reads can be requeued. */
+  readonly preempted: boolean;
+
+  constructor(message: string = 'Artwork request was preempted', public cause?: unknown, preempted: boolean = true) {
     super(message);
     this.name = 'ArtworkRequestPreemptedException';
+    this.preempted = preempted;
   }
+}
+
+export function isPreemptedArtworkError(error: unknown): boolean {
+  return error instanceof ArtworkRequestPreemptedException && error.preempted;
 }
 
 export interface ArtworkPreemptibleTransport {
@@ -153,6 +161,10 @@ export class SerializedHttpTransport implements HttpTransport, ArtworkPreemptibl
   }
 }
 
+function isCatalogArtworkRequest(target: string): boolean {
+  return target === '/api/v1/catalog/art' || target.startsWith('/api/v1/catalog/art?');
+}
+
 export function isOptionalArtworkRequest(target: string): boolean {
   return (
     target === '/api/v1/art' ||
@@ -177,6 +189,7 @@ export class FetchHttpTransport implements HttpTransport, ArtworkPreemptibleTran
   private baseUrl: string;
   private timeoutMs: number;
   private activeArtworkControllers = new Map<number | 'general', AbortController>();
+  private preemptedControllers = new WeakSet<AbortController>();
 
   constructor(baseUrl: string, timeoutMs: number = 8000, downloadFile?: FileDownloader) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
@@ -212,11 +225,13 @@ export class FetchHttpTransport implements HttpTransport, ArtworkPreemptibleTran
     if (index != null) {
       const controller = this.activeArtworkControllers.get(index);
       if (controller) {
+        this.preemptedControllers.add(controller);
         controller.abort();
         this.activeArtworkControllers.delete(index);
       }
     } else {
       for (const controller of this.activeArtworkControllers.values()) {
+        this.preemptedControllers.add(controller);
         controller.abort();
       }
       this.activeArtworkControllers.clear();
@@ -234,7 +249,9 @@ export class FetchHttpTransport implements HttpTransport, ArtworkPreemptibleTran
     const isArt = isOptionalArtworkRequest(request.target);
     const artIndex = isArt ? extractArtworkIndex(request.target) : null;
     const controller = new AbortController();
-    const key = artIndex != null ? artIndex : (isArt ? 'general' : null);
+    // Catalog cover sync is not tied to the current track, so commands must not cancel it; it only times out.
+    const preemptible = isArt && !isCatalogArtworkRequest(request.target);
+    const key = !preemptible ? null : artIndex != null ? artIndex : 'general';
 
     if (key != null) {
       this.activeArtworkControllers.set(key, controller);
@@ -245,7 +262,12 @@ export class FetchHttpTransport implements HttpTransport, ArtworkPreemptibleTran
       return await run(controller.signal);
     } catch (err: any) {
       if (controller.signal.aborted && isArt) {
-        throw new ArtworkRequestPreemptedException('Artwork request preempted or timed out', err);
+        const preempted = this.preemptedControllers.has(controller);
+        throw new ArtworkRequestPreemptedException(
+          preempted ? 'Artwork request preempted' : 'Artwork request timed out',
+          err,
+          preempted
+        );
       }
       throw err;
     } finally {

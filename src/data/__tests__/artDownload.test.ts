@@ -72,7 +72,36 @@ describe('art downloads', () => {
     const pending = api.downloadArt('file:///a.tmp');
     await Promise.resolve();
     api.preemptArtworkRequest();
-    await expect(pending).rejects.toBeInstanceOf(ArtworkRequestPreemptedException);
+    await expect(pending).rejects.toMatchObject({ name: 'ArtworkRequestPreemptedException', preempted: true });
+  });
+
+  it('does not let a player command cancel catalog cover sync', async () => {
+    const realFetch = globalThis.fetch;
+    let release: (() => void) | null = null;
+    let aborted = false;
+    globalThis.fetch = ((_url: string, init: RequestInit) =>
+      new Promise((resolve) => {
+        init.signal?.addEventListener('abort', () => (aborted = true));
+        release = () => resolve(new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/jpeg' } }));
+      })) as typeof fetch;
+    try {
+      const api = new RemoteApi(new SerializedHttpTransport(new FetchHttpTransport('http://player:8899')));
+      const cover = api.catalogArt('rev', 4, 'cover');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      api.preemptArtworkRequest();
+      expect(aborted).toBe(false);
+      release!();
+      await expect(cover).resolves.toEqual({ contentType: 'image/jpeg', base64: 'AQID' });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it('marks timed-out artwork as not preempted', async () => {
+    const download: FileDownloader = (_url, _fileUri, _headers, signal) =>
+      new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('cancelled'))));
+    const api = new RemoteApi(new SerializedHttpTransport(new FetchHttpTransport('http://player', 5, download)));
+    await expect(api.downloadArt('file:///a.tmp')).rejects.toMatchObject({ preempted: false });
   });
 
   it('is unavailable on transports without file downloads', () => {
