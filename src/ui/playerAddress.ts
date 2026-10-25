@@ -9,9 +9,14 @@ const HOST_WITH_OPTIONAL_PORT = /^[a-zA-Z0-9][a-zA-Z0-9.-]*(:\d{1,5})?$/;
 const IPV4_WITH_OPTIONAL_PORT = /^\d+\.\d+\.\d+\.\d+(:\d+)?$/;
 const HAS_LETTER = /[a-z]/i;
 
+// The saved address is a full URL ("http://192.168.1.20:8899"), and people paste those too.
+function withoutScheme(input: string): string {
+  return input.trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
+}
+
 export function checkPlayerAddress(input: string): AddressCheck {
-  const address = input.trim();
-  if (!address) return 'blank';
+  if (!input.trim()) return 'blank';
+  const address = withoutScheme(input);
   const plausible =
     HOST_WITH_OPTIONAL_PORT.test(address) && (IPV4_WITH_OPTIONAL_PORT.test(address) || HAS_LETTER.test(address));
   return plausible ? 'valid' : 'invalid';
@@ -25,7 +30,9 @@ export function playerAddressHint(
     case 'blank':
       return t('If you leave out the port, {port} is used.', { port: RemoteEndpoint.DEFAULT_PLAYER_PORT });
     case 'valid': {
-      const port = input.trim().split(':')[1] ?? String(RemoteEndpoint.DEFAULT_PLAYER_PORT);
+      const address = withoutScheme(input);
+      const port = address.split(':')[1] ??
+        (address.toLowerCase().endsWith(RemoteEndpoint.PLAYER_DOMAIN) ? '80' : String(RemoteEndpoint.DEFAULT_PLAYER_PORT));
       return t('Looks good. Port {port}.', { port });
     }
     default:

@@ -107,7 +107,13 @@ export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
           <>
             <PlayerCard name={player.name} detail={player.detail}>
               <View style={styles.playerActions}>
-                <Button label={t('Update saved PIN')} variant="container" fill onPress={() => onAction({ type: 'ChangePin' })} />
+                <Button
+                  label={t('Change PIN')}
+                  accessibilityLabel={t('Update saved PIN')}
+                  variant="container"
+                  fill
+                  onPress={() => onAction({ type: 'ChangePin' })}
+                />
                 <DisconnectButton playerName={player.name} onDisconnect={() => onAction({ type: 'Disconnect' })} />
               </View>
             </PlayerCard>
