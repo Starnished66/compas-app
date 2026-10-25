@@ -852,7 +852,7 @@ Object.assign(catalogs.es, {
   'Playlists the player made itself, like Most Played, can’t be changed and aren’t listed.': 'Las listas creadas por el reproductor, como Más reproducidas, no se pueden cambiar y no aparecen aquí.',
   'Remove': 'Quitar', 'Remove from favorites': 'Quitar de favoritos', 'Selected items are from the loaded results.': 'Los elementos seleccionados pertenecen a los resultados cargados.',
   'Stop': 'Detener', 'You can also start a playlist from any song. Open its menu and choose Add to playlist.': 'También puedes iniciar una lista desde cualquier canción. Abre su menú y elige Añadir a una lista.',
-  '{completed} of {total} processed': '{completed} de {total} procesados', '{count} selected': '{count} seleccionados',
+  '{completed} of {total} processed': '{completed} de {total} procesados', '{count} selected': { one: '{count} seleccionado', other: '{count} seleccionados' },
 });
 Object.assign(catalogs.de, {
   'Compás Remote closed unexpectedly': 'Compás Remote wurde unerwartet geschlossen',
@@ -884,7 +884,7 @@ Object.assign(catalogs.fr, {
   'Playlists the player made itself, like Most Played, can’t be changed and aren’t listed.': 'Les playlists créées par le lecteur, comme Les plus écoutées, ne sont pas modifiables et ne sont pas affichées.',
   'Remove': 'Supprimer', 'Remove from favorites': 'Retirer des favoris', 'Selected items are from the loaded results.': 'La sélection provient des résultats chargés.',
   'Stop': 'Arrêter', 'You can also start a playlist from any song. Open its menu and choose Add to playlist.': 'Vous pouvez aussi créer une playlist depuis un titre. Ouvrez son menu et choisissez Ajouter à une playlist.',
-  '{completed} of {total} processed': '{completed} sur {total} traités', '{count} selected': '{count} sélectionnés',
+  '{completed} of {total} processed': '{completed} sur {total} traités', '{count} selected': { one: '{count} sélectionné', other: '{count} sélectionnés' },
 });
 Object.assign(catalogs.it, {
   'Compás Remote closed unexpectedly': 'Compás Remote si è chiusa inaspettatamente',
@@ -900,7 +900,7 @@ Object.assign(catalogs.it, {
   'Playlists the player made itself, like Most Played, can’t be changed and aren’t listed.': 'Le playlist create dal lettore, come Più riprodotte, non si possono modificare e non vengono mostrate.',
   'Remove': 'Rimuovi', 'Remove from favorites': 'Rimuovi dai preferiti', 'Selected items are from the loaded results.': 'Gli elementi selezionati provengono dai risultati caricati.',
   'Stop': 'Interrompi', 'You can also start a playlist from any song. Open its menu and choose Add to playlist.': 'Puoi avviare una playlist anche da un brano. Apri il menu e scegli Aggiungi a una playlist.',
-  '{completed} of {total} processed': '{completed} di {total} elaborati', '{count} selected': '{count} selezionati',
+  '{completed} of {total} processed': '{completed} di {total} elaborati', '{count} selected': { one: '{count} selezionato', other: '{count} selezionati' },
 });
 Object.assign(catalogs.ru, {
   'Compás Remote closed unexpectedly': 'Приложение Compás Remote неожиданно закрылось',
