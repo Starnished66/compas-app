@@ -173,7 +173,7 @@ export default function App() {
                   <AppBackdrop
                     artworkUri={state.currentTrack?.artwork ?? null}
                     prominent={mainScreen.type === 'Home'}
-                    paused={nowPlayingVisible}
+                    paused={nowPlayingVisible || queueOpen}
                   />
                   <AppSnackbarProvider showMiniPlayer={showMiniPlayer} chromeHidden={connectionVisible}>
                     <StatusBar style={isDark ? 'light' : 'dark'} />

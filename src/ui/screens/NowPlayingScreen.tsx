@@ -291,7 +291,11 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
         accessibilityLabel={t('Now playing')}
         style={[styles.player, playerAnimatedStyle]}
       >
-        <AppBackdrop artworkUri={visible ? track?.artwork : lastVisibleArtwork.current} paused={!visible} />
+        {/* The queue sheet covers this screen; animating underneath it only costs frames while the queue scrolls. */}
+        <AppBackdrop
+          artworkUri={visible ? track?.artwork : lastVisibleArtwork.current}
+          paused={!visible || state.screen.type === 'Queue'}
+        />
         <View collapsable={false} style={[styles.page, { paddingTop: insets.top, paddingBottom: Space.xl + insetBeyond(insets.bottom, Space.xl) }]}>
           <GestureDetector gesture={panGesture}>
             <View style={styles.dismissSurface}>
