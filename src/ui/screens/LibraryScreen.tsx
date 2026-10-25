@@ -329,7 +329,11 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
             <LibrarySyncCard
               message={catalogSyncMessage}
               insetRight={railGutter}
-              onRefresh={() => onAction({ type: 'RefreshLibrary', category })}
+              // Also checks the player's catalog: a failed sync retries, and changes made on the player come in.
+              onRefresh={() => {
+                onAction({ type: 'SyncLibrary' });
+                onAction({ type: 'RefreshLibrary', category });
+              }}
             />,
           ),
         );
