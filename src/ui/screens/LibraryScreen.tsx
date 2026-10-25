@@ -220,7 +220,9 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   const step = nested ? trail.current : null;
   const artistDetail = nested && state.libraryNestedTitle === NESTED_ALBUMS_TITLE;
   const albumDetail = nested && !artistDetail && step?.kind === 'album';
-  const nativeCollectionSupported = state.supportedFeatures.includes('collection_playback');
+  // Features outlive a dropped link; don't offer playback the player can't receive right now.
+  const nativeCollectionSupported =
+    state.connectionStatus === ConnectionStatus.Connected && state.supportedFeatures.includes('collection_playback');
   const nativeCollectionPlayback =
     nativeCollectionSupported &&
     (artistDetail || albumDetail) &&
