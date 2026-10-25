@@ -135,6 +135,8 @@ const PREF_AUTO_RECONNECT = 'compas_pref_auto_reconnect';
 // Backoff before re-running a failed catalog sync; after the last one the failure is shown.
 const CATALOG_SYNC_RETRY_DELAYS_MS = [2000, 5000, 15000];
 const MEDIA_ACTION_RECONCILE_DELAY_MS = 1200;
+const QUEUE_ARTWORK_FLUSH_MS = 120;
+const QUEUE_REFRESHING_MESSAGE = 'The queue changed. It is being refreshed.';
 
 // Socket and HTTP errors from the transports are developer text; show the user what to check instead.
 const connectFailureMessage = (err: any, transport: ConnectionTransport): string => {
@@ -304,6 +306,8 @@ export function useRemoteSession() {
   const pollLoopTokenRef = useRef(0);
   const reconcileOnceRef = useRef(false);
   const reconcileTimerRef = useRef<any>(null);
+  const queueArtworkPendingRef = useRef(new Map<number, string>());
+  const queueArtworkFlushTimerRef = useRef<any>(null);
   const pinCooldownTimerRef = useRef<any>(null);
   const autoReconnectTimerRef = useRef<any>(null);
   const autoReconnectEnabledRef = useRef<boolean>(true);
@@ -438,6 +442,7 @@ export function useRemoteSession() {
       if (pinCooldownTimerRef.current) clearInterval(pinCooldownTimerRef.current);
       if (autoReconnectTimerRef.current) clearTimeout(autoReconnectTimerRef.current);
       if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current);
+      if (queueArtworkFlushTimerRef.current) clearTimeout(queueArtworkFlushTimerRef.current);
       if (searchDebounceTimerRef.current) clearTimeout(searchDebounceTimerRef.current);
       libraryArtwork.dispose();
       wifiDiscoveryGenerationRef.current++;
@@ -1000,6 +1005,7 @@ export function useRemoteSession() {
     catalogCoversByAlbumRef.current = new Map();
     syncedCoverUriCacheRef.current = new Map();
     queueArtworkBySongRef.current.clear();
+    queueArtworkPendingRef.current.clear();
     libraryEntriesRef.current.clear();
     libraryListCacheRef.current.clear();
     shownLibraryListRef.current = null;
@@ -1036,6 +1042,7 @@ export function useRemoteSession() {
     catalogCoversByAlbumRef.current = new Map();
     syncedCoverUriCacheRef.current = new Map();
     queueArtworkBySongRef.current.clear();
+    queueArtworkPendingRef.current.clear();
     libraryArtwork.clear();
     nowPlayingArtwork.reset();
     const withoutArtwork = <T extends { artwork?: string | null }>(entry: T): T => ({ ...entry, artwork: null });
@@ -1078,6 +1085,7 @@ export function useRemoteSession() {
         catalogCoversByAlbumRef.current = new Map();
         syncedCoverUriCacheRef.current = new Map();
         queueArtworkBySongRef.current.clear();
+        queueArtworkPendingRef.current.clear();
         setState((prev) => ({ ...prev, catalogSyncMessage: null }));
         return;
       }
@@ -1089,6 +1097,7 @@ export function useRemoteSession() {
         generation === catalogSyncGenerationRef.current;
       syncedCoverUriCacheRef.current = new Map();
       queueArtworkBySongRef.current.clear();
+      queueArtworkPendingRef.current.clear();
       lastCatalogCoverProgressAtRef.current = 0;
       setState((prev) => ({ ...prev, catalogSyncMessage: 'Checking player library' }));
 
@@ -1738,6 +1747,8 @@ export function useRemoteSession() {
         queueTotal: qPage.total,
         queueHasMore: tracks.length < qPage.total,
         queueStatus: tracks.length > 0 ? ContentStatus.Ready : ContentStatus.Empty,
+        // The refresh this message announced is done.
+        connectionMessage: prev.connectionMessage === QUEUE_REFRESHING_MESSAGE ? null : prev.connectionMessage,
       }));
       void loadQueueArtwork(qPage.songs.map((song) => song.index), api);
     } catch {
@@ -1922,7 +1933,7 @@ export function useRemoteSession() {
         setState((prev) => ({
           ...prev,
           queueLoadingMore: false,
-          connectionMessage: 'The queue changed. It is being refreshed.',
+          connectionMessage: QUEUE_REFRESHING_MESSAGE,
         }));
         refreshQueue(api);
         return;
@@ -3343,13 +3354,32 @@ export function useRemoteSession() {
       ) return;
       if (!uri) continue;
       queueArtworkBySongRef.current.set(songIndex, uri);
-      setState((prev) => ({
-        ...prev,
-        queue: prev.queue.map((track) =>
-          queueTargetsRef.current.get(track.id)?.songIndex === songIndex ? { ...track, artwork: uri } : track,
-        ),
-      }));
+      queueArtworkPendingRef.current.set(songIndex, uri);
+      scheduleQueueArtworkFlush();
     }
+  };
+
+  // Covers resolve one by one; applying each with its own state update re-rendered the whole app
+  // (and every visible queue row) up to 25 times per page. Apply them together instead.
+  const scheduleQueueArtworkFlush = () => {
+    if (queueArtworkFlushTimerRef.current) return;
+    queueArtworkFlushTimerRef.current = setTimeout(() => {
+      queueArtworkFlushTimerRef.current = null;
+      const resolved = queueArtworkPendingRef.current;
+      if (!resolved.size) return;
+      queueArtworkPendingRef.current = new Map();
+      setState((prev) => {
+        let changed = false;
+        const queue = prev.queue.map((track) => {
+          const songIndex = queueTargetsRef.current.get(track.id)?.songIndex;
+          const uri = songIndex == null ? undefined : resolved.get(songIndex);
+          if (!uri || track.artwork === uri) return track;
+          changed = true;
+          return { ...track, artwork: uri };
+        });
+        return changed ? { ...prev, queue } : prev;
+      });
+    }, QUEUE_ARTWORK_FLUSH_MS);
   };
 
   const navigateBack = () => {
