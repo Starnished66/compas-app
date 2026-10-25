@@ -59,14 +59,15 @@ export interface TransferScreenProps {
 const MAX_FILE_BYTES = 4 * 1024 * 1024 * 1024 - 1;
 const WIDE_LAYOUT_MIN_WIDTH = 720;
 const PROGRESS_INTERVAL_MS = 150;
-// A dropped Wi-Fi link reconnects on its own; an upload waits that long for it before giving up.
-const RECONNECT_WAIT_MS = 45000;
-const UPLOAD_NETWORK_RETRIES = 2;
+// A dropped Wi-Fi link reconnects on its own, but the player keeps refusing uploads for about a
+// minute while the interrupted one times out; an upload keeps retrying that long before giving up.
+const RECONNECT_WAIT_MS = 120000;
+const UPLOAD_RETRY_DELAY_MS = 3000;
 
-/** A failure to reach the player at all, as opposed to the player refusing the request. */
+/** A failure to reach the player, or a session a reconnect replaced, as opposed to the player refusing the request. */
 function isConnectionError(cause: any): boolean {
   if (typeof cause?.statusCode === 'number') return false;
-  return /fetch failed|network request failed|connectexception|sockettimeout|timed? ?out|connection (reset|refused|abort)|unreachable/i
+  return /fetch failed|failed to connect|network request failed|connectexception|sockettimeout|timed? ?out|connection (reset|refused|abort)|broken pipe|end of stream|unreachable|import session ended/i
     .test(String(cause?.message ?? ''));
 }
 
@@ -152,6 +153,8 @@ interface UploadJob {
   sentBytes: number;
   totalBytes: number;
   destination: string;
+  /** Waiting for the player to take the file again after a dropped link. */
+  waiting?: boolean;
 }
 
 function TransferWorkspace({ transfer, active, connected }: { transfer: TransferApi; active: boolean; connected: boolean }) {
@@ -229,10 +232,10 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
     }
   }, [openPhoneDirectory, t]);
 
-  const loadSd = useCallback(async (path: string, append = false, offset = 0) => {
+  const loadSd = useCallback(async (path: string, append = false, offset = 0, keepError = false) => {
     const generation = ++sdGenerationRef.current;
     setSdLoading(true);
-    setError(null);
+    if (!keepError) setError(null);
     try {
       const page = await transferRef.current.list(path, append ? offset : 0);
       if (!aliveRef.current || generation !== sdGenerationRef.current) return;
@@ -329,7 +332,7 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
       setPreparing(false);
       let doneBytes = 0;
       let lastProgressAt = 0;
-      let networkRetries = 0;
+      let offlineSince: number | null = null;
       for (let index = 0; index < plan.uploads.length; index++) {
         if (controller.signal.aborted) throw new Error('Upload cancelled');
         const { source, destination: folder } = plan.uploads[index];
@@ -343,15 +346,19 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
             setJob({ ...base, sentBytes: doneBytes + sent });
           }, controller.signal);
           uploaded++;
-          networkRetries = 0;
+          offlineSince = null;
         } catch (cause: any) {
           if (controller.signal.aborted) throw cause;
           // The player drops a partial file, so the same file is sent again once the link is back.
-          if (isConnectionError(cause) && networkRetries < UPLOAD_NETWORK_RETRIES) {
-            networkRetries++;
-            await waitForSession(controller.signal);
-            index--;
-            continue;
+          if (isConnectionError(cause)) {
+            offlineSince ??= Date.now();
+            const deadline = offlineSince + RECONNECT_WAIT_MS;
+            if (Date.now() < deadline) {
+              if (aliveRef.current) setJob({ ...base, sentBytes: doneBytes, waiting: true });
+              await waitForSession(controller.signal, deadline);
+              index--;
+              continue;
+            }
           }
           const code = cause?.statusCode;
           if (code === 409) skipped++;
@@ -381,18 +388,21 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
         setPreparing(false);
         setJob(null);
         if (uploaded) setUploadedSinceFinish((count) => count + uploaded);
-        if (transferRef.current.status.state === 'ready') void loadSd(destination);
+        // Keeps the upload's own message; a failed refresh still replaces it.
+        if (transferRef.current.status.state === 'ready') void loadSd(destination, false, 0, true);
       }
     }
   };
 
-  const waitForSession = async (signal: AbortSignal) => {
-    const deadline = Date.now() + RECONNECT_WAIT_MS;
+  // The app may not have noticed the drop yet, so pause before checking that the session is back.
+  const waitForSession = async (signal: AbortSignal, deadline: number) => {
+    await new Promise((resolve) => setTimeout(resolve, UPLOAD_RETRY_DELAY_MS));
     while (transferRef.current.status.state !== 'ready') {
       if (signal.aborted) throw new Error('Upload cancelled');
       if (!aliveRef.current || Date.now() > deadline) throw new Error('Connection to Compás player was lost.');
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
+    if (signal.aborted) throw new Error('Upload cancelled');
   };
 
   const finish = async () => {
@@ -622,7 +632,9 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
             <ProgressBar value={progress} />
             <View style={styles.actionRow}>
               <AppText variant="caption" tone="inkMuted" style={styles.flex}>
-                {job ? `${formatBytes(job.sentBytes)} / ${formatBytes(job.totalBytes)} → ${job.destination ? `SD/${job.destination}` : 'SD/'}` : ''}
+                {job?.waiting
+                  ? t('Reconnecting to the player…')
+                  : job ? `${formatBytes(job.sentBytes)} / ${formatBytes(job.totalBytes)} → ${job.destination ? `SD/${job.destination}` : 'SD/'}` : ''}
               </AppText>
               <Button size="sm" variant="container" label={t('Cancel upload')} onPress={() => uploadControllerRef.current?.abort()} />
             </View>
