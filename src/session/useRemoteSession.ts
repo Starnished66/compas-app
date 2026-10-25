@@ -134,6 +134,7 @@ const PREF_LAST_TRANSPORT = 'compas_pref_last_transport';
 const PREF_AUTO_RECONNECT = 'compas_pref_auto_reconnect';
 // Backoff before re-running a failed catalog sync; after the last one the failure is shown.
 const CATALOG_SYNC_RETRY_DELAYS_MS = [2000, 5000, 15000];
+const MEDIA_ACTION_RECONCILE_DELAY_MS = 1200;
 
 const normalizedVolume = (value: number | null | undefined): number =>
   Number.isFinite(value) ? Math.max(0, Math.min(1, value as number)) : 0.68;
@@ -293,6 +294,8 @@ export function useRemoteSession() {
   const wifiDiscoveryProbesRef = useRef(new Set<string>());
   const pollingTimerRef = useRef<any>(null);
   const pollLoopTokenRef = useRef(0);
+  const reconcileOnceRef = useRef(false);
+  const reconcileTimerRef = useRef<any>(null);
   const pinCooldownTimerRef = useRef<any>(null);
   const autoReconnectTimerRef = useRef<any>(null);
   const autoReconnectEnabledRef = useRef<boolean>(true);
@@ -409,6 +412,8 @@ export function useRemoteSession() {
           }
           break;
       }
+      // An ignored play/pause means our state is stale too, so reconcile either way.
+      if (['play', 'pause', 'toggle', 'next', 'previous'].includes(evt.action)) reconcileAfterMediaAction();
     });
 
     return () => {
@@ -424,6 +429,7 @@ export function useRemoteSession() {
       if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
       if (pinCooldownTimerRef.current) clearInterval(pinCooldownTimerRef.current);
       if (autoReconnectTimerRef.current) clearTimeout(autoReconnectTimerRef.current);
+      if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current);
       if (searchDebounceTimerRef.current) clearTimeout(searchDebounceTimerRef.current);
       libraryArtwork.dispose();
       wifiDiscoveryGenerationRef.current++;
@@ -1428,6 +1434,23 @@ export function useRemoteSession() {
     if (ownsCatalogSync()) setState((prev) => ({ ...prev, catalogSyncMessage: null }));
   };
 
+  // Background Bluetooth audio suspends polling; a lock-screen action gets one status read
+  // shortly after, so the notification shows the new track and play/pause follows the player.
+  const reconcileAfterMediaAction = () => {
+    if (!BluetoothRequestPolicy.allowsActionReconciliation(
+      stateRef.current.connectionTransport,
+      appForegroundRef.current,
+      bluetoothAudioOutputRef.current
+    )) return;
+    if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current);
+    reconcileTimerRef.current = setTimeout(() => {
+      reconcileTimerRef.current = null;
+      if (!apiRef.current) return;
+      reconcileOnceRef.current = true;
+      startPollingLoop();
+    }, MEDIA_ACTION_RECONCILE_DELAY_MS);
+  };
+
   // Status Polling Loop
   const startPollingLoop = () => {
     if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
@@ -1442,7 +1465,9 @@ export function useRemoteSession() {
       if (!api || stateRef.current.connectionStatus !== ConnectionStatus.Connected) return;
 
       const transport = stateRef.current.connectionTransport;
-      if (!BluetoothRequestPolicy.allowsPassiveRequests(
+      const reconcile = reconcileOnceRef.current;
+      reconcileOnceRef.current = false;
+      if (!reconcile && !BluetoothRequestPolicy.allowsPassiveRequests(
         transport,
         appForegroundRef.current,
         bluetoothAudioOutputRef.current
