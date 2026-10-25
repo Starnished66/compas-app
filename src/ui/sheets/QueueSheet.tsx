@@ -1,5 +1,6 @@
 import React, { Ref, memo, useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, ListRenderItem, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { FlashList, ListRenderItem } from '@shopify/flash-list';
 import { ContentStatus, PlaybackMode, RemoteAction, RemoteTrack, RemoteUiState } from '../../data/types';
 import { AppText } from '../components/AppText';
 import { BottomSheet } from '../components/BottomSheet';
@@ -37,6 +38,7 @@ const QUEUE_ROW_ARTWORK = 40;
 const MODE_ICON_SIZE = 18;
 const END_REACHED_THRESHOLD = 0.5;
 const QUEUE_ROW_HEIGHT = 56;
+const NO_POSITION_KEEPING = { disabled: true };
 
 let removeHintShown = false;
 
@@ -166,6 +168,11 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
   const queueCount = Math.max(state.queueTotal, state.queue.length);
   const shuffleOn = isShuffleMode(state.playbackMode);
   const repeatOn = state.playbackMode === PlaybackMode.RepeatAll || state.playbackMode === PlaybackMode.RepeatOne || state.playbackMode === PlaybackMode.ShuffleRepeat;
+
+  // A refresh restarts the list at its first page, so the same length:total key must be requestable again.
+  useEffect(() => {
+    if (state.queueStatus === ContentStatus.Loading) lastPageRequest.current = '';
+  }, [state.queueStatus]);
 
   const loadMore = () => {
     const key = `${state.queue.length}:${state.queueTotal}`;
@@ -351,19 +358,23 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
         style={styles.sectionHeader}
       />
       <DragReorderCellContext.Provider value={drag.rowStyle}>
-        <FlatList
+        {/* Recycles row views; mounting fresh rows was most of the main-thread cost while flinging. */}
+        <FlashList
           data={rows}
+          // FlashList keeps a cell's rendered row when only its index changes; rows bind drag handles
+          // by index, so a reorder must re-render them or a handle drags the song that used to be there.
+          extraData={rows}
+          maintainVisibleContentPosition={NO_POSITION_KEEPING}
           CellRendererComponent={DragReorderCell}
           scrollEnabled={drag.scrollEnabled}
           keyExtractor={keyOf}
           renderItem={renderTrack}
-          strictMode
           ListEmptyComponent={emptyState}
           ListFooterComponent={footer}
           onEndReached={loadMore}
           onEndReachedThreshold={END_REACHED_THRESHOLD}
           showsVerticalScrollIndicator={false}
-          style={[styles.list, { backgroundColor: palette.surface }]}
+          style={StyleSheet.flatten([styles.list, { backgroundColor: palette.surface }])}
         />
       </DragReorderCellContext.Provider>
       <ConfirmDialog

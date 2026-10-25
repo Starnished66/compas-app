@@ -4,11 +4,12 @@
   "main": "index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@shopify/flash-list": "2.3.3",
     "@shopify/react-native-skia": "2.6.2",
     "compas-bluetooth": "file:./modules/compas-bluetooth",
     "compas-diagnostics": "file:./modules/compas-diagnostics",
-    "compas-files": "file:./modules/compas-files",
     "compas-discovery": "file:./modules/compas-discovery",
+    "compas-files": "file:./modules/compas-files",
     "compas-media-session": "file:./modules/compas-media-session",
     "compas-updates": "file:./modules/compas-updates",
     "expo": "~57.0.25",

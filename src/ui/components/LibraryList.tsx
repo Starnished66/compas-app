@@ -1,5 +1,6 @@
 import React, { ReactElement, memo, useCallback, useMemo } from 'react';
-import { FlatList, ListRenderItemInfo, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { FlashList, ListRenderItemInfo } from '@shopify/flash-list';
 import { ContentStatus, LibraryEntry, RemoteAction, RemoteTrack } from '../../data/types';
 import { Space } from '../tokens';
 import { LibraryEntryKind, isCurrentEntry } from '../library/libraryEntryKind';
@@ -15,12 +16,10 @@ import { unclippedScroll } from '../unclippedScroll';
 import { useStableTrack } from '../useStableTrack';
 
 const END_REACHED_THRESHOLD = 1.5;
-const INITIAL_ROWS = 16;
-const RENDER_WINDOW = 7;
+const NO_POSITION_KEEPING = { disabled: true };
 const SCROLL_EVENT_THROTTLE = 16;
 const LETTER_HEADER_MIN_HEIGHT = 36;
 const LETTER_HEADER_RIGHT = 28;
-const INDEX_RETRY_DELAY_MS = 60;
 
 export interface LibraryListProps {
   items: LibraryItem[];
@@ -46,6 +45,18 @@ export interface LibraryListProps {
 
 function keyOf(item: LibraryItem): string {
   return item.key;
+}
+
+// Recycled views are reused only for rows of the same shape; header nodes are one-offs.
+function itemTypeOf(item: LibraryItem): string {
+  switch (item.type) {
+    case 'node':
+      return `node:${item.key}`;
+    case 'entry':
+      return `entry:${item.kind}`;
+    default:
+      return item.type;
+  }
 }
 
 function LibraryListContent({
@@ -92,14 +103,6 @@ function LibraryListContent({
   const listRef = scroll?.listRef;
   const currentSong = useStableTrack(currentTrack);
   const contentContainerStyle = useMemo(() => ({ paddingBottom: contentBottomInset }), [contentBottomInset]);
-
-  const onScrollToIndexFailed = useCallback(
-    (info: { index: number; averageItemLength: number }) => {
-      listRef?.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
-      setTimeout(() => listRef?.current?.scrollToIndex({ index: info.index, animated: false }), INDEX_RETRY_DELAY_MS);
-    },
-    [listRef],
-  );
 
   const renderItem = useCallback(({ item }: ListRenderItemInfo<LibraryItem>) => {
     switch (item.type) {
@@ -163,14 +166,14 @@ function LibraryListContent({
   ]);
 
   return (
-    <FlatList
+    <FlashList
       ref={listRef}
+      getItemType={itemTypeOf}
+      maintainVisibleContentPosition={NO_POSITION_KEEPING}
       style={unclippedScroll}
       data={items}
       keyExtractor={keyOf}
       renderItem={renderItem}
-      strictMode
-      removeClippedSubviews={false}
       CellRendererComponent={renderPlaylistTrack ? DragReorderCell : undefined}
       stickyHeaderIndices={stickyHeaderIndices}
       onEndReached={onEndReached}
@@ -179,14 +182,11 @@ function LibraryListContent({
       viewabilityConfig={LIBRARY_VIEWABILITY_CONFIG}
       onScroll={scroll?.onScroll}
       onContentSizeChange={scroll?.onContentSizeChange}
-      onScrollToIndexFailed={onScrollToIndexFailed}
       scrollEventThrottle={SCROLL_EVENT_THROTTLE}
       scrollEnabled={scrollEnabled}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       showsVerticalScrollIndicator={false}
-      initialNumToRender={INITIAL_ROWS}
-      windowSize={RENDER_WINDOW}
       contentContainerStyle={contentContainerStyle}
       ListFooterComponent={loadingMore ? loadingFooter : null}
     />

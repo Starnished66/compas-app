@@ -1,10 +1,10 @@
 import { useCallback, useMemo, useRef } from 'react';
-import { FlatList, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
-import { useChromeScrollHandler } from '../chrome/useChromeScrollHandler';
+import { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import type { FlashListRef } from '@shopify/flash-list';
 import { LibraryItem } from './libraryItems';
 
 export interface LibraryListScroll {
-  listRef: React.RefObject<FlatList<LibraryItem> | null>;
+  listRef: React.RefObject<FlashListRef<LibraryItem> | null>;
   offset: () => number;
   onScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   onContentSizeChange: (width: number, height: number) => void;
@@ -15,10 +15,9 @@ export interface LibraryListScroll {
 export function useLibraryListScroll(onOffsetChange?: (offset: number) => void): LibraryListScroll {
   const offsetListener = useRef(onOffsetChange);
   offsetListener.current = onOffsetChange;
-  const listRef = useRef<FlatList<LibraryItem> | null>(null);
+  const listRef = useRef<FlashListRef<LibraryItem> | null>(null);
   const offsetRef = useRef(0);
   const pendingRestore = useRef<number | null>(null);
-  const chromeScroll = useChromeScrollHandler(true);
 
   const scrollTo = useCallback((offset: number, animated: boolean) => {
     listRef.current?.scrollToOffset({ offset, animated });
@@ -30,9 +29,8 @@ export function useLibraryListScroll(onOffsetChange?: (offset: number) => void):
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       offsetRef.current = event.nativeEvent.contentOffset.y;
       offsetListener.current?.(offsetRef.current);
-      chromeScroll(event);
     },
-    [chromeScroll],
+    [],
   );
 
   const onContentSizeChange = useCallback(
