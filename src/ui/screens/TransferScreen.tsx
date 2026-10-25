@@ -59,6 +59,16 @@ export interface TransferScreenProps {
 const MAX_FILE_BYTES = 4 * 1024 * 1024 * 1024 - 1;
 const WIDE_LAYOUT_MIN_WIDTH = 720;
 const PROGRESS_INTERVAL_MS = 150;
+// A dropped Wi-Fi link reconnects on its own; an upload waits that long for it before giving up.
+const RECONNECT_WAIT_MS = 45000;
+const UPLOAD_NETWORK_RETRIES = 2;
+
+/** A failure to reach the player at all, as opposed to the player refusing the request. */
+function isConnectionError(cause: any): boolean {
+  if (typeof cause?.statusCode === 'number') return false;
+  return /fetch failed|network request failed|connectexception|sockettimeout|timed? ?out|connection (reset|refused|abort)|unreachable/i
+    .test(String(cause?.message ?? ''));
+}
 
 type Pane = 'phone' | 'sd';
 
@@ -130,7 +140,7 @@ export function TransferScreen({ state, onAction, transfer, active, contentBotto
           <AppText variant="caption" tone="inkMuted" style={styles.flex}>{t('Reconnecting to the player…')}</AppText>
         </View>
       ) : gate ? <View style={styles.gateBanner}>{gate}</View> : null}
-      <TransferWorkspace key={state.wifiAddress} transfer={transfer} active={active} />
+      <TransferWorkspace key={state.wifiAddress} transfer={transfer} active={active} connected={!gate} />
     </View>
   );
 }
@@ -144,7 +154,7 @@ interface UploadJob {
   destination: string;
 }
 
-function TransferWorkspace({ transfer, active }: { transfer: TransferApi; active: boolean }) {
+function TransferWorkspace({ transfer, active, connected }: { transfer: TransferApi; active: boolean; connected: boolean }) {
   const { t } = useI18n();
   const palette = usePalette();
   const { width } = useWindowDimensions();
@@ -153,6 +163,8 @@ function TransferWorkspace({ transfer, active }: { transfer: TransferApi; active
   transferRef.current = transfer;
   const aliveRef = useRef(true);
   useEffect(() => () => { aliveRef.current = false; }, []);
+  const errorText = useCallback((cause: any, fallback: string) =>
+    isConnectionError(cause) ? t('Connection to Compás player was lost.') : cause?.message || fallback, [t]);
 
   const [pane, setPane] = useState<Pane>('phone');
   const [error, setError] = useState<string | null>(null);
@@ -229,24 +241,34 @@ function TransferWorkspace({ transfer, active }: { transfer: TransferApi; active
       setSdNextOffset(page.nextOffset);
       setSdLoaded(true);
     } catch (cause: any) {
-      if (aliveRef.current && generation === sdGenerationRef.current) setError(cause?.message || t('Could not read the SD card.'));
+      if (aliveRef.current && generation === sdGenerationRef.current) setError(errorText(cause, t('Could not read the SD card.')));
     } finally {
       if (aliveRef.current && generation === sdGenerationRef.current) setSdLoading(false);
     }
-  }, [t]);
+  }, [errorText, t]);
 
-  const startSession = useCallback(async () => {
+  // Set once the import session opens and cleared by Finish, so a reconnect reopens it.
+  const wantSessionRef = useRef(false);
+  const sdPathRef = useRef('');
+  sdPathRef.current = sdPath;
+  const startSession = useCallback(async (path = '') => {
     setStarting(true);
     setError(null);
     try {
       await transferRef.current.start();
-      if (aliveRef.current) await loadSd('');
+      wantSessionRef.current = true;
+      if (aliveRef.current) await loadSd(path);
     } catch (cause: any) {
-      if (aliveRef.current) setError(cause?.message || t('Could not start Wi-Fi import.'));
+      if (aliveRef.current) setError(errorText(cause, t('Could not start Wi-Fi import.')));
     } finally {
       if (aliveRef.current) setStarting(false);
     }
-  }, [loadSd, t]);
+  }, [errorText, loadSd, t]);
+
+  // Reconnecting resets the player's import session; reopen it where the SD card was showing.
+  useEffect(() => {
+    if (connected && status === 'stopped' && wantSessionRef.current && !starting) void startSession(sdPathRef.current);
+  }, [connected, status, starting, startSession]);
 
   // Open the player's import session the first time the tab is shown.
   const autoStartedRef = useRef(false);
@@ -307,21 +329,30 @@ function TransferWorkspace({ transfer, active }: { transfer: TransferApi; active
       setPreparing(false);
       let doneBytes = 0;
       let lastProgressAt = 0;
+      let networkRetries = 0;
       for (let index = 0; index < plan.uploads.length; index++) {
         if (controller.signal.aborted) throw new Error('Upload cancelled');
         const { source, destination: folder } = plan.uploads[index];
         const base = { fileIndex: index + 1, fileCount: plan.uploads.length, fileName: source.name, totalBytes: plan.totalBytes, destination };
         if (aliveRef.current) setJob({ ...base, sentBytes: doneBytes });
         try {
-          await api.upload(localFileUri(source.path), folder, source.name, (sent) => {
+          await transferRef.current.upload(localFileUri(source.path), folder, source.name, (sent) => {
             const now = Date.now();
             if (!aliveRef.current || now - lastProgressAt < PROGRESS_INTERVAL_MS) return;
             lastProgressAt = now;
             setJob({ ...base, sentBytes: doneBytes + sent });
           }, controller.signal);
           uploaded++;
+          networkRetries = 0;
         } catch (cause: any) {
           if (controller.signal.aborted) throw cause;
+          // The player drops a partial file, so the same file is sent again once the link is back.
+          if (isConnectionError(cause) && networkRetries < UPLOAD_NETWORK_RETRIES) {
+            networkRetries++;
+            await waitForSession(controller.signal);
+            index--;
+            continue;
+          }
           const code = cause?.statusCode;
           if (code === 409) skipped++;
           else if (code === 400 || code === 404 || code === 413 || cause?.message === 'Enter a valid file name') failed.push(source.name);
@@ -355,17 +386,27 @@ function TransferWorkspace({ transfer, active }: { transfer: TransferApi; active
     }
   };
 
+  const waitForSession = async (signal: AbortSignal) => {
+    const deadline = Date.now() + RECONNECT_WAIT_MS;
+    while (transferRef.current.status.state !== 'ready') {
+      if (signal.aborted) throw new Error('Upload cancelled');
+      if (!aliveRef.current || Date.now() > deadline) throw new Error('Connection to Compás player was lost.');
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  };
+
   const finish = async () => {
     if (uploading || finishing) return;
     setFinishing(true);
     setError(null);
     try {
       await transferRef.current.finish();
+      wantSessionRef.current = false;
       if (!aliveRef.current) return;
       setUploadedSinceFinish(0);
       setNotice(t('The player is updating its library.'));
     } catch (cause: any) {
-      if (aliveRef.current) setError(cause?.message || t('Could not finish import.'));
+      if (aliveRef.current) setError(errorText(cause, t('Could not finish import.')));
     } finally {
       if (aliveRef.current) setFinishing(false);
     }
