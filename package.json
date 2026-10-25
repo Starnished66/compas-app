@@ -1,6 +1,6 @@
 {
   "name": "compas-app",
-  "version": "0.3.6-8",
+  "version": "0.3.7",
   "main": "index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -47,5 +47,12 @@
     "simulator": "node tools/dap-simulator/server.js",
     "verify:apk": "python3 tools/verify_android_apk.py"
   },
-  "private": true
+  "private": true,
+  "expo": {
+    "install": {
+      "exclude": [
+        "@shopify/flash-list"
+      ]
+    }
+  }
 }
