@@ -78,6 +78,7 @@ const state = {
   pinLockedUntil: 0,
   latency: opts.latency,
   offline: false,
+  catalogFail: false,
   catalogRevisionCounter: 1,
   queue: [], // song ids
   queueRevision: 1,
@@ -739,6 +740,7 @@ const server = http.createServer((req, res) => {
       try {
         if(!handler) throw notFound(`no route for ${ req.method } ${ url.pathname }`);
         checkPin(req);
+        if(state.catalogFail && route.startsWith('GET /catalog')) throw new ApiError(500, {error: 'catalog unavailable', code: 'internal'});
         const result = handler(url.searchParams, Buffer.concat(chunks));
         if(result && result.contentType) {
           send(res, result.status, result.contentType, result.body);
@@ -784,6 +786,7 @@ const HELP = `Commands:
   latency <ms>      delay every response
   offline / online  drop all connections (tests reconnect) / accept again
   revision          bump the catalog revision (forces a full catalog resync)
+  catalogfail on|off  fail catalog requests while status keeps working (tests the sync failure card)
   quit`;
 
 function startConsole() {
@@ -807,6 +810,7 @@ function startConsole() {
       case 'latency': state.latency = Math.max(0, Number(arg) || 0); console.log(`latency ${ state.latency }ms`); break;
       case 'offline': state.offline = true; server.closeAllConnections(); console.log('offline: dropping connections'); break;
       case 'online': state.offline = false; console.log('online'); break;
+      case 'catalogfail': state.catalogFail = arg === 'on'; console.log(`catalog requests ${ state.catalogFail ? 'failing' : 'ok' }`); break;
       case 'revision': state.catalogRevisionCounter++; console.log(`catalog revision now ${ catalogRevision() }`); break;
       case 'quit': case 'exit': process.exit(0); break;
       default: console.log(HELP);
