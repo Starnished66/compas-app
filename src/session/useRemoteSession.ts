@@ -325,6 +325,7 @@ export function useRemoteSession() {
   const latestPlayingRef = useRef<boolean>(false);
   const bluetoothAudioOutputRef = useRef<boolean | null>(null);
   const appForegroundRef = useRef(AppState.currentState === 'active');
+  const autoReconnectDueAtRef = useRef(0);
   const lastQueueRefreshAtRef = useRef(0);
   const lastWifiProbeAtRef = useRef(0);
   const lastBluetoothArtworkAtRef = useRef(0);
@@ -470,10 +471,17 @@ export function useRemoteSession() {
     return () => sub.remove();
   }, []);
 
-  // JS timers stop in the background, so the playback service's tick drives the poll there.
+  // JS timers stop in the background, so the playback service's tick drives the poll and
+  // any reconnect that is due there.
   useEffect(() => {
     const sub = addBackgroundTickListener(() => {
-      if (appForegroundRef.current || !apiRef.current || stateRef.current.connectionStatus !== ConnectionStatus.Connected) return;
+      if (appForegroundRef.current) return;
+      if (autoReconnectTimerRef.current && Date.now() >= autoReconnectDueAtRef.current) {
+        clearTimeout(autoReconnectTimerRef.current);
+        void runAutoReconnect();
+        return;
+      }
+      if (!apiRef.current || stateRef.current.connectionStatus !== ConnectionStatus.Connected) return;
       startPollingLoop(true);
     });
     return () => sub?.remove();
@@ -692,47 +700,49 @@ export function useRemoteSession() {
   // Connect flows
   const scheduleAutoReconnect = (initialDelayMs: number = 15000) => {
     if (!autoReconnectEnabledRef.current || autoReconnectTimerRef.current) return;
+    autoReconnectDueAtRef.current = Date.now() + initialDelayMs;
+    autoReconnectTimerRef.current = setTimeout(runAutoReconnect, initialDelayMs);
+  };
 
-    autoReconnectTimerRef.current = setTimeout(async () => {
-      autoReconnectTimerRef.current = null;
-      if (!autoReconnectEnabledRef.current || apiRef.current) return;
-      if (stateRef.current.pinDialogVisible) {
-        // Editing the PIN while a dropped link waits: try again later instead of leaving "Connecting" stuck.
-        // A PIN rejection sets Error, and that wait is for the user, not for us.
-        if (stateRef.current.connectionStatus === ConnectionStatus.Connecting) scheduleAutoReconnect(5000);
-        return;
+  const runAutoReconnect = async () => {
+    autoReconnectTimerRef.current = null;
+    if (!autoReconnectEnabledRef.current || apiRef.current) return;
+    if (stateRef.current.pinDialogVisible) {
+      // Editing the PIN while a dropped link waits: try again later instead of leaving "Connecting" stuck.
+      // A PIN rejection sets Error, and that wait is for the user, not for us.
+      if (stateRef.current.connectionStatus === ConnectionStatus.Connecting) scheduleAutoReconnect(5000);
+      return;
+    }
+
+    const savedWifi = await AsyncStorage.getItem(PREF_WIFI_ADDRESS);
+    const savedBt = await AsyncStorage.getItem(PREF_BLUETOOTH_ID);
+
+    let connected = false;
+    if (savedWifi && savedWifi.trim().length > 0) {
+      const wifiPerms = getRequiredPermissionsForWifi();
+      const wifiOk = wifiPerms.length === 0 || (await checkPermissions(wifiPerms));
+      if (wifiOk) {
+        startPlaybackService('Reconnecting to player…').catch(() => {});
+        try {
+          connected = await connectDirect(ConnectionTransport.Wifi, savedWifi.trim());
+        } catch {}
       }
+    }
 
-      const savedWifi = await AsyncStorage.getItem(PREF_WIFI_ADDRESS);
-      const savedBt = await AsyncStorage.getItem(PREF_BLUETOOTH_ID);
-
-      let connected = false;
-      if (savedWifi && savedWifi.trim().length > 0) {
-        const wifiPerms = getRequiredPermissionsForWifi();
-        const wifiOk = wifiPerms.length === 0 || (await checkPermissions(wifiPerms));
-        if (wifiOk) {
-          startPlaybackService('Reconnecting to player…').catch(() => {});
-          try {
-            connected = await connectDirect(ConnectionTransport.Wifi, savedWifi.trim());
-          } catch {}
-        }
+    if (!connected && savedBt && autoReconnectEnabledRef.current && !apiRef.current) {
+      const btPerms = getRequiredPermissionsForBluetooth();
+      const btOk = await checkPermissions(btPerms);
+      if (btOk) {
+        startPlaybackService('Reconnecting to player…').catch(() => {});
+        try {
+          connected = await connectDirect(ConnectionTransport.Bluetooth, undefined, savedBt);
+        } catch {}
       }
+    }
 
-      if (!connected && savedBt && autoReconnectEnabledRef.current && !apiRef.current) {
-        const btPerms = getRequiredPermissionsForBluetooth();
-        const btOk = await checkPermissions(btPerms);
-        if (btOk) {
-          startPlaybackService('Reconnecting to player…').catch(() => {});
-          try {
-            connected = await connectDirect(ConnectionTransport.Bluetooth, undefined, savedBt);
-          } catch {}
-        }
-      }
-
-      if (!connected && autoReconnectEnabledRef.current && !apiRef.current && !stateRef.current.pinDialogVisible) {
-        scheduleAutoReconnect(15000);
-      }
-    }, initialDelayMs);
+    if (!connected && autoReconnectEnabledRef.current && !apiRef.current && !stateRef.current.pinDialogVisible) {
+      scheduleAutoReconnect(15000);
+    }
   };
 
   // A choice rejected before connecting must not tear down a session that still works.
