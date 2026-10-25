@@ -31,7 +31,7 @@ export function NowPlayingFooter({ playerName, queueTotal, onOpenConnection, onO
         style={({ pressed }) => [styles.player, pressed && styles.pressed]}
       >
         <Icon name="player" size={PLAYER_ICON_SIZE} color={palette.inkMuted} />
-        <AppText variant="caption" tone="inkMuted" numberOfLines={1} style={styles.playerText}>
+        <AppText variant="caption" tone="inkMuted" numberOfLines={2} style={styles.playerText}>
           {t('Playing on {name}', { name })}
         </AppText>
       </Pressable>
@@ -60,10 +60,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Space.md,
   },
+  // Wraps to a second line on phones rather than cutting off the player's name.
   player: {
     flex: 1,
     minWidth: 0,
-    height: Size.controlMd,
+    minHeight: Size.controlMd,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.sm,
