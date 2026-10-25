@@ -282,10 +282,16 @@ class CompasDiscoveryModule : Module() {
                     val apiAttr = info.attributes?.get("api")?.let { String(it, StandardCharsets.UTF_8) }
                     val endpointHost = if (host.contains(':')) "[$host]" else host
                     val address = "$endpointHost:$port"
+                    // Android reports the SRV target without its ".local" suffix ("r1.compas").
+                    val hostname = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                        info.hostname?.trimEnd('.')?.takeIf { it.isNotEmpty() }
+                            ?.let { if (it.endsWith(".local", ignoreCase = true)) it else "$it.local" }
+                    } else null
                     sendEvent("onDeviceFound", mapOf(
                         "id" to info.serviceName,
                         "name" to info.serviceName,
                         "host" to host,
+                        "hostname" to hostname,
                         "port" to port,
                         "address" to address,
                         "apiVersion" to (apiAttr ?: "1")

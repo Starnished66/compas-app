@@ -6,6 +6,8 @@ export interface DiscoveredWifiService {
   host: string;
   port: number;
   address: string;
+  /** The advertised SRV target, such as r1.compas.local (Android 15 and later). */
+  hostname?: string | null;
   apiVersion?: string;
 }
 

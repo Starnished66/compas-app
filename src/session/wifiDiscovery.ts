@@ -13,3 +13,11 @@ export function discoveryEndpoint(service: DiscoveredWifiService): string | null
   try { return RemoteEndpoint.normalizeWifiAddress(`${host.includes(':') ? `[${host}]` : host}:8899`); }
   catch { return null; }
 }
+
+const PLAYER_HOSTNAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.compas\.local$/i;
+
+/** The player's advertised name, such as http://r1.compas.local, for an otherwise valid advertisement. */
+export function discoveryHostnameEndpoint(service: DiscoveredWifiService): string | null {
+  if (!discoveryEndpoint(service) || typeof service.hostname !== 'string' || !PLAYER_HOSTNAME.test(service.hostname)) return null;
+  return RemoteEndpoint.normalizeWifiAddress(service.hostname);
+}

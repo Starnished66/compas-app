@@ -77,7 +77,7 @@ import { BulkWriteCounts, queueInsertWindowMatches, queueInsertionOffsets, queue
 import { collectionJobSettled } from './collectionJobState';
 import { buildCollectionPlaybackRequest } from './collectionPlaybackRequest';
 import { fromNumeric, toNumeric, isShuffleMode, toggleShuffleMode, toggleRepeatMode } from './playbackModes';
-import { discoveryEndpoint } from './wifiDiscovery';
+import { discoveryEndpoint, discoveryHostnameEndpoint } from './wifiDiscovery';
 import { publicLibraryIdentityMatches, verifyWifiUpgradeIdentity } from './wifiUpgradeIdentity';
 import { isCurrentWifiImportSession } from './wifiImportSession';
 import { wifiImportErrorMessage } from './wifiImportError';
@@ -326,6 +326,7 @@ export function useRemoteSession() {
   const bluetoothAudioOutputRef = useRef<boolean | null>(null);
   const appForegroundRef = useRef(AppState.currentState === 'active');
   const autoReconnectDueAtRef = useRef(0);
+  const wifiHostnameByIpRef = useRef(new Map<string, string>());
   const lastQueueRefreshAtRef = useRef(0);
   const lastWifiProbeAtRef = useRef(0);
   const lastBluetoothArtworkAtRef = useRef(0);
@@ -561,8 +562,16 @@ export function useRemoteSession() {
   // ownership prevents late NSD/UDP replies from reviving an abandoned scan.
   useEffect(() => {
     const found = addWifiDeviceFoundListener((service: DiscoveredWifiService) => {
-      const address = discoveryEndpoint(service);
-      if (!address || stateRef.current.screen.type !== 'Connection' || stateRef.current.selectedConnectionTransport !== ConnectionTransport.Wifi) return;
+      const ipAddress = discoveryEndpoint(service);
+      if (!ipAddress || stateRef.current.screen.type !== 'Connection' || stateRef.current.selectedConnectionTransport !== ConnectionTransport.Wifi) return;
+      // The player's own name (http://r1.compas.local) survives IP changes; the IP covers players
+      // that could not take port 80 and phones that cannot report the name.
+      // Only DNS-SD reports the name; a broadcast reply from the same IP reuses it.
+      const named = discoveryHostnameEndpoint(service);
+      if (named) wifiHostnameByIpRef.current.set(ipAddress, named);
+      const candidates = [named ?? wifiHostnameByIpRef.current.get(ipAddress) ?? null, ipAddress]
+        .filter((item): item is string => item != null);
+      const address = candidates[0];
       const generation = wifiDiscoveryGenerationRef.current;
       if (wifiDiscoverySourcesRef.current.size >= 64 && !wifiDiscoverySourcesRef.current.has(service.id)) return;
       wifiDiscoverySourcesRef.current.set(service.id, address);
@@ -571,18 +580,31 @@ export function useRemoteSession() {
       wifiDiscoveryProbesRef.current.add(address);
       void (async () => {
         try {
-          const capabilities = await new RemoteApi(createWifiTransport(address, 1500)).capabilities();
-          if (capabilities.version !== 1 || !capabilities.features.includes('status') ||
-              generation !== wifiDiscoveryGenerationRef.current ||
-              ![...wifiDiscoverySourcesRef.current.values()].includes(address)) return;
+          let reachable: string | null = null;
+          for (const candidate of candidates) {
+            try {
+              // Resolving a .local name the first time can take a couple of seconds.
+              const timeoutMs = candidate === ipAddress ? 1500 : 5000;
+              const capabilities = await new RemoteApi(createWifiTransport(candidate, timeoutMs)).capabilities();
+              if (capabilities.version === 1 && capabilities.features.includes('status')) {
+                reachable = candidate;
+                break;
+              }
+            } catch { /* Try the next address. */ }
+          }
+          if (!reachable || generation !== wifiDiscoveryGenerationRef.current ||
+              wifiDiscoverySourcesRef.current.get(service.id) !== address) return;
+          wifiDiscoverySourcesRef.current.set(service.id, reachable);
           setState((prev) => {
             if (prev.screen.type !== 'Connection' || prev.selectedConnectionTransport !== ConnectionTransport.Wifi) return prev;
-            const player: WifiPlayer = { id: `wifi:${address}`, name: service.name || 'Compás Player', address };
-            const updated = prev.wifiPlayers.some((item) => item.address === address)
-              ? prev.wifiPlayers.map((item) => item.address === address ? player : item)
-              : [...prev.wifiPlayers, player];
+            const player: WifiPlayer = { id: `wifi:${reachable}`, name: service.name || 'Compás Player', address: reachable };
+            // Once the name answers, the same player's IP entry is redundant.
+            const others = reachable === ipAddress ? prev.wifiPlayers : prev.wifiPlayers.filter((item) => item.address !== ipAddress);
+            const updated = others.some((item) => item.address === reachable)
+              ? others.map((item) => item.address === reachable ? player : item)
+              : [...others, player];
             return { ...prev, wifiPlayers: updated, wifiDiscoveryStatus: ContentStatus.Ready,
-              wifiAddress: !wifiAddressEditedRef.current && !prev.wifiAddress ? address : prev.wifiAddress };
+              wifiAddress: !wifiAddressEditedRef.current && !prev.wifiAddress ? reachable : prev.wifiAddress };
           });
         } catch { /* An advertisement is not proof of a compatible player. */ }
         finally { if (generation === wifiDiscoveryGenerationRef.current) wifiDiscoveryProbesRef.current.delete(address); }
