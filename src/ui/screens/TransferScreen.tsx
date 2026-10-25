@@ -410,6 +410,8 @@ function TransferWorkspace({ transfer, active }: { transfer: TransferApi; active
     ]);
   };
 
+  // The native module names the primary volume in English; other volumes use the system's own label.
+  const rootLabel = (item: StorageRoot) => (item.name === 'Internal storage' ? t('Internal storage') : item.name);
   const phoneRelative = phonePath && root ? phonePath.slice(root.path.length).replace(/^\//, '') : '';
   const phoneParent = phonePath && root && phonePath !== root.path ? phonePath.slice(0, phonePath.lastIndexOf('/')) : null;
   const sdUp = sdParent(sdPath);
@@ -424,7 +426,7 @@ function TransferWorkspace({ transfer, active }: { transfer: TransferApi; active
       {roots.length > 1 ? (
         <SegmentedControl
           size="sm"
-          options={roots.map((item) => ({ value: item.path, label: item.name }))}
+          options={roots.map((item) => ({ value: item.path, label: rootLabel(item) }))}
           value={root?.path ?? ''}
           onChange={(path) => {
             const next = roots.find((item) => item.path === path) ?? null;
@@ -436,7 +438,7 @@ function TransferWorkspace({ transfer, active }: { transfer: TransferApi; active
       ) : null}
       <View style={styles.pathRow}>
         <IconButton icon="chevronLeft" label={t('Up')} size="sm" disabled={!phoneParent || phoneLoading} onPress={() => phoneParent && void openPhoneDirectory(phoneParent)} />
-        <AppText variant="bodyStrong" numberOfLines={1} style={styles.flex}>{phoneRelative ? `/${phoneRelative}` : root?.name ?? ''}</AppText>
+        <AppText variant="bodyStrong" numberOfLines={1} style={styles.flex}>{phoneRelative ? `/${phoneRelative}` : root ? rootLabel(root) : ''}</AppText>
       </View>
       <FlatList
         data={phoneEntries}
