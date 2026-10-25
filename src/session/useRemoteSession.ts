@@ -136,6 +136,14 @@ const PREF_AUTO_RECONNECT = 'compas_pref_auto_reconnect';
 const CATALOG_SYNC_RETRY_DELAYS_MS = [2000, 5000, 15000];
 const MEDIA_ACTION_RECONCILE_DELAY_MS = 1200;
 
+// Socket and HTTP errors from the transports are developer text; show the user what to check instead.
+const connectFailureMessage = (err: any, transport: ConnectionTransport): string => {
+  if (err?.message === 'Unsupported Compás protocol version') return 'This player’s Compás version isn’t supported. Update the app and the player.';
+  return transport === ConnectionTransport.Bluetooth
+    ? 'Could not reach the player over Bluetooth. Make sure it’s on, nearby and has Remote Control enabled.'
+    : 'Could not reach the player on this network. Make sure it’s on, on the same Wi-Fi and has Remote Control enabled.';
+};
+
 const normalizedVolume = (value: number | null | undefined): number =>
   Number.isFinite(value) ? Math.max(0, Math.min(1, value as number)) : 0.68;
 
@@ -933,7 +941,7 @@ export function useRemoteSession() {
         setState((prev) => ({
           ...prev,
           connectionStatus: ConnectionStatus.Error,
-          connectionMessage: err?.message || 'Could not connect to Compás player.',
+          connectionMessage: connectFailureMessage(err, transport),
         }));
         if (autoReconnectEnabledRef.current) {
           scheduleAutoReconnect(15000);
