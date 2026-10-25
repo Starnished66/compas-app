@@ -1,23 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import { LayoutChangeEvent, StyleSheet, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import React from 'react';
+import { StyleSheet, View } from 'react-native';
 import { RemoteAction, RemoteUiState } from '../../data/types';
 import { useChromeState } from '../chrome/useChromeState';
 import { resolveMiniProgressStyle } from '../miniProgress';
 import { useMiniProgressPreference } from '../preferences/useMiniProgressPreference';
-import { between } from '../collapse';
-import { Durations, motionDuration } from '../motion';
-import { WorkletEasings } from '../workletEasings';
-import { useReducedMotion } from '../useReducedMotion';
 import { TabBar, TabKey } from './TabBar';
 import { PlayerButton } from './PlayerButton';
 import { MiniPlayer } from './MiniPlayer';
-import {
-  ChromeInset,
-  MiniPlayerBottom,
-  minimizedTabBarRightInset,
-  TabBarRightInset,
-} from './bottomChromeLayout';
+import { ChromeInset, MiniPlayerBottom, TabBarRightInset } from './bottomChromeLayout';
 import { useScreenInsets } from '../useScreenInsets';
 import { insetBeyond } from '../insetBeyond';
 
@@ -31,26 +21,10 @@ export interface AppChromeProps {
 }
 
 export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelectTab, onOpenNowPlaying }: AppChromeProps) {
-  const chrome = useChromeState();
-  const reducedMotion = useReducedMotion();
+  // The tab bar always stays full width; it no longer collapses into a pill while lists scroll.
+  const { expand, requestScrollToTop } = useChromeState();
   const insets = useScreenInsets();
   const { preference: progressPreference } = useMiniProgressPreference();
-  const [width, setWidth] = useState(0);
-  const minimizable = showMiniPlayer && (activeTab === 'library' || activeTab === 'playlists');
-  const minimized = chrome.minimized && minimizable;
-  const collapse = useSharedValue(minimized ? 1 : 0);
-  const { expand, requestScrollToTop } = chrome;
-
-  useEffect(() => {
-    if (!minimizable) expand();
-  }, [expand, minimizable]);
-
-  useEffect(() => {
-    collapse.value = withTiming(minimized ? 1 : 0, {
-      duration: motionDuration(reducedMotion, Durations.pill),
-      easing: WorkletEasings.responsive,
-    });
-  }, [collapse, minimized, reducedMotion]);
 
   const selectTab = (tab: TabKey) => {
     if (tab === activeTab) {
@@ -61,16 +35,10 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
     onSelectTab(tab);
   };
 
-  const minimizedRight = minimizedTabBarRightInset(width);
-  const tabBarPosition = useAnimatedStyle(() => ({
-    right: between(collapse.value, TabBarRightInset, minimizedRight),
-  }));
-
   return (
     <View
       style={[StyleSheet.absoluteFill, { bottom: insetBeyond(insets.bottom, ChromeInset) }]}
       pointerEvents="box-none"
-      onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width)}
     >
       {showMiniPlayer && state.currentTrack ? (
         <View style={styles.miniPlayer} pointerEvents="box-none">
@@ -85,9 +53,9 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
           />
         </View>
       ) : null}
-      <Animated.View style={[styles.tabBar, tabBarPosition]} pointerEvents="box-none">
-        <TabBar active={activeTab} minimized={minimized} onSelect={selectTab} onExpand={expand} />
-      </Animated.View>
+      <View style={styles.tabBar} pointerEvents="box-none">
+        <TabBar active={activeTab} onSelect={selectTab} />
+      </View>
       <PlayerButton
         style={styles.playerButton}
         status={state.connectionStatus}
@@ -102,6 +70,6 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
 
 const styles = StyleSheet.create({
   miniPlayer: { position: 'absolute', left: ChromeInset, right: ChromeInset, bottom: MiniPlayerBottom },
-  tabBar: { position: 'absolute', left: ChromeInset, bottom: ChromeInset },
+  tabBar: { position: 'absolute', left: ChromeInset, right: TabBarRightInset, bottom: ChromeInset },
   playerButton: { position: 'absolute', right: ChromeInset, bottom: ChromeInset },
 });

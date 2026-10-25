@@ -12,7 +12,3 @@ export function chromeContentInset(withMiniPlayer: boolean, safeAreaBottom = 0):
   const miniPlayerSpace = withMiniPlayer ? Size.bar + ChromeGap : 0;
   return insetBeyond(safeAreaBottom, ChromeInset) + tabBarSpace + miniPlayerSpace;
 }
-
-export function minimizedTabBarRightInset(chromeWidth: number): number {
-  return Math.max(TabBarRightInset, chromeWidth - ChromeInset - MinimizedTabBarWidth);
-}
