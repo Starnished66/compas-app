@@ -4,6 +4,9 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -23,6 +26,8 @@ private const val UDP_DISCOVERY_PORT = 8899
 private const val UDP_DISCOVERY_REQUEST_SIZE = 32
 private const val UDP_DISCOVERY_WINDOW_MS = 4_000L
 private const val UDP_DISCOVERY_INTERVAL_MS = 1_000L
+private const val RESOLVE_RETRY_DELAY_MS = 300L
+private const val RESOLVE_MAX_RETRIES = 5
 private val UDP_DISCOVERY_REQUEST = ByteArray(UDP_DISCOVERY_REQUEST_SIZE).also {
     "COMPAS_REMOTE_DISCOVER_V1".toByteArray(StandardCharsets.US_ASCII).copyInto(it)
 }
@@ -36,6 +41,16 @@ class CompasDiscoveryModule : Module() {
     private var discoveryListener: NsdManager.DiscoveryListener? = null
     private var multicastLock: WifiManager.MulticastLock? = null
     private val resolvingServices = ConcurrentHashMap.newKeySet<String>()
+    // Before API 34 NsdManager allows one resolve at a time and fails the rest with
+    // FAILURE_ALREADY_ACTIVE, so resolves are queued and run one by one (guarded by nsdLifecycleLock).
+    private val resolveQueue = ArrayDeque<NsdServiceInfo>()
+    private val resolveRetries = HashMap<String, Int>()
+    private var resolveInFlightName: String? = null
+    private var activeResolveListener: NsdManager.ResolveListener? = null
+    private val resolveRetryHandler = Handler(Looper.getMainLooper())
+    // Guarded by discoveryLifecycleLock: JS asked for discovery, and it is paused while backgrounded.
+    private var discoveryRequested = false
+    private var pausedForBackground = false
     private val nsdGeneration = AtomicLong(0)
     private val nsdLifecycleLock = Any()
     private val discoveryLifecycleLock = Any()
@@ -51,6 +66,8 @@ class CompasDiscoveryModule : Module() {
 
         AsyncFunction("startDiscovery") { promise: Promise ->
             synchronized(discoveryLifecycleLock) {
+                discoveryRequested = true
+                pausedForBackground = false
                 restartUdpFallback()
                 try {
                     startNsdDiscovery()
@@ -70,6 +87,15 @@ class CompasDiscoveryModule : Module() {
             }
         }
 
+        // Don't hold the multicast lock or keep mDNS running while the app is in the background.
+        OnActivityEntersBackground {
+            pauseForBackground()
+        }
+
+        OnActivityEntersForeground {
+            resumeFromBackground()
+        }
+
         OnDestroy {
             stopInternal()
         }
@@ -77,8 +103,36 @@ class CompasDiscoveryModule : Module() {
 
     private fun stopInternal() {
         synchronized(discoveryLifecycleLock) {
+            discoveryRequested = false
+            pausedForBackground = false
             stopUdpFallback()
             stopNsdDiscovery()
+        }
+    }
+
+    private fun pauseForBackground() {
+        synchronized(discoveryLifecycleLock) {
+            if (discoveryRequested && !pausedForBackground) {
+                pausedForBackground = true
+                stopUdpFallback()
+                stopNsdDiscovery()
+            }
+        }
+    }
+
+    private fun resumeFromBackground() {
+        synchronized(discoveryLifecycleLock) {
+            if (pausedForBackground) {
+                pausedForBackground = false
+                if (discoveryRequested) {
+                    restartUdpFallback()
+                    try {
+                        startNsdDiscovery()
+                    } catch (_: Exception) {
+                        sendEvent("onDiscoveryError", mapOf("errorCode" to -1, "phase" to "start"))
+                    }
+                }
+            }
         }
     }
 
@@ -141,56 +195,103 @@ class CompasDiscoveryModule : Module() {
         }
 
         override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-            val serviceName = synchronized(nsdLifecycleLock) {
+            synchronized(nsdLifecycleLock) {
                 if (generation != nsdGeneration.get() || discoveryListener !== this) return
                 if (serviceInfo.serviceType.trimEnd('.') != SERVICE_TYPE.trimEnd('.')) return
                 val name = serviceInfo.serviceName ?: return
-                if (resolvingServices.add(name)) name else null
-            } ?: return
-
-            try {
-                manager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
-                    override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {
-                        synchronized(nsdLifecycleLock) {
-                            if (generation == nsdGeneration.get()) resolvingServices.remove(serviceName)
-                        }
-                    }
-
-                    override fun onServiceResolved(info: NsdServiceInfo) {
-                        synchronized(nsdLifecycleLock) {
-                            if (generation != nsdGeneration.get()) return
-                            resolvingServices.remove(serviceName)
-                            val host = info.host?.hostAddress ?: return
-                            val port = info.port
-                            val apiAttr = info.attributes?.get("api")?.let { String(it, StandardCharsets.UTF_8) }
-                            val endpointHost = if (host.contains(':')) "[$host]" else host
-                            val address = "$endpointHost:$port"
-                            sendEvent("onDeviceFound", mapOf(
-                                "id" to info.serviceName,
-                                "name" to info.serviceName,
-                                "host" to host,
-                                "port" to port,
-                                "address" to address,
-                                "apiVersion" to (apiAttr ?: "1")
-                            ))
-                        }
-                    }
-                })
-            } catch (_: Exception) {
-                synchronized(nsdLifecycleLock) {
-                    if (generation == nsdGeneration.get()) resolvingServices.remove(serviceName)
-                }
+                if (!resolvingServices.add(name)) return
+                resolveQueue.addLast(serviceInfo)
+                pumpResolveQueueLocked(manager, generation)
             }
         }
 
         override fun onServiceLost(serviceInfo: NsdServiceInfo) {
             synchronized(nsdLifecycleLock) {
                 if (generation == nsdGeneration.get()) {
+                    val name = serviceInfo.serviceName
+                    if (name != null && name != resolveInFlightName && resolveQueue.removeAll { it.serviceName == name }) {
+                        resolvingServices.remove(name)
+                        resolveRetries.remove(name)
+                    }
                     sendEvent("onDeviceLost", mapOf(
                         "id" to serviceInfo.serviceName,
                         "name" to serviceInfo.serviceName
                     ))
                 }
+            }
+        }
+    }
+
+    private fun pumpResolveQueueLocked(manager: NsdManager, generation: Long) {
+        if (generation != nsdGeneration.get()) return
+        while (resolveInFlightName == null) {
+            val next = resolveQueue.removeFirstOrNull() ?: return
+            val name = next.serviceName ?: continue
+            val listener = createResolveListener(manager, generation, name)
+            resolveInFlightName = name
+            activeResolveListener = listener
+            try {
+                manager.resolveService(next, listener)
+            } catch (_: Exception) {
+                resolveInFlightName = null
+                activeResolveListener = null
+                resolvingServices.remove(name)
+                resolveRetries.remove(name)
+            }
+        }
+    }
+
+    private fun createResolveListener(manager: NsdManager, generation: Long, serviceName: String) = object : NsdManager.ResolveListener {
+        override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {
+            synchronized(nsdLifecycleLock) {
+                if (generation != nsdGeneration.get() || activeResolveListener !== this) return
+                resolveInFlightName = null
+                activeResolveListener = null
+                val attempts = resolveRetries[serviceName] ?: 0
+                if (errorCode == NsdManager.FAILURE_ALREADY_ACTIVE && attempts < RESOLVE_MAX_RETRIES) {
+                    // A resolve from a previous discovery session (or another client) is still running.
+                    resolveRetries[serviceName] = attempts + 1
+                    resolveRetryHandler.postDelayed({
+                        synchronized(nsdLifecycleLock) {
+                            if (generation == nsdGeneration.get() && serviceName in resolvingServices &&
+                                serviceName != resolveInFlightName && resolveQueue.none { it.serviceName == serviceName }
+                            ) {
+                                resolveQueue.addLast(info)
+                                pumpResolveQueueLocked(manager, generation)
+                            }
+                        }
+                    }, RESOLVE_RETRY_DELAY_MS)
+                } else {
+                    resolvingServices.remove(serviceName)
+                    resolveRetries.remove(serviceName)
+                }
+                pumpResolveQueueLocked(manager, generation)
+            }
+        }
+
+        override fun onServiceResolved(info: NsdServiceInfo) {
+            synchronized(nsdLifecycleLock) {
+                if (generation != nsdGeneration.get() || activeResolveListener !== this) return
+                resolveInFlightName = null
+                activeResolveListener = null
+                resolvingServices.remove(serviceName)
+                resolveRetries.remove(serviceName)
+                val host = info.host?.hostAddress
+                if (host != null) {
+                    val port = info.port
+                    val apiAttr = info.attributes?.get("api")?.let { String(it, StandardCharsets.UTF_8) }
+                    val endpointHost = if (host.contains(':')) "[$host]" else host
+                    val address = "$endpointHost:$port"
+                    sendEvent("onDeviceFound", mapOf(
+                        "id" to info.serviceName,
+                        "name" to info.serviceName,
+                        "host" to host,
+                        "port" to port,
+                        "address" to address,
+                        "apiVersion" to (apiAttr ?: "1")
+                    ))
+                }
+                pumpResolveQueueLocked(manager, generation)
             }
         }
     }
@@ -214,7 +315,16 @@ class CompasDiscoveryModule : Module() {
         if (listener != null && nsdManager != null) {
             runCatching { nsdManager?.stopServiceDiscovery(listener) }
         }
+        val resolveListener = activeResolveListener
+        activeResolveListener = null
+        if (resolveListener != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            runCatching { nsdManager?.stopServiceResolution(resolveListener) }
+        }
         nsdManager = null
+        resolveRetryHandler.removeCallbacksAndMessages(null)
+        resolveQueue.clear()
+        resolveRetries.clear()
+        resolveInFlightName = null
         resolvingServices.clear()
         multicastLock?.let { lock ->
             if (lock.isHeld) {

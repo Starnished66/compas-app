@@ -31,6 +31,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.net.SocketTimeoutException
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
 
 val COMPAS_REMOTE_UUID: UUID = UUID.fromString("9d2f8a7e-6b4c-4d51-8e43-38f7a2c0b719")
 
@@ -60,6 +62,24 @@ class CompasBluetoothModule : Module() {
 
     private val artworkLock = Any()
     private val activeArtworkExchanges = LinkedHashSet<ArtworkExchange>()
+
+    /** Settles its promise once, so OnDestroy and a still-running worker can't both settle it. */
+    private class PendingRfcommRequest(private val promise: Promise) {
+        private val settled = AtomicBoolean(false)
+        @Volatile var socket: BluetoothSocket? = null
+
+        fun resolve(value: Any?) {
+            if (settled.compareAndSet(false, true)) promise.resolve(value)
+        }
+
+        fun reject(code: String, message: String?, cause: Throwable?) {
+            if (settled.compareAndSet(false, true)) promise.reject(code, message, cause)
+        }
+    }
+
+    // shutdownNow() drops queued tasks; OnDestroy rejects these so JS awaits don't hang on reload.
+    private val pendingRfcommRequests = ConcurrentHashMap.newKeySet<PendingRfcommRequest>()
+    @Volatile private var destroyed = false
 
     override fun definition() = ModuleDefinition {
         Name("CompasBluetooth")
@@ -300,6 +320,14 @@ class CompasBluetoothModule : Module() {
         }
 
         AsyncFunction("executeRfcommRequest") { deviceId: String, method: String, target: String, headers: Map<String, String>?, isArtwork: Boolean, artworkIndex: Double?, bodyBase64: String?, promise: Promise ->
+            val pending = PendingRfcommRequest(promise)
+            pendingRfcommRequests.add(pending)
+            // Checked after registering so a concurrent OnDestroy either sees this request or we see the flag.
+            if (destroyed) {
+                pendingRfcommRequests.remove(pending)
+                pending.reject("MODULE_DESTROYED", "Bluetooth module was destroyed", null)
+                return@AsyncFunction
+            }
             val idx = artworkIndex?.toLong()
             val exchange = if (isArtwork) {
                 ArtworkExchange(idx).also { ex ->
@@ -307,7 +335,7 @@ class CompasBluetoothModule : Module() {
                 }
             } else null
 
-            rfcommRequestExecutor.submit {
+            val task = Runnable {
                 var socket: BluetoothSocket? = null
                 try {
                     val adapter = bluetoothAdapter ?: throw IOException("Bluetooth adapter not available")
@@ -325,6 +353,11 @@ class CompasBluetoothModule : Module() {
                             throw IOException("Artwork request preempted by foreground command")
                         }
                         val candidate = device.createRfcommSocketToServiceRecord(COMPAS_REMOTE_UUID)
+                        pending.socket = candidate
+                        if (destroyed) {
+                            runCatching { candidate.close() }
+                            throw IOException("Bluetooth module was destroyed")
+                        }
                         if (exchange != null) {
                             synchronized(artworkLock) {
                                 if (exchange.preempted) {
@@ -368,6 +401,7 @@ class CompasBluetoothModule : Module() {
 
                     val activeSocket = connectedSocket ?: throw IOException("Could not connect to Compás over Bluetooth")
                     socket = activeSocket
+                    pending.socket = activeSocket
                     if (exchange != null) {
                         synchronized(artworkLock) { exchange.socket = activeSocket }
                     }
@@ -395,7 +429,7 @@ class CompasBluetoothModule : Module() {
 
                         val response = parseHttpResponse(activeSocket.inputStream)
                         val base64Body = Base64.encodeToString(response.body, Base64.NO_WRAP)
-                        promise.resolve(mapOf(
+                        pending.resolve(mapOf(
                             "statusCode" to response.statusCode,
                             "reason" to response.reason,
                             "headers" to response.headers,
@@ -405,12 +439,16 @@ class CompasBluetoothModule : Module() {
                         responseTimeout.cancel(false)
                     }
                 } catch (e: Exception) {
-                    if (exchange != null && exchange.preempted) {
-                        promise.reject("ARTWORK_PREEMPTED", "Artwork request was preempted", e)
+                    if (destroyed) {
+                        pending.reject("MODULE_DESTROYED", "Bluetooth module was destroyed", e)
+                    } else if (exchange != null && exchange.preempted) {
+                        pending.reject("ARTWORK_PREEMPTED", "Artwork request was preempted", e)
                     } else {
-                        promise.reject("RFCOMM_ERROR", e.message, e)
+                        pending.reject("RFCOMM_ERROR", e.message, e)
                     }
                 } finally {
+                    pendingRfcommRequests.remove(pending)
+                    pending.socket = null
                     if (exchange != null) {
                         synchronized(artworkLock) {
                             activeArtworkExchanges.remove(exchange)
@@ -419,6 +457,13 @@ class CompasBluetoothModule : Module() {
                     }
                     runCatching { socket?.close() }
                 }
+            }
+            try {
+                rfcommRequestExecutor.execute(task)
+            } catch (e: RejectedExecutionException) {
+                pendingRfcommRequests.remove(pending)
+                exchange?.let { ex -> synchronized(artworkLock) { activeArtworkExchanges.remove(ex) } }
+                pending.reject("MODULE_DESTROYED", "Bluetooth module was destroyed", e)
             }
         }
 
@@ -431,7 +476,13 @@ class CompasBluetoothModule : Module() {
                 }
                 activeArtworkExchanges.clear()
             }
+            destroyed = true
             rfcommRequestExecutor.shutdownNow()
+            pendingRfcommRequests.forEach { pending ->
+                pending.socket?.let { socket -> runCatching { socket.close() } }
+                pending.reject("MODULE_DESTROYED", "Bluetooth module was destroyed", null)
+            }
+            pendingRfcommRequests.clear()
         }
     }
 

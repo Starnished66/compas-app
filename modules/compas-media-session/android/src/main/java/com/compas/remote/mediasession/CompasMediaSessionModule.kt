@@ -21,6 +21,7 @@ import androidx.core.app.NotificationManagerCompat
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.net.URL
@@ -86,14 +87,21 @@ class CompasMediaSessionModule : Module() {
                         runCatching {
                             bitmap = if (artworkUri.startsWith("file://") || artworkUri.startsWith("/")) {
                                 val cleanPath = artworkUri.removePrefix("file://")
-                                BitmapFactory.decodeFile(cleanPath)
+                                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                BitmapFactory.decodeFile(cleanPath, bounds)
+                                BitmapFactory.decodeFile(cleanPath, sampledOptions(bounds))
                             } else if (artworkUri.startsWith("http://") || artworkUri.startsWith("https://")) {
                                 // A stalled player must not block every later update on this single thread.
                                 val connection = URL(artworkUri).openConnection().apply {
                                     connectTimeout = ARTWORK_TIMEOUT_MS
                                     readTimeout = ARTWORK_TIMEOUT_MS
                                 }
-                                connection.getInputStream().use { stream: InputStream -> BitmapFactory.decodeStream(stream) }
+                                val bytes = connection.getInputStream().use { stream: InputStream -> readBounded(stream) }
+                                if (bytes == null) null else {
+                                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, sampledOptions(bounds))
+                                }
                             } else null
                         }
                     }
@@ -326,6 +334,27 @@ class CompasMediaSessionModule : Module() {
         }
     }
 
+    // Full-resolution cover art (3000x3000 is ~36 MB) can OOM; the notification needs ~512 px.
+    private fun sampledOptions(bounds: BitmapFactory.Options): BitmapFactory.Options {
+        var sample = 1
+        val largest = maxOf(bounds.outWidth, bounds.outHeight)
+        while (largest / (sample * 2) >= ARTWORK_TARGET_PX) sample *= 2
+        return BitmapFactory.Options().apply { inSampleSize = sample }
+    }
+
+    /** Reads at most ARTWORK_MAX_BYTES; returns null for larger bodies instead of buffering them. */
+    private fun readBounded(stream: InputStream): ByteArray? {
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(16 * 1024)
+        while (true) {
+            val read = stream.read(buffer)
+            if (read < 0) break
+            if (out.size() + read > ARTWORK_MAX_BYTES) return null
+            out.write(buffer, 0, read)
+        }
+        return out.toByteArray()
+    }
+
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = context.getSystemService(NotificationManager::class.java)
@@ -338,6 +367,8 @@ class CompasMediaSessionModule : Module() {
     companion object {
         const val NOTIFICATION_ID = RemotePlaybackService.NOTIFICATION_ID
         private const val ARTWORK_TIMEOUT_MS = 5000
+        private const val ARTWORK_TARGET_PX = 512
+        private const val ARTWORK_MAX_BYTES = 8 * 1024 * 1024
         const val CHANNEL_ID = RemotePlaybackService.CHANNEL_ID
         const val ACTION_PREVIOUS = "com.compas.remote.PREVIOUS"
         const val ACTION_TOGGLE = "com.compas.remote.TOGGLE"
