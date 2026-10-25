@@ -3,7 +3,7 @@ import { ConnectionTransport, PlaybackMode, RemoteAction, RemoteUiState } from '
 import { PlaybackPosition } from '../session/PlaybackPositionStore';
 import { formatPlaybackTime } from './playbackTime';
 import { recordSkip } from './skipDirection';
-import { useSnackbar } from './snackbar/useSnackbar';
+import { useOptimisticErrorSnackbar } from './sheets/useOptimisticErrorSnackbar';
 import { trackKey } from './trackKey';
 import { usePlaybackPositionStore } from './usePlaybackPosition';
 import { isShuffleMode, toggleRepeatMode } from '../session/playbackModes';
@@ -42,12 +42,15 @@ function repeatLabel(mode: PlaybackMode): string {
 
 export function usePlayerCommands(state: RemoteUiState, onAction: (action: RemoteAction) => void): PlayerCommands {
   const { t } = useI18n();
-  const snackbar = useSnackbar();
   const positionStore = usePlaybackPositionStore();
+  // Commands are fire-and-forget in the session; a failure lands in connectionMessage, which the
+  // session snackbars skip whenever a screen shows it inline (hidden under Now Playing), so the
+  // control that sent the command reports it here.
+  const watchResult = useOptimisticErrorSnackbar(state.connectionMessage, state.currentFavorite);
   const [pending, setPending] = useState<PendingCommand | null>(null);
   const counter = useRef(0);
-  const latest = useRef({ state, onAction, snackbar, positionStore, t });
-  latest.current = { state, onAction, snackbar, positionStore, t };
+  const latest = useRef({ state, onAction, watchResult, positionStore, t });
+  latest.current = { state, onAction, watchResult, positionStore, t };
   const feedbackMs = state.connectionTransport === ConnectionTransport.Bluetooth ? BLUETOOTH_FEEDBACK_MS : WIFI_FEEDBACK_MS;
 
   useEffect(() => {
@@ -72,6 +75,7 @@ export function usePlayerCommands(state: RemoteUiState, onAction: (action: Remot
     const run = (action: RemoteAction, label: string, options: Omit<PendingCommand, 'id' | 'label'> = { skipping: false }) => {
       counter.current += 1;
       setPending({ id: counter.current, label: latest.current.t(label), ...options });
+      latest.current.watchResult();
       latest.current.onAction(action);
     };
 
@@ -115,10 +119,14 @@ export function usePlayerCommands(state: RemoteUiState, onAction: (action: Remot
           skipping: false,
           settled: (current) => current.currentFavorite === favorite,
         });
-        latest.current.snackbar.show({
-          text: favorite ? latest.current.t('Added to favorites') : latest.current.t('Removed from favorites'),
-          actionLabel: latest.current.t('Undo'),
-          onAction: () => latest.current.onAction({ type: 'SetCurrentFavorite', favorite: !favorite }),
+        // Announced once the player reports the new favorite state, never ahead of a failure.
+        latest.current.watchResult({
+          message: {
+            text: favorite ? latest.current.t('Added to favorites') : latest.current.t('Removed from favorites'),
+            actionLabel: latest.current.t('Undo'),
+            onAction: () => latest.current.onAction({ type: 'SetCurrentFavorite', favorite: !favorite }),
+          },
+          confirmed: (current) => current === favorite,
         });
       },
     };

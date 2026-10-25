@@ -22,11 +22,14 @@ export function useSongActionPending(
   state: RemoteUiState,
   onAction: (action: RemoteAction) => void,
   onConfirmed: (action: PendingSongAction) => void,
+  onTimedOut?: (action: PendingSongAction) => void,
 ) {
   const [pending, setPending] = useState<PendingRecord | null>(null);
   const [revealed, setRevealed] = useState(false);
   const onConfirmedRef = useRef(onConfirmed);
   onConfirmedRef.current = onConfirmed;
+  const onTimedOutRef = useRef(onTimedOut);
+  onTimedOutRef.current = onTimedOut;
   const connectionMessage = state.connectionMessage ?? null;
   const connected = state.connectionStatus === ConnectionStatus.Connected;
   const target = `${state.songActionTitle}\u0000${state.songActionPosition ?? ''}`;
@@ -67,7 +70,11 @@ export function useSongActionPending(
   useEffect(() => {
     if (!pending) return;
     const reveal = setTimeout(() => setRevealed(true), REVEAL_DELAY_MS);
-    const giveUp = setTimeout(clear, GIVE_UP_DELAY_MS);
+    // Giving up re-enables the sheet; the caller is told so the user knows the result is unknown.
+    const giveUp = setTimeout(() => {
+      clear();
+      onTimedOutRef.current?.(pending.action);
+    }, GIVE_UP_DELAY_MS);
     return () => {
       clearTimeout(reveal);
       clearTimeout(giveUp);

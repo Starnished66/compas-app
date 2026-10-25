@@ -172,7 +172,7 @@ export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(fu
     });
 
   const peek = () => {
-    if (latest.current.reducedMotion || removingRef.current) return;
+    if (!latest.current.swipeToRemove || latest.current.reducedMotion || removingRef.current) return;
     revealBackdrop();
     const half = { duration: Durations.peek / 2, easing: Easings.easeInOut, useNativeDriver: true };
     Animated.sequence([
@@ -235,7 +235,7 @@ export const RemovableRow = forwardRef<RemovableRowHandle, RemovableRowProps>(fu
 
   const actions: RowAccessibilityAction[] = [
     ...(onTap && accessibilityLabel ? [{ name: 'activate', label: accessibilityLabel, onAction: onTap }] : []),
-    { name: 'remove', label: removeLabel, onAction: remove },
+    ...(swipeToRemove ? [{ name: 'remove', label: removeLabel, onAction: remove }] : []),
     ...extraActions,
   ];
   const handleAccessibilityAction = (event: AccessibilityActionEvent) =>

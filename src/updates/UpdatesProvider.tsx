@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { Alert, AppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAppVersion, notificationsEnabled, notifyRelease } from '../../modules/compas-updates/src';
-import { checkReleaseUpdates, ReleaseNotice } from './releaseUpdates';
+import { checkReleaseUpdates, isFirmwareReleaseNewer, ReleaseNotice } from './releaseUpdates';
 import { emptySaved, noticeKey, parseSavedUpdates } from './updatePreferences';
 import appConfig from '../../app.json';
 import { useI18n } from '../i18n';
@@ -27,8 +27,18 @@ interface UpdatesState {
 }
 const UpdatesContext = createContext<UpdatesState | null>(null);
 
-export function UpdatesProvider({ children }: { children: React.ReactNode }) {
+/**
+ * `playerVersion` is the connected player's reported version. The latest firmware release is always
+ * listed, but it is announced (snackbar, Android notification) only when that version is known and older.
+ */
+export function UpdatesProvider({ playerVersion, children }: { playerVersion?: string | null; children: React.ReactNode }) {
   const { t } = useI18n();
+  const playerVersionRef = useRef(playerVersion ?? null);
+  playerVersionRef.current = playerVersion ?? null;
+  const firmwareUpdate = (notice: ReleaseNotice | null): ReleaseNotice | null =>
+    notice && isFirmwareReleaseNewer(playerVersionRef.current, notice.version) ? notice : null;
+  const firmwareUpdateRef = useRef(firmwareUpdate);
+  firmwareUpdateRef.current = firmwareUpdate;
   const tRef = useRef(t);
   tRef.current = t;
   const saved = useRef(emptySaved());
@@ -80,7 +90,7 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }) {
         saved.current.checkedAt = Date.now();
         setApplication(result.application);
         persist();
-        await deliver([result.firmware, result.application].filter((n): n is ReleaseNotice => n != null));
+        await deliver([firmwareUpdateRef.current(result.firmware), result.application].filter((n): n is ReleaseNotice => n != null));
       } catch {
         if (mounted.current) setError('Could not check releases. Check your internet connection and try again.');
       } finally {
@@ -109,13 +119,23 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }) {
     const foregroundCheck = () => {
       if (AppState.currentState !== 'active') return;
       if (Date.now() - saved.current.checkedAt >= CHECK_INTERVAL && Date.now() - lastAttempt.current >= RETRY_INTERVAL) void check();
-      else if (saved.current.firmware) void deliver([saved.current.firmware]);
+      else {
+        const update = firmwareUpdateRef.current(saved.current.firmware);
+        if (update) void deliver([update]);
+      }
     };
     foregroundCheck();
     const listener = AppState.addEventListener('change', (state) => { if (state === 'active') foregroundCheck(); });
     const timer = setInterval(foregroundCheck, 60_000);
     return () => { listener.remove(); clearInterval(timer); };
   }, [check, deliver, ready]);
+
+  // A player connecting (or reporting a new version) can make the cached release newly relevant.
+  useEffect(() => {
+    if (!ready || AppState.currentState !== 'active') return;
+    const update = firmwareUpdateRef.current(saved.current.firmware);
+    if (update) void deliver([update]);
+  }, [deliver, playerVersion, ready]);
 
   const setAlerts = useCallback(async (enabled: boolean) => {
     try {
@@ -129,7 +149,8 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }) {
     }
     saved.current.alerts = enabled;
     persist();
-    if (enabled && saved.current.firmware) await deliver([saved.current.firmware]);
+    const update = enabled ? firmwareUpdateRef.current(saved.current.firmware) : null;
+    if (update) await deliver([update]);
     } catch { Alert.alert(tRef.current('Could not enable notifications'), tRef.current('Release notices will still appear inside Compás.')); }
   }, [deliver, persist]);
   const acknowledge = useCallback((notices: ReleaseNotice[]) => {
@@ -142,7 +163,7 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }) {
     try { await Linking.openURL(notice.releaseUrl); }
     catch { Alert.alert(tRef.current('Could not open release'), tRef.current('Try again when a browser and internet connection are available.')); }
   }, []);
-  const notices = [saved.current.firmware, application].filter((n): n is ReleaseNotice => n != null);
+  const notices = [firmwareUpdate(saved.current.firmware), application].filter((n): n is ReleaseNotice => n != null);
   void revision;
   return <UpdatesContext.Provider value={{ firmware: saved.current.firmware, application, appVersion, checking, checkedAt: saved.current.checkedAt,
     error, alerts: saved.current.alerts, unseen: ready ? notices.filter((n) => !saved.current.seen.includes(noticeKey(n))) : [],

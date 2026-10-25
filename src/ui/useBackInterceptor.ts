@@ -1,6 +1,19 @@
 import { useEffect, useRef } from 'react';
-import { BackHandler } from 'react-native';
 import { useTabActive } from './tabActivity';
+
+type Interceptor = { current: () => void };
+
+// Ordered stack instead of separate BackHandler listeners: RN calls the most recently added listener
+// first, so any re-registration elsewhere would silently jump ahead of the screen interceptors.
+const interceptors: Interceptor[] = [];
+
+/** Runs the most recently activated interceptor; useHardwareBack calls this before navigating. */
+export function dispatchBackInterceptor(): boolean {
+  const top = interceptors[interceptors.length - 1];
+  if (!top) return false;
+  top.current();
+  return true;
+}
 
 export function useBackInterceptor(enabled: boolean, onBack: () => void): void {
   const onBackRef = useRef(onBack);
@@ -10,10 +23,11 @@ export function useBackInterceptor(enabled: boolean, onBack: () => void): void {
 
   useEffect(() => {
     if (!active) return;
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      onBackRef.current();
-      return true;
-    });
-    return () => subscription.remove();
+    const entry: Interceptor = { current: () => onBackRef.current() };
+    interceptors.push(entry);
+    return () => {
+      const index = interceptors.indexOf(entry);
+      if (index >= 0) interceptors.splice(index, 1);
+    };
   }, [active]);
 }

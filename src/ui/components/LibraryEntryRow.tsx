@@ -26,7 +26,7 @@ export interface LibraryEntryRowProps {
   onMore?: (entry: LibraryEntry) => void;
   selectionMode?: boolean;
   selected?: boolean;
-  onSelect?: (entry: LibraryEntry) => void;
+  onSelect?: (entry: LibraryEntry, kind: LibraryEntryKind) => void;
 }
 
 const CHEVRON_SIZE = 18;
@@ -36,8 +36,8 @@ function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress
   const { t } = useI18n();
   const subtitle = localizedEntrySubtitle(entry, t);
   const artworkUri = useEntryArtwork(entry);
-  const press = () => selectionMode ? onSelect?.(entry) : onPress(entry, kind);
-  const longPress = selectionMode ? () => onSelect?.(entry) : onLongPress ? () => onLongPress(entry, kind) : undefined;
+  const press = () => selectionMode ? onSelect?.(entry, kind) : onPress(entry, kind);
+  const longPress = selectionMode ? () => onSelect?.(entry, kind) : onLongPress ? () => onLongPress(entry, kind) : undefined;
 
   if (kind === 'song') {
     return (

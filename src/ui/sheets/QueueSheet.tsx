@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Ref, memo, useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, ListRenderItem, StyleSheet, View } from 'react-native';
 import { ContentStatus, PlaybackMode, RemoteAction, RemoteTrack, RemoteUiState } from '../../data/types';
 import { AppText } from '../components/AppText';
@@ -20,7 +20,7 @@ import { usePalette } from '../PaletteProvider';
 import { Durations } from '../motion';
 import { useSnackbar } from '../snackbar/useSnackbar';
 import { Space } from '../tokens';
-import { useDragReorder } from '../useDragReorder';
+import { DragHandleProps, useDragReorder } from '../useDragReorder';
 import { useQueueReorder } from '../useQueueReorder';
 import { useI18n } from '../../i18n';
 import { isShuffleMode } from '../../session/playbackModes';
@@ -36,6 +36,9 @@ const QUEUE_ROW_ARTWORK = 40;
 const MODE_ICON_SIZE = 18;
 const END_REACHED_THRESHOLD = 0.5;
 const QUEUE_ROW_HEIGHT = 56;
+const INITIAL_ROWS = 16;
+const ROWS_PER_BATCH = 10;
+const RENDER_WINDOW = 7;
 
 let removeHintShown = false;
 
@@ -53,6 +56,77 @@ function trackSubtitle(track: RemoteTrack, t: (source: string) => string): strin
   const artist = track.artist || t('Unknown artist');
   return track.duration ? `${artist} · ${track.duration}` : artist;
 }
+
+interface QueueRowProps {
+  track: RemoteTrack;
+  selecting: boolean;
+  selected: boolean;
+  lifted: boolean;
+  removable: boolean;
+  dragHandle?: DragHandleProps;
+  rowRef?: Ref<RemovableRowHandle>;
+  onPlay: (track: RemoteTrack) => void;
+  onToggleSelected: (track: RemoteTrack) => void;
+  onBeginSelecting: (track: RemoteTrack) => void;
+  onRemove: (track: RemoteTrack) => void;
+}
+
+// Memoized so selection, drag and page loads re-render only the rows whose own props changed.
+const QueueRow = memo(function QueueRow({
+  track,
+  selecting,
+  selected,
+  lifted,
+  removable,
+  dragHandle,
+  rowRef,
+  onPlay,
+  onToggleSelected,
+  onBeginSelecting,
+  onRemove,
+}: QueueRowProps) {
+  const { t } = useI18n();
+  const palette = usePalette();
+  const title = track.title || t('Unknown song');
+  const subtitle = trackSubtitle(track, t);
+  if (selecting) {
+    return (
+      <TrackRow
+        title={title}
+        subtitle={subtitle}
+        artworkUri={track.artwork}
+        artworkSize={QUEUE_ROW_ARTWORK}
+        selected={selected}
+        onPress={() => onToggleSelected(track)}
+        onLongPress={() => onToggleSelected(track)}
+        accessory={<Icon name={selected ? 'check' : 'selectionCircle'} color={selected ? palette.accent : palette.inkMuted} />}
+      />
+    );
+  }
+  const play = () => onPlay(track);
+  return (
+    <RemovableRow
+      ref={rowRef}
+      rowHeight={QUEUE_ROW_HEIGHT}
+      swipeToRemove={removable}
+      accessibilityLabel={`${track.title}, ${subtitle}`}
+      removeLabel={t('Remove')}
+      onRemove={() => onRemove(track)}
+      onTap={play}
+      contentBackground={lifted ? palette.surfaceRaised : undefined}
+    >
+      <TrackRow
+        title={title}
+        subtitle={subtitle}
+        artworkUri={track.artwork}
+        artworkSize={QUEUE_ROW_ARTWORK}
+        onPress={play}
+        onLongPress={() => onBeginSelecting(track)}
+        accessory={dragHandle ? <DragHandle handle={dragHandle} /> : undefined}
+      />
+    </RemovableRow>
+  );
+});
 
 export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProps) {
   const { t } = useI18n();
@@ -83,14 +157,14 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
   const hasRows = rows.length > 0;
 
   useEffect(() => {
-    if (!visible || removeHintShown) return;
+    if (!visible || removeHintShown || !canEditQueue) return;
     const timer = setTimeout(() => {
       if (!firstRow.current) return;
       removeHintShown = true;
       firstRow.current.peek();
     }, Durations.peekDelay);
     return () => clearTimeout(timer);
-  }, [visible, hasRows]);
+  }, [visible, hasRows, canEditQueue]);
   const queueCount = Math.max(state.queueTotal, state.queue.length);
   const shuffleOn = isShuffleMode(state.playbackMode);
   const repeatOn = state.playbackMode === PlaybackMode.RepeatAll || state.playbackMode === PlaybackMode.RepeatOne || state.playbackMode === PlaybackMode.ShuffleRepeat;
@@ -113,11 +187,26 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
     onClose();
   };
 
+  const latest = useRef({ onAction, snackbar, t, canEditQueue, bulkJobRunning });
+  latest.current = { onAction, snackbar, t, canEditQueue, bulkJobRunning };
+
   const removeTrack = useCallback((track: RemoteTrack) => {
-    if (state.bulkActionProgress?.phase === 'resolving' || state.bulkActionProgress?.phase === 'writing') return;
-    onAction({ type: 'RemoveQueueTrack', id: track.id });
-    snackbar.show({ text: t('Removed “{title}”', { title: track.title }) });
-  }, [onAction, snackbar, state.bulkActionProgress?.phase, t]);
+    const current = latest.current;
+    if (current.bulkJobRunning) return;
+    current.onAction({ type: 'RemoveQueueTrack', id: track.id });
+    current.snackbar.show({ text: current.t('Removed “{title}”', { title: track.title }) });
+  }, []);
+
+  // Same feedback as Home's Up next when the player can't jump within its queue.
+  const playTrack = useCallback((track: RemoteTrack) => {
+    const current = latest.current;
+    if (current.bulkJobRunning) return;
+    if (!current.canEditQueue) {
+      current.snackbar.show({ text: current.t('This player can’t jump to a song in the queue.') });
+      return;
+    }
+    current.onAction({ type: 'PlayQueueTrack', id: track.id });
+  }, []);
 
   const toggleSelected = useCallback((track: RemoteTrack) => {
     setSelectedIds((previous) => {
@@ -135,48 +224,21 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
   };
 
   const { draggingIndex, handleProps } = drag;
-  const renderTrack: ListRenderItem<RemoteTrack> = useCallback(({ item, index }) => {
-    const play = selecting
-      ? () => toggleSelected(item)
-      : canEditQueue && !bulkJobRunning ? () => onAction({ type: 'PlayQueueTrack', id: item.id }) : undefined;
-    const selectAccessory = selecting ? <Icon name={selectedIds.has(item.id) ? 'check' : 'selectionCircle'} color={selectedIds.has(item.id) ? palette.accent : palette.inkMuted} /> : undefined;
-    if (selecting) {
-      return (
-        <TrackRow
-          title={item.title || t('Unknown song')}
-          subtitle={trackSubtitle(item, t)}
-          artworkUri={item.artwork}
-          artworkSize={QUEUE_ROW_ARTWORK}
-          selected={selectedIds.has(item.id)}
-          onPress={play}
-          onLongPress={() => toggleSelected(item)}
-          accessory={selectAccessory}
-        />
-      );
-    }
-    return (
-      <RemovableRow
-        ref={index === 0 ? firstRow : undefined}
-        rowHeight={QUEUE_ROW_HEIGHT}
-          swipeToRemove={canEditQueue && !bulkJobRunning}
-        accessibilityLabel={`${item.title}, ${trackSubtitle(item, t)}`}
-        removeLabel={t('Remove')}
-        onRemove={() => removeTrack(item)}
-        onTap={play}
-        contentBackground={draggingIndex === index ? palette.surfaceRaised : undefined}
-      >
-        <TrackRow
-          title={item.title || t('Unknown song')}
-          subtitle={trackSubtitle(item, t)}
-          artworkUri={item.artwork}
-          artworkSize={QUEUE_ROW_ARTWORK}
-          onPress={play}
-          onLongPress={() => beginSelecting(item)}
-          accessory={canEditQueue ? <DragHandle handle={handleProps(index)} /> : undefined}
-        />
-      </RemovableRow>
-    );
-  }, [bulkJobRunning, canEditQueue, draggingIndex, handleProps, onAction, palette.surfaceRaised, palette.accent, palette.inkMuted, removeTrack, selecting, selectedIds, toggleSelected, beginSelecting, t]);
+  const renderTrack: ListRenderItem<RemoteTrack> = useCallback(({ item, index }) => (
+    <QueueRow
+      track={item}
+      selecting={selecting}
+      selected={selecting && selectedIds.has(item.id)}
+      lifted={draggingIndex === index}
+      removable={canEditQueue && !bulkJobRunning}
+      dragHandle={canEditQueue ? handleProps(index) : undefined}
+      rowRef={index === 0 ? firstRow : undefined}
+      onPlay={playTrack}
+      onToggleSelected={toggleSelected}
+      onBeginSelecting={beginSelecting}
+      onRemove={removeTrack}
+    />
+  ), [bulkJobRunning, canEditQueue, draggingIndex, handleProps, playTrack, removeTrack, selecting, selectedIds, toggleSelected, beginSelecting]);
 
   const emptyState =
     state.queueStatus === ContentStatus.Loading ? (
@@ -278,7 +340,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
       <SectionHeader
         label={t('Up next')}
         tone="muted"
-        caption={hasRows ? (canEditQueue ? t('Drag ≡ to reorder · swipe left to remove') : t('Swipe left to remove')) : undefined}
+        caption={hasRows && canEditQueue ? t('Drag ≡ to reorder · swipe left to remove') : undefined}
         style={styles.sectionHeader}
       />
       <DragReorderCellContext.Provider value={drag.rowStyle}>
@@ -294,6 +356,10 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
           onEndReached={loadMore}
           onEndReachedThreshold={END_REACHED_THRESHOLD}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews={false}
+          initialNumToRender={INITIAL_ROWS}
+          maxToRenderPerBatch={ROWS_PER_BATCH}
+          windowSize={RENDER_WINDOW}
           style={[styles.list, { backgroundColor: palette.surface }]}
         />
       </DragReorderCellContext.Provider>

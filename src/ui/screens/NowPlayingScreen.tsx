@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated as RNAnimated,
   LayoutChangeEvent,
@@ -76,6 +76,8 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
   const gestureCloseToken = useSharedValue(0);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const dragStart = useSharedValue(0);
   const artScale = useRef(new RNAnimated.Value(state.isPlaying ? 1 : PAUSED_ART_SCALE)).current;
 
@@ -163,7 +165,21 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
     return () => animation.stop();
   }, [artScale, reducedMotion, state.isPlaying, visible]);
 
-  const panGesture = Gesture.Pan()
+  // Stable so the memoized pan gesture can call it from the UI thread without capturing a stale onClose.
+  const requestGestureClose = useCallback((token: number) => {
+    if (shouldRequestNowPlayingGestureClose(
+      visibleRef.current,
+      gestureClosePending.value,
+      token,
+      gestureCloseToken.value,
+      targetOffset.value,
+      windowHeight,
+    )) {
+      onCloseRef.current();
+    }
+  }, [gestureClosePending, gestureCloseToken, targetOffset, windowHeight]);
+
+  const panGesture = useMemo(() => Gesture.Pan()
     .enabled(visible)
     .activeOffsetY(10)
     .failOffsetX([-14, 14])
@@ -237,20 +253,7 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
               overshootClamping: true,
             });
       }
-    });
-
-  function requestGestureClose(token: number) {
-    if (shouldRequestNowPlayingGestureClose(
-      visibleRef.current,
-      gestureClosePending.value,
-      token,
-      gestureCloseToken.value,
-      targetOffset.value,
-      windowHeight,
-    )) {
-      onClose();
-    }
-  }
+    }), [dragStart, gestureClosePending, gestureCloseToken, offset, reducedMotion, requestGestureClose, targetOffset, visible, windowHeight]);
 
   const playerAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: offset.value }],

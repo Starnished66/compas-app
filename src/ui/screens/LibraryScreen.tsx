@@ -4,6 +4,7 @@ import { localizedCountLabel, localizedEntrySubtitle } from '../localizedLabels'
 import { StyleSheet, View } from 'react-native';
 import {
   ConnectionStatus,
+  ContentStatus,
   LibraryCategory,
   LibraryEntry,
   RemoteAction,
@@ -83,10 +84,6 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const exitSelection = useCallback(() => { setSelectionMode(false); setSelectedIds(new Set()); }, []);
-  // Entry IDs belong to the currently loaded results, not the next page or collection.
-  useEffect(() => {
-    if (!bulkActionsOpen) exitSelection();
-  }, [state.libraryEntries, bulkActionsOpen, exitSelection]);
   const tabActive = useTabActive();
   useEffect(() => {
     if (!tabActive) setSearchOpen(false);
@@ -118,15 +115,41 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   });
   const { rememberPush } = levels;
 
+  // Entry IDs belong to the open collection: leaving it ends selection, while the next page (or a refresh of the
+  // same list) only drops IDs that are no longer listed.
+  const collectionKey = [
+    levels.transitionKey,
+    nested,
+    state.libraryNestedTitle ?? '',
+    trail.current?.entry.id ?? '',
+    searchActive ? state.libraryQuery : '',
+  ].join('|');
+  const selectionCollection = useRef(collectionKey);
+  useEffect(() => {
+    if (bulkActionsOpen) return;
+    if (selectionCollection.current !== collectionKey) {
+      selectionCollection.current = collectionKey;
+      exitSelection();
+      return;
+    }
+    if (!state.libraryEntries.length && state.libraryStatus === ContentStatus.Loading) return;
+    setSelectedIds((previous) => {
+      if (!previous.size) return previous;
+      const listed = new Set(state.libraryEntries.map((entry) => entry.id));
+      const kept = [...previous].filter((id) => listed.has(id));
+      return kept.length === previous.size ? previous : new Set(kept);
+    });
+  }, [collectionKey, state.libraryEntries, state.libraryStatus, bulkActionsOpen, exitSelection]);
+
   useLayoutEffect(() => {
     if (flipSerial) flipRegistry.play();
   }, [flipRegistry, flipSerial]);
 
-  const flip = (mode: FlipMode, apply: () => void) => {
+  const flip = useCallback((mode: FlipMode, apply: () => void) => {
     if (!reducedMotion) flipRegistry.begin(mode);
     apply();
     setFlipSerial((value) => value + 1);
-  };
+  }, [flipRegistry, reducedMotion]);
 
   const openEntry = useCallback(
     (entry: LibraryEntry, kind: LibraryEntryKind) => {
@@ -224,6 +247,155 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   const playableIds = useMemo(() => (albumDetail ? songIds(entries) : []), [albumDetail, entries]);
   const albumArtwork = useFirstEntryArtwork(albumDetail ? entries : null, step?.entry);
 
+  const noun = nested ? (artistDetail ? 'albums' : 'items') : categoryNoun(category);
+  const connected = state.connectionStatus === ConnectionStatus.Connected;
+  const shuffleActive = isShuffleMode(state.playbackMode);
+  const railGutter = lettered && entries.length > 0 ? RAIL_GUTTER : undefined;
+  const inlineError = inlineLibraryError(state);
+  const hasLoadedEntries = state.libraryEntries.length > 0;
+  const { connectionStatus, connectionMessage, libraryStatus, libraryCountLabel, collectionBusy, catalogSyncMessage, supportedFeatures } = state;
+  const { onLeadingLayout, stuck: chipsStuck } = chipsHeader;
+  const insetTop = insets.top;
+  const selectedCount = selectedIds.size;
+  const entryCount = entries.length;
+
+  // Header nodes and the list data are memoized on the fields they show, so session updates that change none of
+  // them (playback, queue, position) keep every list item identical and LibraryList skips the render.
+  const placeholder = useMemo(
+    () =>
+      libraryStateMessage({
+        translate: t,
+        state,
+        onAction,
+        noun,
+        empty: emptyMessage(category, nested),
+        onRetry: nested ? undefined : () => onAction({ type: 'RefreshLibrary', category }),
+      }),
+    // libraryStateMessage reads only these fields of state.
+    [t, onAction, noun, category, nested, connectionStatus, connectionMessage, hasLoadedEntries, libraryStatus, libraryCountLabel],
+  );
+
+  const headerItems = useMemo(() => {
+    const items: LibraryItem[] = [];
+    if (searchActive) return items;
+    const playButtons = (ids: string[], native: boolean) => (
+      <CollectionPlayButtons
+        busy={collectionBusy}
+        onPlay={() => playCollection(onAction, ids, false, shuffleActive, native)}
+        onShuffle={() => playCollection(onAction, ids, true, shuffleActive, native)}
+      />
+    );
+    if (nested) {
+      items.push(
+        nodeItem(
+          'title',
+          <ScreenTitleBar
+            title={albumDetail ? undefined : step?.entry.title ?? (nestedTitle === 'Tracks' || nestedTitle === NESTED_ALBUMS_TITLE ? t(nestedTitle) : nestedTitle) ?? undefined}
+            onBack={() => onAction({ type: 'Back' })}
+          />,
+        ),
+      );
+      if ((artistDetail && nativeCollectionPlayback) || nativeGenrePlayback) {
+        items.push(nodeItem('collection-playback', <View style={styles.collectionActions}>{playButtons([], true)}</View>));
+      }
+    } else {
+      items.push(
+        nodeItem(
+          'heading',
+          <View onLayout={onLeadingLayout}>
+            <ScreenTitleBar title={t('Library')} />
+            <SearchLauncher label={t('Search artists, albums, songs')} onPress={() => setSearchOpen(true)} />
+          </View>,
+        ),
+        nodeItem(
+          'chips',
+          <StickyFrostBar extended={chipsStuck} extension={insetTop}>
+            <CategoryChips
+              options={availableCategoryOptions(supportedFeatures)}
+              value={category}
+              onChange={(value) => onAction({ type: 'OpenLibrary', category: value })}
+            />
+          </StickyFrostBar>,
+        ),
+      );
+      if (connected) {
+        items.push(
+          nodeItem(
+            'sync',
+            <LibrarySyncCard
+              message={catalogSyncMessage}
+              insetRight={railGutter}
+              onRefresh={() => onAction({ type: 'RefreshLibrary', category })}
+            />,
+          ),
+        );
+      }
+      if (nativeRootSongsPlayback) {
+        items.push(nodeItem('collection-playback', <View style={styles.collectionActions}>{playButtons([], true)}</View>));
+      }
+    }
+
+    if (albumDetail && step) {
+      items.push(
+        nodeItem(
+          'album',
+          <CollectionHeader
+            eyebrow={t('Album')}
+            title={step.entry.title}
+            subtitle={localizedEntrySubtitle(step.entry, t)}
+            meta={localizedCountLabel(libraryCountLabel, t) || undefined}
+            artworkUri={albumArtwork}
+            actions={playableIds.length || nativeCollectionPlayback ? playButtons(playableIds, nativeCollectionPlayback) : undefined}
+          />,
+        ),
+      );
+    }
+
+    if (inlineError) {
+      items.push(nodeItem('error', <InlineError message={inlineError} style={styles.inlineError} />));
+    }
+
+    if (placeholder) {
+      items.push(nodeItem('placeholder', <LibraryPlaceholder {...placeholder} />));
+    } else {
+      if (selectionMode) {
+        items.push(nodeItem('selection', <BulkSelectionBar count={selectedCount} onActions={() => setBulkActionsOpen(true)} onCancel={exitSelection} />));
+      }
+      if (!albumDetail) {
+        items.push(
+          nodeItem(
+            'toolbar',
+            <LibraryToolbar
+              countLabel={localizedCountLabel(libraryCountLabel || `${entryCount} ${noun}`, t)}
+              ascending={ascending}
+              onToggleSort={localDirectionSort ? () => flip('sort', () => setAscending((value) => !value)) : undefined}
+              grid={showGrid}
+              onToggleGrid={gridCapable ? () => flip('view', () => setGrid((value) => !value)) : undefined}
+              insetRight={railGutter}
+            />,
+          ),
+        );
+      }
+    }
+    return items;
+  }, [
+    searchActive, nested, albumDetail, step, nestedTitle, t, onAction, artistDetail, nativeCollectionPlayback,
+    nativeGenrePlayback, nativeRootSongsPlayback, collectionBusy, shuffleActive, onLeadingLayout, chipsStuck, insetTop,
+    supportedFeatures, category, connected, catalogSyncMessage, railGutter, albumArtwork, playableIds, libraryCountLabel,
+    inlineError, placeholder, selectionMode, selectedCount, exitSelection, entryCount, noun, ascending, localDirectionSort,
+    showGrid, gridCapable, flip,
+  ]);
+
+  const rowsStart = headerItems.length;
+  const letters = useMemo(
+    () => (placeholder ? [] : rowLetters.map((letter) => ({ ...letter, itemIndex: letter.itemIndex + rowsStart }))),
+    [placeholder, rowLetters, rowsStart],
+  );
+  const listItems = useMemo(
+    () => (placeholder ? headerItems : headerItems.concat(rows)),
+    [placeholder, headerItems, rows],
+  );
+
   const page = (content: React.ReactNode, rail?: React.ReactNode) => (
     <FlipContext.Provider value={flipRegistry}>
       <View style={styles.screen}>
@@ -262,157 +434,6 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
     );
   }
 
-  const noun = nested ? (artistDetail ? 'albums' : 'items') : categoryNoun(category);
-  const connected = state.connectionStatus === ConnectionStatus.Connected;
-  const shuffleActive = isShuffleMode(state.playbackMode);
-  const railGutter = lettered && entries.length > 0 ? RAIL_GUTTER : undefined;
-
-  const items: LibraryItem[] = [];
-  if (nested) {
-    items.push(
-      nodeItem(
-        'title',
-        <ScreenTitleBar
-          title={albumDetail ? undefined : step?.entry.title ?? (state.libraryNestedTitle === 'Tracks' || state.libraryNestedTitle === NESTED_ALBUMS_TITLE ? t(state.libraryNestedTitle) : state.libraryNestedTitle) ?? undefined}
-          onBack={() => onAction({ type: 'Back' })}
-        />,
-      ),
-    );
-    if (artistDetail && nativeCollectionPlayback) {
-      items.push(
-        nodeItem(
-          'collection-playback',
-          <View style={styles.collectionActions}><CollectionPlayButtons
-            busy={state.collectionBusy}
-            onPlay={() => playCollection(onAction, [], false, shuffleActive, true)}
-            onShuffle={() => playCollection(onAction, [], true, shuffleActive, true)}
-          /></View>,
-        ),
-      );
-    }
-    if (nativeGenrePlayback) {
-      items.push(
-        nodeItem(
-          'collection-playback',
-          <View style={styles.collectionActions}><CollectionPlayButtons
-            busy={state.collectionBusy}
-            onPlay={() => playCollection(onAction, [], false, shuffleActive, true)}
-            onShuffle={() => playCollection(onAction, [], true, shuffleActive, true)}
-          /></View>,
-        ),
-      );
-    }
-  } else {
-    items.push(
-      nodeItem(
-        'heading',
-        <View onLayout={chipsHeader.onLeadingLayout}>
-          <ScreenTitleBar title={t('Library')} />
-          <SearchLauncher label={t('Search artists, albums, songs')} onPress={() => setSearchOpen(true)} />
-        </View>,
-      ),
-      nodeItem(
-        'chips',
-        <StickyFrostBar extended={chipsHeader.stuck} extension={insets.top}>
-          <CategoryChips
-            options={availableCategoryOptions(state.supportedFeatures)}
-            value={category}
-            onChange={(value) => onAction({ type: 'OpenLibrary', category: value })}
-          />
-        </StickyFrostBar>,
-      ),
-    );
-    if (connected) {
-      items.push(
-        nodeItem(
-          'sync',
-          <LibrarySyncCard
-            message={state.catalogSyncMessage}
-            insetRight={railGutter}
-            onRefresh={() => onAction({ type: 'RefreshLibrary', category })}
-          />,
-        ),
-      );
-    }
-    if (nativeRootSongsPlayback) {
-      items.push(
-        nodeItem(
-          'collection-playback',
-          <View style={styles.collectionActions}><CollectionPlayButtons
-            busy={state.collectionBusy}
-            onPlay={() => playCollection(onAction, [], false, shuffleActive, true)}
-            onShuffle={() => playCollection(onAction, [], true, shuffleActive, true)}
-          /></View>,
-        ),
-      );
-    }
-  }
-
-  if (albumDetail && step) {
-    items.push(
-      nodeItem(
-        'album',
-        <CollectionHeader
-          eyebrow={t('Album')}
-          title={step.entry.title}
-          subtitle={localizedEntrySubtitle(step.entry, t)}
-          meta={localizedCountLabel(state.libraryCountLabel, t) || undefined}
-          artworkUri={albumArtwork}
-          actions={
-            playableIds.length || nativeCollectionPlayback ? (
-              <CollectionPlayButtons
-                busy={state.collectionBusy}
-                onPlay={() => playCollection(onAction, playableIds, false, shuffleActive, nativeCollectionPlayback)}
-                onShuffle={() => playCollection(onAction, playableIds, true, shuffleActive, nativeCollectionPlayback)}
-              />
-            ) : undefined
-          }
-        />,
-      ),
-    );
-  }
-
-  const inlineError = inlineLibraryError(state);
-  if (inlineError) {
-    items.push(nodeItem('error', <InlineError message={inlineError} style={styles.inlineError} />));
-  }
-
-  const placeholder = libraryStateMessage({
-        translate: t,
-    state,
-    onAction,
-    noun,
-    empty: emptyMessage(category, nested),
-    onRetry: nested ? undefined : () => onAction({ type: 'RefreshLibrary', category }),
-  });
-
-  if (placeholder) {
-    items.push(nodeItem('placeholder', <LibraryPlaceholder {...placeholder} />));
-  } else {
-    if (selectionMode) {
-      items.push(nodeItem('selection', <BulkSelectionBar count={selectedIds.size} onActions={() => setBulkActionsOpen(true)} onCancel={exitSelection} />));
-    }
-    if (!albumDetail) {
-      items.push(
-        nodeItem(
-          'toolbar',
-          <LibraryToolbar
-            countLabel={localizedCountLabel(state.libraryCountLabel || `${entries.length} ${noun}`, t)}
-            ascending={ascending}
-            onToggleSort={localDirectionSort ? () => flip('sort', () => setAscending((value) => !value)) : undefined}
-            grid={showGrid}
-            onToggleGrid={gridCapable ? () => flip('view', () => setGrid((value) => !value)) : undefined}
-            insetRight={railGutter}
-          />,
-        ),
-      );
-    }
-  }
-  const rowsStart = items.length;
-  const letters = placeholder
-    ? []
-    : rowLetters.map((letter) => ({ ...letter, itemIndex: letter.itemIndex + rowsStart }));
-  const listItems = placeholder ? items : items.concat(rows);
   const jumpToItem = (index: number) =>
     scroll.listRef.current?.scrollToIndex({ index, animated: false, viewOffset: STICKY_CHIPS_OFFSET });
 

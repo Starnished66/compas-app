@@ -26,3 +26,11 @@ export function shiftUpdates(
   }
   return updates;
 }
+
+// Moves one slot of a per-index array the same way the list reorders its items, so state bound to a row (its
+// animated value, its cached style) follows that row's item instead of staying with the index it left.
+export function moveSlot<T>(slots: T[], from: number, to: number): void {
+  if (from === to || from < 0 || to < 0 || from >= slots.length || to >= slots.length) return;
+  const [slot] = slots.splice(from, 1);
+  slots.splice(to, 0, slot);
+}

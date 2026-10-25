@@ -108,7 +108,8 @@ function toFirmwareNotice(payload: unknown): ReleaseNotice | null {
 /**
  * Fetches and validates the latest stable firmware release. It only returns a
  * release page announcement; it never downloads firmware or checksum assets.
- * Network, timeout, HTTP, and payload errors are treated as no available notice.
+ * A payload that fails validation resolves to null; network, timeout and HTTP
+ * errors reject, and UpdatesProvider reports them as a failed check.
  */
 export async function fetchLatestFirmwareRelease(
   fetchImpl: typeof fetch = fetch,
@@ -142,7 +143,8 @@ export async function fetchLatestFirmwareRelease(
 }
 
 /**
- * Strict numeric version comparison for a future configured application feed.
+ * Strict numeric version comparison, used for firmware notices today and for a
+ * future configured application feed.
  * Supports optional `v` prefixes and SemVer-style prerelease identifiers,
  * including the app's current `0.3.6-8` form. Invalid versions return null.
  */
@@ -193,6 +195,16 @@ function parseVersion(value: string): {
   const core = [Number(match[1]), Number(match[2]), Number(match[3] ?? '0')] as [number, number, number];
   if (!core.every(Number.isSafeInteger)) return null;
   return { core, prerelease: match[4] ? match[4].split('.') : null };
+}
+
+/**
+ * True only when the installed player version parses and is older than the
+ * release. An unknown version (not connected, no `device_info`, or a label such
+ * as "Development Build") never claims the release is newer, so no notice fires.
+ */
+export function isFirmwareReleaseNewer(installed: string | null | undefined, release: string): boolean {
+  if (!installed) return false;
+  return compareApplicationVersions(installed.trim(), release) === -1;
 }
 
 /**

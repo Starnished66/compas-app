@@ -8,6 +8,7 @@ import {
   compareApplicationVersions,
   fetchApplicationUpdateNotice,
   fetchLatestFirmwareRelease,
+  isFirmwareReleaseNewer,
 } from '../releaseUpdates';
 
 function release(overrides: Record<string, unknown> = {}): unknown {
@@ -138,5 +139,19 @@ describe('compareApplicationVersions', () => {
     expect(compareApplicationVersions('0.3.6', '0.3.5')).toBe(1);
     expect(compareApplicationVersions('0.3.x', '0.4.0')).toBeNull();
     expect(compareApplicationVersions('0.3.06', '0.4.0')).toBeNull();
+  });
+});
+
+describe('isFirmwareReleaseNewer', () => {
+  it('announces only releases newer than a parseable installed version', () => {
+    expect(isFirmwareReleaseNewer('v1.2.0', 'v1.3')).toBe(true);
+    expect(isFirmwareReleaseNewer('1.3', 'v1.3')).toBe(false);
+    expect(isFirmwareReleaseNewer('v1.4.1', 'v1.3')).toBe(false);
+  });
+
+  it('never claims an update when the installed version is unknown', () => {
+    expect(isFirmwareReleaseNewer(null, 'v1.3')).toBe(false);
+    expect(isFirmwareReleaseNewer(undefined, 'v1.3')).toBe(false);
+    expect(isFirmwareReleaseNewer('Development Build', 'v1.3')).toBe(false);
   });
 });

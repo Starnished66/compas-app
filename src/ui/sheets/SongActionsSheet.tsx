@@ -30,18 +30,17 @@ type SheetStep = 'actions' | 'playlists' | 'name';
 
 const HEADER_ARTWORK_SIZE = 48;
 
-function findSongEntries(state: RemoteUiState): LibraryEntry[] {
-  return state.libraryEntries.filter(
+function findSongEntries(entries: readonly LibraryEntry[], title: string, position: number | null | undefined): LibraryEntry[] {
+  return entries.filter(
     (entry) =>
       entry.kind === 'song' &&
-      entry.title === state.songActionTitle &&
-      (state.songActionPosition == null || entry.playlistPosition === state.songActionPosition),
+      entry.title === title &&
+      (position == null || entry.playlistPosition === position),
   );
 }
 
-function playlistNeighbours(state: RemoteUiState) {
-  const position = state.songActionPosition;
-  const positions = state.libraryEntries
+function playlistNeighbours(entries: readonly LibraryEntry[], position: number | null | undefined) {
+  const positions = entries
     .map((entry) => entry.playlistPosition)
     .filter((value): value is number => value != null);
   return {
@@ -49,6 +48,14 @@ function playlistNeighbours(state: RemoteUiState) {
     hasLater: position != null && positions.some((value) => value > position),
   };
 }
+
+interface SongEntryLookup {
+  matches: LibraryEntry[];
+  hasEarlier: boolean;
+  hasLater: boolean;
+}
+
+const NO_LOOKUP: SongEntryLookup = { matches: [], hasEarlier: false, hasLater: false };
 
 function showsFavorites(state: RemoteUiState): boolean {
   return state.screen.type === 'Library' && state.screen.category === LibraryCategory.Favorites;
@@ -126,9 +133,24 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
     [onAction, snackbar, viewPlaylist, t],
   );
 
-  const { pending, revealed, start, clear } = useSongActionPending(state, onAction, confirmed);
+  const timedOut = useCallback(
+    () => snackbar.show({ text: t('No response from the player. Check whether the change was applied.') }),
+    [snackbar, t],
+  );
+  const { pending, revealed, start, clear } = useSongActionPending(state, onAction, confirmed, timedOut);
 
-  const matches = useMemo(() => findSongEntries(state), [state]);
+  // The library scans only run while the sheet is open; while it closes the last result is kept so the
+  // header and move rows don't change mid-animation.
+  const { libraryEntries, songActionTitle, songActionPosition } = state;
+  const lastLookup = useRef<SongEntryLookup>(NO_LOOKUP);
+  const lookup = useMemo(
+    () => visible
+      ? { matches: findSongEntries(libraryEntries, songActionTitle, songActionPosition), ...playlistNeighbours(libraryEntries, songActionPosition) }
+      : lastLookup.current,
+    [visible, libraryEntries, songActionTitle, songActionPosition],
+  );
+  lastLookup.current = lookup;
+  const { matches, hasEarlier, hasLater } = lookup;
   const entry = matches[0];
   const entryArtwork = useEntryArtwork(entry);
   const uniqueEntryId = matches.length === 1 ? matches[0].id : null;
@@ -139,7 +161,6 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
   const canEditPlaylistTrack = Boolean(
     playlist?.writable && state.playlistRevision && state.songActionPosition != null && features.includes('playlist_edit'),
   );
-  const { hasEarlier, hasLater } = playlistNeighbours(state);
   const playlistName = playlist ? playlistDisplayName(playlist.name) : '';
   const busy = pending != null;
 

@@ -32,6 +32,7 @@ import { ScreenTitleBar } from '../components/ScreenTitleBar';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { Spinner } from '../components/Spinner';
 import { TextField } from '../components/TextField';
+import { localizedMessage } from '../localizedLabels';
 import { usePalette } from '../PaletteProvider';
 import { Space } from '../tokens';
 import { useStorageAccess } from '../useStorageAccess';
@@ -65,6 +66,7 @@ export function TransferScreen({ state, onAction, transfer, active, contentBotto
   const { t } = useI18n();
   const storage = useStorageAccess();
   const connected = state.connectionStatus === ConnectionStatus.Connected;
+  const reconnecting = state.connectionStatus === ConnectionStatus.Connecting;
   const supported = state.supportedFeatures.includes('wifi_import') && state.supportedFeatures.includes('wifi_import_files');
 
   let gate: React.ReactNode = null;
@@ -104,12 +106,31 @@ export function TransferScreen({ state, onAction, transfer, active, contentBotto
     );
   }
 
+  // Once the workspace has opened for this player it stays mounted through gates (an auto-reconnect
+  // passes through Connecting), because unmounting aborts the upload and drops the selection.
+  const workspaceKeyRef = useRef<string | null>(null);
+  if (!gate) workspaceKeyRef.current = state.wifiAddress;
+  const keepWorkspace = workspaceKeyRef.current === state.wifiAddress;
+
+  if (!keepWorkspace) {
+    return (
+      <View style={[styles.screen, { paddingBottom: contentBottomInset }]}>
+        <ScreenTitleBar title={t('Transfer')} />
+        <View style={styles.gate}>{gate}</View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.screen, { paddingBottom: contentBottomInset }]}>
       <ScreenTitleBar title={t('Transfer')} />
-      {gate ? <View style={styles.gate}>{gate}</View> : (
-        <TransferWorkspace key={state.wifiAddress} transfer={transfer} active={active} />
-      )}
+      {gate && reconnecting ? (
+        <View style={styles.banner}>
+          <Spinner />
+          <AppText variant="caption" tone="inkMuted" style={styles.flex}>{t('Reconnecting to the player…')}</AppText>
+        </View>
+      ) : gate ? <View style={styles.gateBanner}>{gate}</View> : null}
+      <TransferWorkspace key={state.wifiAddress} transfer={transfer} active={active} />
     </View>
   );
 }
@@ -318,7 +339,11 @@ function TransferWorkspace({ transfer, active }: { transfer: TransferApi; active
     } catch (cause: any) {
       if (!aliveRef.current) return;
       if (controller.signal.aborted) setNotice(t('Upload cancelled. {count} files uploaded.', { count: uploaded }));
-      else setError(cause?.message || t('Upload stopped. You can retry the remaining files.'));
+      else {
+        // Spell out what survived: the selection is kept so only the retry is left to the user.
+        const summary = t('Upload stopped after {count} files. You can retry the remaining files.', { count: uploaded });
+        setError(cause?.message ? `${summary} ${localizedMessage(cause.message, t)}` : summary);
+      }
     } finally {
       if (uploadControllerRef.current === controller) uploadControllerRef.current = null;
       if (aliveRef.current) {
@@ -583,6 +608,8 @@ function TransferWorkspace({ transfer, active }: { transfer: TransferApi; active
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   gate: { paddingHorizontal: Space.lg, paddingTop: Space.md },
+  gateBanner: { paddingHorizontal: Space.lg, paddingBottom: Space.sm },
+  banner: { flexDirection: 'row', alignItems: 'center', gap: Space.sm, paddingHorizontal: Space.lg, paddingBottom: Space.sm },
   workspace: { flex: 1, paddingHorizontal: Space.lg, gap: Space.sm },
   paneToggle: { marginBottom: Space.xs },
   panes: { flex: 1, gap: Space.md },

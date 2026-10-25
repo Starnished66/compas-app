@@ -141,6 +141,8 @@ export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBot
         items={items}
         onAction={onAction}
         onOpenEntry={onOpenEntry}
+        // Long-press starts multi-select on result rows exactly as in the library lists.
+        onEntryLongPress={onEntrySelectionLongPress}
         hasMore={showingResults && filter === 'songs' && state.libraryHasMore}
         status={state.libraryStatus}
         currentTrack={state.currentTrack}

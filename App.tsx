@@ -13,6 +13,7 @@ import { BackgroundPreferenceProvider } from './src/ui/preferences/BackgroundPre
 import { useAccentPreference } from './src/ui/preferences/useAccentPreference';
 import { AccentStyle, accentFollowsArtwork } from './src/ui/accentStyle';
 import { useHardwareBack } from './src/ui/useHardwareBack';
+import { dispatchBackInterceptor } from './src/ui/useBackInterceptor';
 import { canOpenNowPlaying } from './src/ui/nowPlayingAccess';
 import { AppBackdrop } from './src/ui/components/AppBackdrop';
 import { AppChrome } from './src/ui/components/AppChrome';
@@ -119,6 +120,8 @@ export default function App() {
       setNowPlayingVisible(false);
       return true;
     }
+    // Screen interceptors (selection, playlist edit) sit under Now Playing but above navigation.
+    if (dispatchBackInterceptor()) return true;
     if (state.screen.type !== 'Home') {
       onAction({ type: 'Back' });
       return true;
@@ -159,7 +162,7 @@ export default function App() {
   };
 
   return (
-    <UpdatesProvider>
+    <UpdatesProvider playerVersion={state.supportedFeatures.includes('device_info') ? state.playerVersion : null}>
     <PlaybackPositionContext.Provider value={playbackPosition}>
       <LibraryArtworkContext.Provider value={libraryArtwork}>
         <PaletteProvider palette={palette}>

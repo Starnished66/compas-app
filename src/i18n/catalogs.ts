@@ -1254,6 +1254,27 @@ Object.assign(catalogs.ru, {
   "Send music from this device to the player SD card": "Отправка музыки с этого устройства на SD-карту плеера",
 });
 
+Object.assign(catalogs.es, {
+  'Upload stopped after {count} files. You can retry the remaining files.': 'La carga se detuvo tras {count} archivos. Puedes volver a intentar los archivos restantes.',
+  'No response from the player. Check whether the change was applied.': 'El reproductor no respondió. Comprueba si el cambio se aplicó.',
+});
+Object.assign(catalogs.de, {
+  'Upload stopped after {count} files. You can retry the remaining files.': 'Upload nach {count} Dateien gestoppt. Du kannst die übrigen Dateien erneut versuchen.',
+  'No response from the player. Check whether the change was applied.': 'Keine Antwort vom Player. Prüfe, ob die Änderung übernommen wurde.',
+});
+Object.assign(catalogs.fr, {
+  'Upload stopped after {count} files. You can retry the remaining files.': 'Envoi interrompu après {count} fichiers. Vous pouvez réessayer les fichiers restants.',
+  'No response from the player. Check whether the change was applied.': 'Aucune réponse du lecteur. Vérifiez si la modification a été appliquée.',
+});
+Object.assign(catalogs.it, {
+  'Upload stopped after {count} files. You can retry the remaining files.': 'Caricamento interrotto dopo {count} file. Puoi riprovare con i file rimanenti.',
+  'No response from the player. Check whether the change was applied.': 'Nessuna risposta dal lettore. Controlla se la modifica è stata applicata.',
+});
+Object.assign(catalogs.ru, {
+  'Upload stopped after {count} files. You can retry the remaining files.': 'Загрузка остановлена после {count} файлов. Можно повторить оставшиеся файлы.',
+  'No response from the player. Check whether the change was applied.': 'Плеер не ответил. Проверьте, применилось ли изменение.',
+});
+
 export const LANGUAGE_OPTIONS: ReadonlyArray<{ value: Language | 'system'; label: string }> = [
   { value: 'system', label: 'System default' },
   { value: 'en', label: 'English' },
@@ -1537,6 +1558,13 @@ Object.assign(catalogs.es, {
   'View': 'Ver',
   'Waiting for WiFi or paused Bluetooth audio': 'Esperando Wi-Fi o a que se pause el audio Bluetooth',
   'Waiting to resume library sync': 'Esperando para reanudar la sincronización',
+  'Waiting to retry library sync': 'Reintentando la sincronización en un momento',
+  'Library sync failed': 'Sincronización de biblioteca fallida',
+  'Tap reload to try again': 'Toca recargar para intentarlo de nuevo',
+  'Could not pair with this player.': 'No se pudo emparejar con este reproductor.',
+  'Could not skip to the previous song.': 'No se pudo pasar a la canción anterior.',
+  'Could not skip to the next song.': 'No se pudo pasar a la siguiente canción.',
+  'The connection changed. Completed changes remain applied.': 'La conexión cambió. Los cambios completados se mantienen.',
   'You already have a playlist with this name': 'Ya tienes una lista con este nombre',
   'You can try the PIN again now.': 'Ya puedes volver a introducir el PIN.',
 });
@@ -1778,6 +1806,13 @@ Object.assign(catalogs.de, {
   'View': 'Anzeigen',
   'Waiting for WiFi or paused Bluetooth audio': 'Warte auf WLAN oder pausiertes Bluetooth-Audio',
   'Waiting to resume library sync': 'Warte auf Fortsetzung der Mediathek-Synchronisierung',
+  'Waiting to retry library sync': 'Synchronisierung wird gleich erneut versucht',
+  'Library sync failed': 'Mediathek-Synchronisierung fehlgeschlagen',
+  'Tap reload to try again': 'Zum erneuten Versuch auf Neu laden tippen',
+  'Could not pair with this player.': 'Kopplung mit diesem Player fehlgeschlagen.',
+  'Could not skip to the previous song.': 'Zum vorherigen Titel wechseln fehlgeschlagen.',
+  'Could not skip to the next song.': 'Zum nächsten Titel wechseln fehlgeschlagen.',
+  'The connection changed. Completed changes remain applied.': 'Die Verbindung hat sich geändert. Abgeschlossene Änderungen bleiben erhalten.',
   'Wi-Fi discovery is unavailable. Check Wi-Fi and local network permission, then try again.': 'Die WLAN-Suche ist nicht verfügbar. Prüfe WLAN und die Berechtigung für das lokale Netzwerk und versuche es erneut.',
   'Wi-Fi player search was cancelled.': 'Die WLAN-Player-Suche wurde abgebrochen.',
   'You already have a playlist with this name': 'Du hast bereits eine Playlist mit diesem Namen',
@@ -2021,6 +2056,13 @@ Object.assign(catalogs.fr, {
   'View': 'Voir',
   'Waiting for WiFi or paused Bluetooth audio': 'En attente du Wi-Fi ou d’une pause de l’audio Bluetooth',
   'Waiting to resume library sync': 'En attente de la reprise de la synchronisation',
+  'Waiting to retry library sync': 'Nouvelle tentative de synchronisation dans un instant',
+  'Library sync failed': 'Échec de la synchronisation de la bibliothèque',
+  'Tap reload to try again': 'Touchez Recharger pour réessayer',
+  'Could not pair with this player.': 'Impossible d’associer ce lecteur.',
+  'Could not skip to the previous song.': 'Impossible de passer au titre précédent.',
+  'Could not skip to the next song.': 'Impossible de passer au titre suivant.',
+  'The connection changed. Completed changes remain applied.': 'La connexion a changé. Les modifications terminées sont conservées.',
   'Wi-Fi discovery is unavailable. Check Wi-Fi and local network permission, then try again.': 'La recherche Wi-Fi est indisponible. Vérifiez le Wi-Fi et l’autorisation Réseau local, puis réessayez.',
   'Wi-Fi player search was cancelled.': 'La recherche du lecteur en Wi-Fi a été annulée.',
   'You already have a playlist with this name': 'Vous avez déjà une playlist portant ce nom',
@@ -2264,6 +2306,13 @@ Object.assign(catalogs.it, {
   'View': 'Vedi',
   'Waiting for WiFi or paused Bluetooth audio': 'In attesa del Wi-Fi o della pausa dell’audio Bluetooth',
   'Waiting to resume library sync': 'In attesa di riprendere la sincronizzazione',
+  'Waiting to retry library sync': 'Nuovo tentativo di sincronizzazione a breve',
+  'Library sync failed': 'Sincronizzazione della libreria non riuscita',
+  'Tap reload to try again': 'Tocca Ricarica per riprovare',
+  'Could not pair with this player.': 'Impossibile associare questo lettore.',
+  'Could not skip to the previous song.': 'Impossibile passare al brano precedente.',
+  'Could not skip to the next song.': 'Impossibile passare al brano successivo.',
+  'The connection changed. Completed changes remain applied.': 'La connessione è cambiata. Le modifiche completate restano applicate.',
   'Wi-Fi discovery is unavailable. Check Wi-Fi and local network permission, then try again.': 'La ricerca Wi-Fi non è disponibile. Controlla il Wi-Fi e l’autorizzazione rete locale e riprova.',
   'Wi-Fi player search was cancelled.': 'La ricerca del lettore via Wi-Fi è stata annullata.',
   'You already have a playlist with this name': 'Hai già una playlist con questo nome',
@@ -2507,6 +2556,13 @@ Object.assign(catalogs.ru, {
   'View': 'Открыть',
   'Waiting for WiFi or paused Bluetooth audio': 'Ожидание Wi-Fi или паузы Bluetooth-аудио',
   'Waiting to resume library sync': 'Ожидание продолжения синхронизации',
+  'Waiting to retry library sync': 'Скоро повторим синхронизацию',
+  'Library sync failed': 'Не удалось синхронизировать медиатеку',
+  'Tap reload to try again': 'Нажмите «Обновить», чтобы повторить',
+  'Could not pair with this player.': 'Не удалось связать этот плеер.',
+  'Could not skip to the previous song.': 'Не удалось перейти к предыдущему треку.',
+  'Could not skip to the next song.': 'Не удалось перейти к следующему треку.',
+  'The connection changed. Completed changes remain applied.': 'Подключение изменилось. Выполненные изменения сохранены.',
   'Wi-Fi discovery is unavailable. Check Wi-Fi and local network permission, then try again.': 'Поиск по Wi-Fi недоступен. Проверьте Wi-Fi и доступ к локальной сети и повторите попытку.',
   'Wi-Fi player search was cancelled.': 'Поиск плеера по Wi-Fi отменён.',
   'You already have a playlist with this name': 'У вас уже есть плейлист с таким именем',

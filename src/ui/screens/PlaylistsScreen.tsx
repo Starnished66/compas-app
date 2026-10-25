@@ -72,9 +72,17 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const exitSelection = useCallback(() => { setSelectionMode(false); setSelectedIds(new Set()); }, []);
   useBackInterceptor(editing || selectionMode, () => { if (editing) setEditing(false); else exitSelection(); });
+  // A page load or refresh keeps the selection; only ids that vanished are dropped. Opening another
+  // playlist exits selection (see the playlist?.key effect below).
   useEffect(() => {
-    if (!bulkActionsOpen) exitSelection();
-  }, [state.libraryEntries, bulkActionsOpen, exitSelection]);
+    if (bulkActionsOpen || state.libraryEntries.length === 0) return;
+    setSelectedIds((previous) => {
+      if (previous.size === 0) return previous;
+      const present = new Set(state.libraryEntries.map((entry) => entry.id));
+      const kept = [...previous].filter((id) => present.has(id));
+      return kept.length === previous.size ? previous : new Set(kept);
+    });
+  }, [state.libraryEntries, bulkActionsOpen]);
   const rootNames = useRef<string[]>([]);
   const { tileWidth } = useAlbumGrid();
   const snackbar = useSnackbar();
@@ -361,6 +369,7 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
         onClose={() => setOptionsPlaylist(null)}
         onAction={onAction}
         errorMessage={state.connectionMessage}
+        entries={state.libraryEntries}
         takenNames={rootNames.current.filter(
           (name) => !optionsPlaylist || name !== playlistDisplayName(optionsPlaylist.name),
         )}

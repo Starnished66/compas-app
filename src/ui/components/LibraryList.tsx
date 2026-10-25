@@ -74,8 +74,16 @@ function LibraryListContent({
     (entry: LibraryEntry) => onAction({ type: 'OpenSongActions', id: entry.id }),
     [onAction],
   );
-  const openTile = useCallback((entry: LibraryEntry) => onOpenEntry(entry, 'album'), [onOpenEntry]);
-  const hasEntries = items.some((item) => item.type !== 'node' && item.type !== 'letter');
+  // Tile callbacks stay stable across renders so memoized rows only re-render when their own props change.
+  const pressTile = useCallback(
+    (entry: LibraryEntry) => (selectionMode ? onSelectEntry?.(entry, 'album') : onOpenEntry(entry, 'album')),
+    [onOpenEntry, onSelectEntry, selectionMode],
+  );
+  const longPressTile = useCallback(
+    (entry: LibraryEntry) => onEntrySelectionLongPress?.(entry, 'album'),
+    [onEntrySelectionLongPress],
+  );
+  const hasEntries = useMemo(() => items.some((item) => item.type !== 'node' && item.type !== 'letter'), [items]);
   const loadingMore = status === ContentStatus.Loading && hasEntries;
   const insetStyle = useMemo(
     () => (entryInsetRight ? { paddingRight: entryInsetRight } : undefined),
@@ -102,10 +110,10 @@ function LibraryListContent({
           <AlbumTileRow
             entries={item.entries}
             tileWidth={tileWidth}
-            onPress={(entry) => selectionMode ? onSelectEntry?.(entry, 'album') : openTile(entry)}
+            onPress={pressTile}
             selectionMode={selectionMode}
-            selectedIds={selectedIds}
-            onLongPress={(entry) => onEntrySelectionLongPress?.(entry, 'album')}
+            selectedIds={selectionMode ? selectedIds : undefined}
+            onLongPress={longPressTile}
           />
         );
       case 'letter':
@@ -131,8 +139,8 @@ function LibraryListContent({
               onLongPress={onEntryLongPress}
               onMore={item.kind === 'song' ? showMoreSongs : undefined}
               selectionMode={selectionMode}
-              selected={selectedIds?.has(item.entry.id)}
-              onSelect={(entry) => onSelectEntry?.(entry, item.kind)}
+              selected={selectionMode && Boolean(selectedIds?.has(item.entry.id))}
+              onSelect={onSelectEntry}
             />
           </View>
         );
@@ -140,7 +148,8 @@ function LibraryListContent({
     }
   }, [
     tileWidth,
-    openTile,
+    pressTile,
+    longPressTile,
     renderPlaylistTrack,
     currentSong,
     isPlaying,
@@ -150,7 +159,6 @@ function LibraryListContent({
     selectionMode,
     selectedIds,
     onSelectEntry,
-    onEntrySelectionLongPress,
     showMoreSongs,
   ]);
 

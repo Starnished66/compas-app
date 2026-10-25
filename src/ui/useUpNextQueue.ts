@@ -1,10 +1,11 @@
 import { useCallback, useRef } from 'react';
-import { RemoteAction, RemoteTrack, RemoteUiState } from '../data/types';
+import { ContentStatus, RemoteAction, RemoteTrack, RemoteUiState } from '../data/types';
 import { recordSkip } from './skipDirection';
 import { useSnackbar } from './snackbar/useSnackbar';
 import { trackKey } from './trackKey';
 import { DragReorder, useDragReorder } from './useDragReorder';
 import { useQueueReorder } from './useQueueReorder';
+import { useOptimisticErrorSnackbar } from './sheets/useOptimisticErrorSnackbar';
 import { useI18n } from '../i18n';
 
 export interface UpNextQueue {
@@ -35,8 +36,9 @@ export function useUpNextQueue(
     onMove: reorder.move,
     onDragStateChange: onReorderActiveChange,
   });
-  const latest = useRef({ state, onAction, snackbar, canEditQueue, t });
-  latest.current = { state, onAction, snackbar, canEditQueue, t };
+  const watchResult = useOptimisticErrorSnackbar(state.connectionMessage, state.queueStatus);
+  const latest = useRef({ state, onAction, snackbar, canEditQueue, t, watchResult });
+  latest.current = { state, onAction, snackbar, canEditQueue, t, watchResult };
 
   const playTrack = useCallback((track: RemoteTrack) => {
     const current = latest.current;
@@ -49,8 +51,17 @@ export function useUpNextQueue(
   }, []);
 
   const removeTrack = useCallback((track: RemoteTrack) => {
+    // The row disappears optimistically; the snackbar waits for the queue refresh that follows a
+    // successful removal (Loading, then settled) so a failure is the only message shown.
+    let refreshing = false;
+    latest.current.watchResult({
+      message: { text: latest.current.t('Removed “{title}”', { title: track.title }) },
+      confirmed: (status) => {
+        if (status === ContentStatus.Loading) refreshing = true;
+        return refreshing && status !== ContentStatus.Loading;
+      },
+    });
     latest.current.onAction({ type: 'RemoveQueueTrack', id: track.id });
-    latest.current.snackbar.show({ text: latest.current.t('Removed “{title}”', { title: track.title }) });
   }, []);
 
   return { rows: reorder.queue, drag, canEditQueue, playTrack, removeTrack };
