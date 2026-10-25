@@ -436,8 +436,11 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
     );
   }
 
+  // The first letter goes to the very top, so the header (and its selection bar) isn't left under the chips.
   const jumpToItem = (index: number) =>
-    scroll.listRef.current?.scrollToIndex({ index, animated: false, viewOffset: STICKY_CHIPS_OFFSET });
+    index <= (letters[0]?.itemIndex ?? 0)
+      ? scrollToTop(false)
+      : scroll.listRef.current?.scrollToIndex({ index, animated: false, viewOffset: STICKY_CHIPS_OFFSET });
 
   return page(
     <LibraryList
