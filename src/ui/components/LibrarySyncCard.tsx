@@ -56,6 +56,16 @@ export function LibrarySyncCard({ message, onRefresh, insetRight }: LibrarySyncC
         <AppText variant="caption" tone="inkMuted" tabular>
           {sync.detail}
         </AppText>
+        {sync.failed ? (
+          <IconButton
+            icon="refresh"
+            label={t('Reload library')}
+            size="sm"
+            iconSize={REFRESH_ICON_SIZE}
+            color={palette.accent}
+            onPress={onRefresh}
+          />
+        ) : null}
       </Card>
     </EnterView>
   );

@@ -29,6 +29,7 @@ import {
   CollectionPlayRequest,
   WifiImportStatus,
   WifiImportDirectoryPage,
+  BulkActionProgress,
 } from '../data/types';
 import { RemoteEndpoint } from '../data/RemoteEndpoint';
 import { RemoteApi } from '../data/RemoteApi';
@@ -131,6 +132,8 @@ const PREF_WIFI_ADDRESS = 'compas_pref_wifi_address';
 const PREF_BLUETOOTH_ID = 'compas_pref_bt_id';
 const PREF_LAST_TRANSPORT = 'compas_pref_last_transport';
 const PREF_AUTO_RECONNECT = 'compas_pref_auto_reconnect';
+// Backoff before re-running a failed catalog sync; after the last one the failure is shown.
+const CATALOG_SYNC_RETRY_DELAYS_MS = [2000, 5000, 15000];
 
 const normalizedVolume = (value: number | null | undefined): number =>
   Number.isFinite(value) ? Math.max(0, Math.min(1, value as number)) : 0.68;
@@ -221,6 +224,7 @@ export function useRemoteSession() {
 
   const apiRef = useRef<RemoteApi | null>(null);
   const connectedPlayerKeyRef = useRef<string | null>(null);
+  const lastPlayerKeyRef = useRef<string | null>(null);
   // Stable owner token for UI work that spans an identity-verified BT → Wi-Fi upgrade.
   const wifiImportOwnerKeyRef = useRef<string | null>(null);
   const activeWifiEndpointRef = useRef<string | null>(null);
@@ -652,7 +656,11 @@ export function useRemoteSession() {
 
     autoReconnectTimerRef.current = setTimeout(async () => {
       autoReconnectTimerRef.current = null;
-      if (!autoReconnectEnabledRef.current || apiRef.current || stateRef.current.pinDialogVisible) {
+      if (!autoReconnectEnabledRef.current || apiRef.current) return;
+      if (stateRef.current.pinDialogVisible) {
+        // Editing the PIN while a dropped link waits: try again later instead of leaving "Connecting" stuck.
+        // A PIN rejection sets Error, and that wait is for the user, not for us.
+        if (stateRef.current.connectionStatus === ConnectionStatus.Connecting) scheduleAutoReconnect(5000);
         return;
       }
 
@@ -688,6 +696,24 @@ export function useRemoteSession() {
     }, initialDelayMs);
   };
 
+  // A choice rejected before connecting must not tear down a session that still works.
+  const rejectConnectChoice = (message: string) => {
+    if (apiRef.current && stateRef.current.connectionStatus === ConnectionStatus.Connected) {
+      setState((prev) => ({ ...prev, connectionMessage: message }));
+      return;
+    }
+    stopPlaybackService().catch(() => {});
+    setState((prev) => ({ ...prev, connectionStatus: ConnectionStatus.Error, connectionMessage: message }));
+  };
+
+  // The previous session can't be resumed once a new attempt replaced its attempt number.
+  const dropLiveSession = () => {
+    if (!apiRef.current) return;
+    apiRef.current = null;
+    if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
+    pollLoopTokenRef.current++;
+  };
+
   const connectDirect = async (
     transport: ConnectionTransport,
     wifiAddr?: string,
@@ -698,13 +724,7 @@ export function useRemoteSession() {
       const btPerms = getRequiredPermissionsForBluetooth();
       const permResult = await requestMissingPermissions(btPerms);
       if (!permResult.granted) {
-        stopPlaybackService().catch(() => {});
-        setState((prev) => ({
-          ...prev,
-          connectionStatus: ConnectionStatus.Error,
-          connectionMessage:
-            'Bluetooth permission was denied. Grant Nearby devices permission to connect to this player.',
-        }));
+        rejectConnectChoice('Bluetooth permission was denied. Grant Nearby devices permission to connect to this player.');
         return false;
       }
     } else if (transport === ConnectionTransport.Wifi) {
@@ -712,24 +732,12 @@ export function useRemoteSession() {
       if (wifiPerms.length > 0) {
         const permResult = await requestMissingPermissions(wifiPerms);
         if (!permResult.granted) {
-          stopPlaybackService().catch(() => {});
-          setState((prev) => ({
-            ...prev,
-            connectionStatus: ConnectionStatus.Error,
-            connectionMessage:
-              'Local network permission was denied. Grant Local Network permission to connect to this player.',
-          }));
+          rejectConnectChoice('Local network permission was denied. Grant Local Network permission to connect to this player.');
           return false;
         }
       }
     }
 
-    const attempt = ++connectionAttemptRef.current;
-    activeWifiEndpointRef.current = null;
-    wifiImportOperationRef.current++;
-    setWifiImportStatus({ state: 'stopped', error: null });
-    pendingSeekRef.current = null;
-    pendingVolumeRef.current = null;
     let api: RemoteApi;
     let playerKey: string;
 
@@ -740,11 +748,7 @@ export function useRemoteSession() {
       try {
         baseUrl = RemoteEndpoint.normalizeWifiAddress(address);
       } catch (err: any) {
-        setState((prev) => ({
-          ...prev,
-          connectionStatus: ConnectionStatus.Error,
-          connectionMessage: err?.message || 'Enter a valid player address.',
-        }));
+        rejectConnectChoice(err?.message || 'Enter a valid player address.');
         return false;
       }
       api = new RemoteApi(createWifiTransport(baseUrl));
@@ -761,12 +765,7 @@ export function useRemoteSession() {
       try {
         bondedDevices = await getBondedDevices();
       } catch (err: any) {
-        stopPlaybackService().catch(() => {});
-        setState((prev) => ({
-          ...prev,
-          connectionStatus: ConnectionStatus.Error,
-          connectionMessage: err?.message || 'Could not check Bluetooth pairing status. Turn Bluetooth on and try again.',
-        }));
+        rejectConnectChoice(err?.message || 'Could not check Bluetooth pairing status. Turn Bluetooth on and try again.');
         return false;
       }
       const bondedPlayer = bondedDevices.find(
@@ -776,19 +775,22 @@ export function useRemoteSession() {
         const selectedPlayer = stateRef.current.bluetoothPlayers.find(
           (player) => player.id.toLowerCase() === devId.toLowerCase()
         );
-        stopPlaybackService().catch(() => {});
-        setState((prev) => ({
-          ...prev,
-          connectionStatus: ConnectionStatus.Error,
-          connectionMessage: selectedPlayer
-            ? `Tap Pair beside ${selectedPlayer.name}, approve Android's prompt, then try again.`
-            : 'Select a paired Bluetooth player first.',
-        }));
+        rejectConnectChoice(selectedPlayer
+          ? `Tap Pair beside ${selectedPlayer.name}, approve Android's prompt, then try again.`
+          : 'Select a paired Bluetooth player first.');
         return false;
       }
       api = new RemoteApi(new SerializedHttpTransport(new BluetoothTransport(devId)));
       playerKey = `bt:${devId}`;
     }
+
+    // Validation is done; only now invalidate the current session's in-flight work.
+    const attempt = ++connectionAttemptRef.current;
+    activeWifiEndpointRef.current = null;
+    wifiImportOperationRef.current++;
+    setWifiImportStatus({ state: 'stopped', error: null });
+    pendingSeekRef.current = null;
+    pendingVolumeRef.current = null;
 
     setState((prev) => ({
       ...prev,
@@ -816,7 +818,8 @@ export function useRemoteSession() {
       const status = await api.status();
       if (attempt !== connectionAttemptRef.current) return false;
 
-      if (connectedPlayerKeyRef.current !== playerKey) {
+      // lastPlayerKeyRef survives a dropped link, so reconnecting to the same player keeps navigation.
+      if (lastPlayerKeyRef.current !== playerKey) {
         activeCatalogRef.current = null;
         clearArtworkState();
         libraryEntriesRef.current.clear();
@@ -829,6 +832,7 @@ export function useRemoteSession() {
       apiRef.current = api;
       featureSetRef.current = new Set(caps.features);
       connectedPlayerKeyRef.current = playerKey;
+      lastPlayerKeyRef.current = playerKey;
       wifiImportOwnerKeyRef.current = playerKey;
       activeWifiEndpointRef.current = transport === ConnectionTransport.Wifi ? playerKey : null;
       wifiImportOperationRef.current++;
@@ -902,6 +906,7 @@ export function useRemoteSession() {
       return true;
     } catch (err: any) {
       if (attempt !== connectionAttemptRef.current) return false;
+      dropLiveSession();
       const statusCode = err?.statusCode || err?.status;
       if (statusCode === 401) {
         if (pinToUse) await pinStoreRef.current.remove(playerKey);
@@ -974,6 +979,7 @@ export function useRemoteSession() {
     collectionStartTokenRef.current++;
     gateRef.current.reset();
     connectedPlayerKeyRef.current = null;
+    lastPlayerKeyRef.current = null;
     wifiImportOwnerKeyRef.current = null;
     bluetoothAudioOutputRef.current = null;
     activeCatalogRef.current = null;
@@ -1131,11 +1137,22 @@ export function useRemoteSession() {
         }
       }
 
-      // 3. Sync songs & covers
-      await syncCatalogOnce(api, attempt, generation, refreshCoversManifest);
+      // 3. Sync songs & covers. Pages are checkpointed, so a retry resumes where the failure left off;
+      // a revision change mid-sync makes the retry restage from the player's new first page.
+      for (let retry = 0; ; retry++) {
+        try {
+          await syncCatalogOnce(api, attempt, generation, refreshCoversManifest);
+          break;
+        } catch (err) {
+          if (!ownsCatalogSync() || retry >= CATALOG_SYNC_RETRY_DELAYS_MS.length) throw err;
+          setCatalogSyncMessage('Waiting to retry library sync');
+          await new Promise<void>((resolve) => setTimeout(resolve, CATALOG_SYNC_RETRY_DELAYS_MS[retry]));
+          if (!ownsCatalogSync()) return;
+        }
+      }
     } catch {
       if (apiRef.current === api && generation === catalogSyncGenerationRef.current && attempt === connectionAttemptRef.current) {
-        setState((prev) => ({ ...prev, catalogSyncMessage: null }));
+        setState((prev) => ({ ...prev, catalogSyncMessage: 'Library sync failed' }));
       }
     }
   };
@@ -1149,6 +1166,21 @@ export function useRemoteSession() {
     }
     return !optionalArtwork || BluetoothRequestPolicy.allowsArtworkRequest(transport, stateRef.current.isPlaying, route);
   };
+
+  // A bulk job that lost its player still has to leave a terminal phase, or its sheet keeps Stop forever.
+  const abandonBulkProgress = (action: BulkActionProgress['action']) =>
+    setState((prev) => {
+      const progress = prev.bulkActionProgress;
+      if (!progress || progress.action !== action || (progress.phase !== 'resolving' && progress.phase !== 'writing')) return prev;
+      return {
+        ...prev,
+        bulkActionProgress: { ...progress, phase: 'cancelled', message: 'The connection changed. Completed changes remain applied.', messageValues: undefined },
+      };
+    });
+
+  // Skips the render when the message is unchanged; the wait loop above sets it every second.
+  const setCatalogSyncMessage = (message: string | null) =>
+    setState((prev) => (prev.catalogSyncMessage === message ? prev : { ...prev, catalogSyncMessage: message }));
 
   const catalogNetwork = async <T,>(
     api: RemoteApi,
@@ -1171,13 +1203,10 @@ export function useRemoteSession() {
           return await request();
         }
       }
-      setState((prev) => ({
-        ...prev,
-        catalogSyncMessage: BluetoothRequestPolicy.requiresBluetoothAudioPriority(
-          prev.connectionTransport,
-          bluetoothAudioOutputRef.current
-        ) ? 'Waiting for WiFi or paused Bluetooth audio' : 'Waiting to resume library sync',
-      }));
+      setCatalogSyncMessage(BluetoothRequestPolicy.requiresBluetoothAudioPriority(
+        stateRef.current.connectionTransport,
+        bluetoothAudioOutputRef.current
+      ) ? 'Waiting for WiFi or paused Bluetooth audio' : 'Waiting to resume library sync');
       await new Promise<void>((resolve) => setTimeout(resolve, 1000));
     }
     throw new Error('Catalog sync no longer owns the active player session');
@@ -1210,10 +1239,10 @@ export function useRemoteSession() {
       activeSongCount === firstPage.total;
 
     if (!activeIsComplete) {
-      await syncedCatalogStoreRef.current.beginCatalogStage(firstPage.libraryId, firstPage.revision, firstPage.total);
+      const resumeOffset = await syncedCatalogStoreRef.current.beginCatalogStage(firstPage.libraryId, firstPage.revision, firstPage.total);
       await syncedCatalogStoreRef.current.writeCatalogPage(firstPage);
 
-      let offset = firstPage.nextOffset;
+      let offset = Math.max(firstPage.nextOffset, resumeOffset);
       while (offset < firstPage.total) {
         if (generation !== catalogSyncGenerationRef.current || attempt !== connectionAttemptRef.current) return;
         setState((prev) => ({
@@ -1245,7 +1274,7 @@ export function useRemoteSession() {
       const firstCovers = await catalogNetwork(api, attempt, generation, false, () =>
         api.catalogCovers(0, undefined, activeIdentity.revision)
       );
-      await syncedCatalogStoreRef.current.beginCovers(
+      const coverStage = await syncedCatalogStoreRef.current.beginCovers(
         activeIdentity.libraryId,
         activeIdentity.revision,
         firstCovers.total,
@@ -1253,7 +1282,7 @@ export function useRemoteSession() {
       );
       await syncedCatalogStoreRef.current.writeCoverPage(firstCovers);
 
-      let offset = firstCovers.nextOffset;
+      let offset = Math.max(firstCovers.nextOffset, coverStage.nextOffset);
       while (offset < firstCovers.total) {
         if (generation !== catalogSyncGenerationRef.current || attempt !== connectionAttemptRef.current) return;
         setState((prev) => ({
@@ -1286,6 +1315,10 @@ export function useRemoteSession() {
     allCovers.forEach((c) => {
       coverMap.set(c.albumKey, c);
     });
+    // The manifest is complete here, so files for covers it no longer lists are orphans.
+    const coverStore = syncedCoverStoreRef.current;
+    void coverStore.pruneLibrary(activeIdentity.libraryId, allCovers.map((c) => c.coverKey)).catch(() => {});
+    void syncedCatalogStoreRef.current.retainedLibraryIds().then((ids) => coverStore.purgeLibrariesExcept(ids)).catch(() => {});
 
     // Download pending covers
     const pending = await syncedCatalogStoreRef.current.pendingCovers(
@@ -1295,6 +1328,8 @@ export function useRemoteSession() {
     if (!ownsCatalogSync() || catalogCoversByAlbumRef.current !== coverMap || syncedCoverUriCacheRef.current !== coverUriMap) return;
     const downloadableTotal = allCovers.filter((c) => c.available !== false).length;
     let done = downloadableTotal - pending.length;
+    // A cover cut off by a timeout or a server error gets one more try at the end of this pass.
+    const requeued = new Set<string>();
 
     for (const cover of pending) {
       if (!ownsCatalogSync() || catalogCoversByAlbumRef.current !== coverMap || syncedCoverUriCacheRef.current !== coverUriMap) return;
@@ -1318,7 +1353,10 @@ export function useRemoteSession() {
         }));
       }
 
-      const existing = await syncedCoverStoreRef.current.getUri(activeIdentity.libraryId, cover.coverKey);
+      // Only a cover on disk counts as stored; the memory fallback is just for display.
+      const existing = (await syncedCoverStoreRef.current.contains(activeIdentity.libraryId, cover.coverKey))
+        ? await syncedCoverStoreRef.current.getUri(activeIdentity.libraryId, cover.coverKey)
+        : null;
       if (existing) {
         if (!ownsCatalogSync() || syncedCoverUriCacheRef.current !== coverUriMap) return;
         await syncedCatalogStoreRef.current.markCoverState(
@@ -1339,9 +1377,15 @@ export function useRemoteSession() {
         );
         if (!ownsCatalogSync() || syncedCoverUriCacheRef.current !== coverUriMap) return;
         if (art && art.base64) {
-          await syncedCoverStoreRef.current.put(activeIdentity.libraryId, cover.coverKey, art.base64);
+          const stored = await syncedCoverStoreRef.current.put(activeIdentity.libraryId, cover.coverKey, art.base64);
           const uri = await syncedCoverStoreRef.current.getUri(activeIdentity.libraryId, cover.coverKey, art.contentType || 'image/jpeg');
           if (!ownsCatalogSync() || syncedCoverUriCacheRef.current !== coverUriMap) return;
+          if (!stored) {
+            // Disk write failed: show it from memory, but leave it pending for the next sync.
+            if (uri) coverUriMap.set(cover.albumKey, uri);
+            done++;
+            continue;
+          }
           await syncedCatalogStoreRef.current.markCoverState(
             activeIdentity.libraryId,
             activeIdentity.revision,
@@ -1372,6 +1416,10 @@ export function useRemoteSession() {
             cover.albumKey,
             SyncedCatalogStore.COVER_PERMANENT_FAILURE
           );
+        } else if (!requeued.has(cover.albumKey) && ownsCatalogSync()) {
+          requeued.add(cover.albumKey);
+          pending.push(cover);
+          continue;
         }
       }
       done++;
@@ -1768,6 +1816,7 @@ export function useRemoteSession() {
       pendingSeekRef.current = null;
       pendingVolumeRef.current = null;
       connectedPlayerKeyRef.current = playerKey;
+      lastPlayerKeyRef.current = playerKey;
       activeWifiEndpointRef.current = endpoint;
       wifiImportOperationRef.current++;
       setWifiImportStatus({ state: 'stopped', error: null });
@@ -1814,6 +1863,8 @@ export function useRemoteSession() {
       refreshQueue(candidate);
       loadLibraryCategory(currentLibraryCategoryRef.current, candidate);
       startCatalogSync(candidate, connectionAttemptRef.current, caps.features);
+      // A Bluetooth poll in flight during the swap returns without rescheduling.
+      startPollingLoop();
       return true;
     } catch {
       return false;
@@ -1919,7 +1970,10 @@ export function useRemoteSession() {
     let removalInFlight = false;
     let writeAttempted = false;
     const publish = (phase: 'writing' | 'cancelled' | 'error' | 'done', message?: string, messageValues?: Record<string, string | number>) => {
-      if (api !== apiRef.current || playerKey !== connectedPlayerKeyRef.current) return;
+      if (api !== apiRef.current || playerKey !== connectedPlayerKeyRef.current) {
+        if (phase !== 'writing') abandonBulkProgress('queueRemove');
+        return;
+      }
       setState((prev) => ({ ...prev, bulkActionProgress: { action: 'queueRemove', completed: processed, total, succeeded, failed, processed, phase, message: message ?? null, messageValues } }));
     };
     const countValues = () => ({ succeeded, failed, processed, total });
@@ -2457,9 +2511,8 @@ export function useRemoteSession() {
 
     try {
       await api.play(index, context, catalogRevision);
-      if (attempt === connectionAttemptRef.current && api === apiRef.current) {
-        gateRef.current.finishAction(token, CommandOutcome.Succeeded, Date.now());
-      }
+      // Always settle the token: a reset gate ignores it, a live one would stay blocked forever.
+      gateRef.current.finishAction(token, CommandOutcome.Succeeded, Date.now());
     } catch (err: any) {
       const is4xx = err?.statusCode >= 400 && err?.statusCode < 500;
       gateRef.current.finishAction(
@@ -2642,7 +2695,10 @@ export function useRemoteSession() {
     let failed = 0;
     let queueActionNeedsRefresh = false;
     const publish = (phase: 'resolving' | 'writing' | 'done' | 'cancelled' | 'error', message?: string, messageValues?: Record<string, string | number>) => {
-      if (!ownsPlayer()) return;
+      if (!ownsPlayer()) {
+        if (phase !== 'resolving' && phase !== 'writing') abandonBulkProgress(action.action);
+        return;
+      }
       setState((prev) => ({ ...prev, bulkActionProgress: { action: action.action, completed, total, succeeded, failed, processed: completed, phase, message: message ?? null, messageValues } }));
     };
     const countValues = () => ({ succeeded, failed, processed: completed, total });
@@ -3489,7 +3545,9 @@ export function useRemoteSession() {
           }));
           break;
         }
-        pairBtDevice(action.id).catch(() => {});
+        pairBtDevice(action.id).catch((err: any) => {
+          setState((prev) => ({ ...prev, connectionMessage: err?.message || 'Could not pair with this player.' }));
+        });
         break;
       }
 
@@ -3559,14 +3617,22 @@ export function useRemoteSession() {
       case 'Previous': {
         const api = apiRef.current;
         if (!api) return;
-        api.previous().catch(() => {});
+        // Clear first so a repeated failure reads as a new message.
+        setState((prev) => (prev.connectionMessage ? { ...prev, connectionMessage: null } : prev));
+        api.previous().catch(() => {
+          if (apiRef.current === api) setState((prev) => ({ ...prev, connectionMessage: 'Could not skip to the previous song.' }));
+        });
         break;
       }
 
       case 'Next': {
         const api = apiRef.current;
         if (!api) return;
-        api.next().catch(() => {});
+        // Clear first so a repeated failure reads as a new message.
+        setState((prev) => (prev.connectionMessage ? { ...prev, connectionMessage: null } : prev));
+        api.next().catch(() => {
+          if (apiRef.current === api) setState((prev) => ({ ...prev, connectionMessage: 'Could not skip to the next song.' }));
+        });
         break;
       }
 

@@ -23,16 +23,14 @@ export interface LibraryEntrySources {
 const NETWORK_SOURCE = 'net';
 
 class UniqueIds {
-  private readonly used: Set<string>;
+  private readonly used = new Set<string>();
 
-  constructor(existing: readonly LibraryEntry[]) {
-    this.used = new Set(existing.map((entry) => entry.id));
-  }
+  constructor(private readonly shown: ReadonlySet<string> = new Set()) {}
 
   next(parts: readonly unknown[]): string {
     const key = JSON.stringify(parts);
     let id = key;
-    for (let copy = 2; this.used.has(id); copy++) id = `${key}#${copy}`;
+    for (let copy = 2; this.shown.has(id) || this.used.has(id); copy++) id = `${key}#${copy}`;
     this.used.add(id);
     return id;
   }
@@ -40,8 +38,23 @@ class UniqueIds {
 
 export class LibraryEntryFactory {
   private readonly targets = new Map<string, EntryTarget>();
+  // Paging passes the growing shown list each time; extend its id set instead of rebuilding it per page.
+  private shownIds: { first: LibraryEntry; length: number; ids: Set<string> } | null = null;
 
   constructor(private readonly sources: LibraryEntrySources) {}
+
+  private idsFor(after: readonly LibraryEntry[]): ReadonlySet<string> {
+    if (!after.length) return new Set();
+    const cached = this.shownIds;
+    if (cached && after.length >= cached.length && after[0] === cached.first && cached.ids.has(after[cached.length - 1].id)) {
+      for (let i = cached.length; i < after.length; i++) cached.ids.add(after[i].id);
+      cached.length = after.length;
+      return cached.ids;
+    }
+    const ids = new Set(after.map((entry) => entry.id));
+    this.shownIds = { first: after[0], length: after.length, ids };
+    return ids;
+  }
 
   target(id: string): EntryTarget | undefined {
     return this.targets.get(id);
@@ -54,7 +67,7 @@ export class LibraryEntryFactory {
     after: readonly LibraryEntry[] = [],
   ): LibraryEntry[] {
     const revision = catalogRevision ?? this.sources.activeRevision();
-    const ids = new UniqueIds(after);
+    const ids = new UniqueIds(this.idsFor(after));
     const scope = [context.playlist ?? '', context.artist ?? '', context.albumArtist ?? '', context.album ?? ''];
     return songs.map((song) => {
       const id = ids.next(['song', revision ?? NETWORK_SOURCE, ...scope, song.index]);
@@ -71,7 +84,7 @@ export class LibraryEntryFactory {
   }
 
   albums(albums: readonly LibraryGroup[], context: LibraryContext | null): LibraryEntry[] {
-    const ids = new UniqueIds([]);
+    const ids = new UniqueIds();
     const source = this.source();
     return albums.map((album) => {
       const identity = album.albumKey ? [album.albumKey] : [album.name, album.albumArtist ?? ''];
@@ -88,7 +101,7 @@ export class LibraryEntryFactory {
   }
 
   groups(groups: readonly LibraryGroup[], kind: GroupKind): LibraryEntry[] {
-    const ids = new UniqueIds([]);
+    const ids = new UniqueIds();
     const source = this.source();
     return groups.map((group) => {
       const id = ids.next(['group', source, kind, group.name]);
@@ -104,7 +117,7 @@ export class LibraryEntryFactory {
   }
 
   playlists(playlists: readonly Playlist[]): LibraryEntry[] {
-    const ids = new UniqueIds([]);
+    const ids = new UniqueIds();
     return playlists.map((playlist) => {
       const id = ids.next(['playlist', playlist.key]);
       this.targets.set(id, { type: 'Playlist', playlist });
@@ -126,7 +139,7 @@ export class LibraryEntryFactory {
     parent: string,
     after: readonly LibraryEntry[] = [],
   ): LibraryEntry[] {
-    const ids = new UniqueIds(after);
+    const ids = new UniqueIds(this.idsFor(after));
     return items.map((item) => {
       const path = parent ? `${parent}/${item.name}` : item.name;
       const id = ids.next(['folder', root, path, item.type]);
