@@ -22,6 +22,7 @@ import { useSnackbar } from '../snackbar/useSnackbar';
 import { Space } from '../tokens';
 import { DragHandleProps, useDragReorder } from '../useDragReorder';
 import { useQueueReorder } from '../useQueueReorder';
+import { useOptimisticErrorSnackbar } from './useOptimisticErrorSnackbar';
 import { useI18n } from '../../i18n';
 import { isShuffleMode } from '../../session/playbackModes';
 
@@ -187,14 +188,23 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
     onClose();
   };
 
-  const latest = useRef({ onAction, snackbar, t, canEditQueue, bulkJobRunning });
-  latest.current = { onAction, snackbar, t, canEditQueue, bulkJobRunning };
+  const watchResult = useOptimisticErrorSnackbar(state.connectionMessage, state.queueStatus);
+  const latest = useRef({ onAction, snackbar, t, canEditQueue, bulkJobRunning, watchResult });
+  latest.current = { onAction, snackbar, t, canEditQueue, bulkJobRunning, watchResult };
 
   const removeTrack = useCallback((track: RemoteTrack) => {
     const current = latest.current;
     if (current.bulkJobRunning) return;
+    // Same as Home's Up next: confirm once the queue refresh after the removal settles.
+    let refreshing = false;
+    current.watchResult({
+      message: { text: current.t('Removed “{title}”', { title: track.title }) },
+      confirmed: (status) => {
+        if (status === ContentStatus.Loading) refreshing = true;
+        return refreshing && status !== ContentStatus.Loading;
+      },
+    });
     current.onAction({ type: 'RemoveQueueTrack', id: track.id });
-    current.snackbar.show({ text: current.t('Removed “{title}”', { title: track.title }) });
   }, []);
 
   // Same feedback as Home's Up next when the player can't jump within its queue.
