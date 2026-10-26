@@ -248,19 +248,19 @@ class CompasMediaSessionModule : Module() {
         @RequiresApi(Build.VERSION_CODES.R)
         constructor(current: Int, volumeControlId: String) : super(VOLUME_CONTROL_ABSOLUTE, 100, current, volumeControlId)
 
+        // Inside this class `currentVolume` is VolumeProvider's own 0-100 value, not the module's 0-1 field.
         override fun onAdjustVolume(direction: Int) {
             if (direction != -1 && direction != 1) return
-            val newVol = ((currentVolume * 100).toInt() + direction * 5).coerceIn(0, 100) / 100f
-            this@CompasMediaSessionModule.currentVolume = newVol
-            setCurrentVolume((newVol * 100).toInt())
-            sendEvent("onMediaAction", mapOf("action" to "setVolume", "volume" to newVol.toDouble()))
+            applyVolume(currentVolume + direction * 5)
         }
 
-        override fun onSetVolumeTo(volume: Int) {
-            val newVol = volume.coerceIn(0, 100) / 100f
-            this@CompasMediaSessionModule.currentVolume = newVol
-            setCurrentVolume(volume.coerceIn(0, 100))
-            sendEvent("onMediaAction", mapOf("action" to "setVolume", "volume" to newVol.toDouble()))
+        override fun onSetVolumeTo(volume: Int) = applyVolume(volume)
+
+        private fun applyVolume(percent: Int) {
+            val clamped = percent.coerceIn(0, 100)
+            this@CompasMediaSessionModule.currentVolume = clamped / 100f
+            setCurrentVolume(clamped)
+            sendEvent("onMediaAction", mapOf("action" to "setVolume", "volume" to clamped / 100.0))
         }
     }
 
