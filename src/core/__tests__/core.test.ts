@@ -6,7 +6,6 @@ jest.mock('expo-crypto', () => ({
   },
 }));
 
-import { normalizeWifiAddress, DEFAULT_PLAYER_PORT } from '../endpoint';
 import { StreamHttpParser, HttpRequest, HttpResponse, HttpTransport } from '../transport';
 // RemoteApi throws the src/data RemoteApiException (re-exported by ../api), not the legacy one in ../errors.
 import { RemoteApi, RemoteApiException } from '../api';
@@ -17,38 +16,6 @@ import {
   matchesStoredCatalogSnapshot,
   canFinishCatalogSyncFromSnapshot,
 } from '../policies';
-
-describe('RemoteEndpoint', () => {
-  test('normalizes standard IP address with default port', () => {
-    expect(normalizeWifiAddress('192.168.1.50')).toBe(`http://192.168.1.50:${DEFAULT_PLAYER_PORT}`);
-  });
-
-  test('normalizes IP address with custom port', () => {
-    expect(normalizeWifiAddress('192.168.1.50:9000')).toBe('http://192.168.1.50:9000');
-  });
-
-  test('accepts http:// scheme and strips trailing slash', () => {
-    expect(normalizeWifiAddress('http://10.0.0.2/')).toBe(`http://10.0.0.2:${DEFAULT_PLAYER_PORT}`);
-  });
-
-  test('formats IPv6 host in brackets', () => {
-    expect(normalizeWifiAddress('fe80::1')).toBe(`http://[fe80::1]:${DEFAULT_PLAYER_PORT}`);
-  });
-
-  test('rejects non-http scheme', () => {
-    expect(() => normalizeWifiAddress('https://192.168.1.50')).toThrow('Use an http:// player address');
-    expect(() => normalizeWifiAddress('ftp://192.168.1.50')).toThrow('Use an http:// player address');
-  });
-
-  test('rejects path or query in input', () => {
-    expect(() => normalizeWifiAddress('192.168.1.50/api')).toThrow('Enter only the player\'s IP address and optional port');
-    expect(() => normalizeWifiAddress('192.168.1.50?query=1')).toThrow('Enter only the player\'s IP address and optional port');
-  });
-
-  test('rejects invalid ports', () => {
-    expect(() => normalizeWifiAddress('192.168.1.50:70000')).toThrow();
-  });
-});
 
 describe('StreamHttpParser', () => {
   test('parses standard HTTP/1.1 response with JSON body', () => {

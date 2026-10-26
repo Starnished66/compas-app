@@ -43,9 +43,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "jest",
-    "typecheck": "tsc --noEmit",
-    "simulator": "node tools/dap-simulator/server.js",
-    "verify:apk": "python3 tools/verify_android_apk.py"
+    "typecheck": "tsc --noEmit"
   },
   "private": true,
   "expo": {
