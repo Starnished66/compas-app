@@ -1683,6 +1683,12 @@ export function useRemoteSession() {
           if (prev.playerAccentColor === playerAccentColor && prev.deviceModel === deviceModel && prev.playerVersion === playerVersion) return prev;
           return { ...prev, playerAccentColor, deviceModel, playerVersion };
         });
+        setState((prev) => {
+          const settingsRevision = featureSetRef.current.has('settings_v1') ? status.settingsRevision ?? null : null;
+          const settingsEpoch = featureSetRef.current.has('settings_v1') ? status.settingsEpoch ?? null : null;
+          if (prev.settingsRevision === settingsRevision && prev.settingsEpoch === settingsEpoch) return prev;
+          return { ...prev, settingsRevision, settingsEpoch };
+        });
 
         const foreground = appForegroundRef.current;
         const nextInterval = Math.max(
@@ -4145,6 +4151,7 @@ export function useRemoteSession() {
     playbackPosition: positionStoreRef.current,
     currentLibraryCategory: currentLibraryCategoryRef.current,
     libraryArtwork,
+    playerSettingsApi: () => apiRef.current?.settings() ?? null,
   };
 }
 

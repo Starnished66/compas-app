@@ -26,6 +26,7 @@ import {
   WifiImportUploadResult,
 } from './types';
 import type { NativeUploadProgress } from './nativeFileUpload';
+import { SettingsApi } from './SettingsApi';
 import {
   HttpTransport,
   HttpRequest,
@@ -170,6 +171,13 @@ export class RemoteApi {
     this.pin = pin || null;
   }
 
+  private settingsClient: SettingsApi | null = null;
+
+  /** Client for the player's remote settings; shares this connection's transport and follows PIN changes. */
+  settings(): SettingsApi {
+    return (this.settingsClient ??= new SettingsApi(this.transport, () => this.pin));
+  }
+
   preemptArtworkRequest(index?: number): void {
     if (index != null) assertIntegerArgument(index, 'Index', 0);
     if (isArtworkPreemptibleTransport(this.transport)) {
@@ -300,6 +308,8 @@ export class RemoteApi {
         : null,
       deviceModel: typeof json.device_model === 'string' && json.device_model.trim() ? json.device_model.trim() : null,
       playerVersion: typeof json.player_version === 'string' && json.player_version.trim() ? json.player_version.trim() : null,
+      settingsRevision: Number.isSafeInteger(json.settingsRevision) ? json.settingsRevision : null,
+      settingsEpoch: Number.isSafeInteger(json.settingsEpoch) ? json.settingsEpoch : null,
       collectionJob: json.collection_job && Number.isSafeInteger(json.collection_job.id) &&
         ['idle', 'pending', 'done', 'error'].includes(json.collection_job.state)
         ? { id: json.collection_job.id, state: json.collection_job.state, error: typeof json.collection_job.error === 'string' ? json.collection_job.error : null }

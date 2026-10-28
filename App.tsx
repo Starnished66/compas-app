@@ -33,6 +33,7 @@ import { TransferApi, TransferScreen } from './src/ui/screens/TransferScreen';
 import { ConnectionScreen } from './src/ui/screens/ConnectionScreen';
 import { NowPlayingScreen } from './src/ui/screens/NowPlayingScreen';
 import { SettingsSheet } from './src/ui/sheets/SettingsSheet';
+import { PlayerSettingsScreen } from './src/ui/screens/PlayerSettingsScreen';
 import { SongActionsSheet } from './src/ui/sheets/SongActionsSheet';
 import { UpdatesProvider } from './src/updates/UpdatesProvider';
 import { UpdateAnnouncements } from './src/ui/components/UpdateAnnouncements';
@@ -67,7 +68,7 @@ function accentSourceFor(state: RemoteUiState, accentStyle: AccentStyle): Accent
 }
 
 export default function App() {
-  const { state, onAction, playbackPosition, libraryArtwork, wifiImportStatus, startWifiImport, stopWifiImport, listWifiImportFiles, uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile, createWifiImportDirectory } = useRemoteSession();
+  const { state, onAction, playbackPosition, libraryArtwork, wifiImportStatus, startWifiImport, stopWifiImport, listWifiImportFiles, uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile, createWifiImportDirectory, playerSettingsApi } = useRemoteSession();
   const transfer: TransferApi = {
     status: wifiImportStatus,
     start: startWifiImport,
@@ -81,6 +82,7 @@ export default function App() {
   const [nowPlayingVisible, setNowPlayingVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [updatesVisible, setUpdatesVisible] = useState(false);
+  const [playerSettingsVisible, setPlayerSettingsVisible] = useState(false);
   const lastBrowseCategoryRef = useRef<LibraryCategory>(LibraryCategory.Albums);
   const lastMainScreenRef = useRef<MainScreen>({ type: 'Home' });
   const [connectionReturnCount, setConnectionReturnCount] = useState(0);
@@ -225,7 +227,11 @@ export default function App() {
                       onOpenConnection={() => onAction({ type: 'OpenConnection' })}
                       onOpenUpdates={openUpdates}
                       onOpenTransfer={() => onAction({ type: 'OpenTransfer' })}
+                      onOpenPlayerSettings={() => setPlayerSettingsVisible(true)}
                     />
+                    <SlideUpScreen visible={playerSettingsVisible}>
+                      <PlayerSettingsScreen state={state} settingsApi={playerSettingsApi()} onClose={() => setPlayerSettingsVisible(false)} />
+                    </SlideUpScreen>
                     <UpdatesSheet visible={updatesVisible} onClose={() => setUpdatesVisible(false)} playerVersion={state.supportedFeatures.includes('device_info') ? state.playerVersion : null} />
                     <SongActionsSheet state={state} onAction={onAction} />
                     <PinDialog state={state} onAction={onAction} />

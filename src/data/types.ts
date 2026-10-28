@@ -78,6 +78,8 @@ export interface PlaybackStatus {
   accentColor?: string | null;
   deviceModel?: string | null;
   playerVersion?: string | null;
+  settingsRevision?: number | null;
+  settingsEpoch?: number | null;
   collectionJob?: CollectionJob | null;
 }
 
@@ -331,6 +333,9 @@ export interface RemoteUiState {
   playerAccentColor?: string | null;
   deviceModel?: string | null;
   playerVersion?: string | null;
+  /** Change counter and boot id of the player's settings, from the status poll (settings_v1). */
+  settingsRevision?: number | null;
+  settingsEpoch?: number | null;
   queue: RemoteTrack[];
   queueTotal: number;
   queueHasMore: boolean;

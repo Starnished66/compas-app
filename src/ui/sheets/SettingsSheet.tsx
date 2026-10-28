@@ -33,6 +33,7 @@ export interface SettingsSheetProps {
   onOpenConnection: () => void;
   onOpenUpdates: () => void;
   onOpenTransfer: () => void;
+  onOpenPlayerSettings?: () => void;
 }
 
 const THEME_OPTIONS: ReadonlyArray<SegmentedOption<RemoteTheme>> = [
@@ -43,7 +44,7 @@ const THEME_OPTIONS: ReadonlyArray<SegmentedOption<RemoteTheme>> = [
 
 const CHEVRON_SIZE = 18;
 
-export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnection, onOpenUpdates, onOpenTransfer }: SettingsSheetProps) {
+export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnection, onOpenUpdates, onOpenTransfer, onOpenPlayerSettings }: SettingsSheetProps) {
   const updates = useUpdates();
   const { t, languagePreference, setLanguage } = useI18n();
   const [languageOpen, setLanguageOpen] = useState(false);
@@ -137,6 +138,22 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
                   onOpenTransfer();
                 }}
               />
+              {onOpenPlayerSettings && state.supportedFeatures.includes('settings_v1') ? (
+                <>
+                  <Divider />
+                  <ListRow
+                    variant="action"
+                    title={t('Player settings')}
+                    leading={<Icon name="sliders" />}
+                    subtitle={t('Sound, display, power and more')}
+                    trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
+                    onPress={() => {
+                      onClose();
+                      onOpenPlayerSettings();
+                    }}
+                  />
+                </>
+              ) : null}
               {state.supportedFeatures.includes('device_info') && (state.deviceModel || state.playerVersion) ? (
                 <>
                   <Divider />

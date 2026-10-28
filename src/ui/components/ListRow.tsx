@@ -14,6 +14,8 @@ export interface ListRowProps {
   selected?: boolean;
   active?: boolean;
   disabled?: boolean;
+  /** Set on a row that opens or closes a list below it. */
+  expanded?: boolean;
   variant?: 'item' | 'action';
   titleVariant?: TypeVariant;
   titleTone?: TextTone;
@@ -38,6 +40,7 @@ export function ListRow({
   selected = false,
   active = false,
   disabled = false,
+  expanded,
   variant = 'item',
   titleVariant,
   titleTone,
@@ -73,7 +76,7 @@ export function ListRow({
     <Pressable
       accessibilityRole={interactive ? accessibilityRole : undefined}
       accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ selected, disabled, checked: accessibilityRole === 'radio' ? selected : undefined }}
+      accessibilityState={{ selected, disabled, checked: accessibilityRole === 'radio' ? selected : undefined, ...(expanded === undefined ? {} : { expanded }) }}
       onPress={onPress}
       onLongPress={onLongPress}
       disabled={disabled || !interactive}

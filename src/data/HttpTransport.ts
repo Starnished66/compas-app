@@ -5,6 +5,8 @@ export interface HttpRequest {
   target: string;
   headers?: Record<string, string>;
   body?: Uint8Array;
+  /** Overrides the transport's default timeout for this one request (slow player-side work). */
+  timeoutMs?: number;
 }
 
 export interface HttpResponse {
@@ -262,7 +264,7 @@ export class FetchHttpTransport implements HttpTransport, ArtworkPreemptibleTran
       this.activeArtworkControllers.set(key, controller);
     }
 
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), request.timeoutMs ?? this.timeoutMs);
     try {
       return await run(controller.signal);
     } catch (err: any) {
