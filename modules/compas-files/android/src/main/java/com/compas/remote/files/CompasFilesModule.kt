@@ -9,6 +9,8 @@ import android.os.Build
 import android.os.Environment
 import android.os.storage.StorageManager
 import android.provider.Settings
+import com.facebook.react.modules.network.OkHttpClientProvider
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -26,8 +28,63 @@ class CompasFilesModule : Module() {
         get() = appContext.reactContext?.applicationContext
             ?: throw IllegalStateException("React context is unavailable")
 
+    private val transfers = PinSafeTransfers()
+
+    private fun fileOf(fileUri: String): File {
+        val path = Uri.parse(fileUri).path ?: throw InvalidPathException("Expected a file URI")
+        return File(path)
+    }
+
     override fun definition() = ModuleDefinition {
         Name("CompasFiles")
+
+        Events("onUploadProgress")
+
+        OnCreate {
+            // JavaScript fetch shares this client; it must never carry the PIN across a redirect.
+            OkHttpClientProvider.setOkHttpClientFactory {
+                // Same builder React Native would have used, plus the redirect guard.
+                val reactContext = appContext.reactContext
+                val builder = if (reactContext != null) OkHttpClientProvider.createClientBuilder(reactContext)
+                else OkHttpClientProvider.createClientBuilder()
+                builder.addNetworkInterceptor(refusePinRedirects).build()
+            }
+        }
+
+        // A reload creates a new module; the old one's app context must not stay behind the factory.
+        OnDestroy {
+            OkHttpClientProvider.setOkHttpClientFactory(null)
+        }
+
+        /**
+         * Raw-body upload on a client that never follows redirects, so the PIN header stays with the player.
+         * Completes asynchronously on OkHttp's threads: the shared Expo function queue is never held.
+         */
+        AsyncFunction("uploadFile") { taskId: String, url: String, fileUri: String, headers: Map<String, String>, promise: Promise ->
+            transfers.upload(taskId, url, fileOf(fileUri), headers, { sent, total ->
+                sendEvent("onUploadProgress", mapOf("taskId" to taskId, "sent" to sent.toDouble(), "total" to total.toDouble()))
+            }) { result ->
+                result.fold(
+                    { (status, body) -> promise.resolve(mapOf("status" to status, "body" to body)) },
+                    { promise.reject(it as? CodedException ?: TransferException(it.message ?: "Transfer failed")) },
+                )
+            }
+        }
+
+        AsyncFunction("downloadFile") { taskId: String, url: String, fileUri: String, headers: Map<String, String>, promise: Promise ->
+            transfers.download(taskId, url, fileOf(fileUri), headers) { result ->
+                result.fold(
+                    { (status, responseHeaders, errorBody) ->
+                        promise.resolve(mapOf("status" to status, "headers" to responseHeaders, "errorBody" to errorBody))
+                    },
+                    { promise.reject(it as? CodedException ?: TransferException(it.message ?: "Transfer failed")) },
+                )
+            }
+        }
+
+        Function("cancelTransfer") { taskId: String ->
+            transfers.cancel(taskId)
+        }
 
         Function("hasStorageAccess") {
             hasStorageAccess()

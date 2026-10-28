@@ -91,4 +91,23 @@ describe('session snackbar events', () => {
     ]);
     expect(messages).toEqual(['Could not seek playback.', null, null]);
   });
+
+  test('a PIN that could not be saved is announced instead of the connection', () => {
+    const notSaved = { ...connected, connectionMessage: 'The PIN could not be saved on this phone. You will be asked for it again.' };
+    expect(run([{}, { connectionStatus: ConnectionStatus.Connecting }, notSaved])).toEqual([
+      null,
+      'The PIN could not be saved on this phone. You will be asked for it again.',
+    ]);
+  });
+
+  test('the unsaved-PIN warning is also announced when connecting from the Connection screen', () => {
+    const warning = 'The PIN could not be saved on this phone. You will be asked for it again.';
+    const onConnection = { screen: { type: 'Connection' } } as Partial<SessionSnapshot>;
+    expect(run([
+      onConnection,
+      { ...onConnection, connectionStatus: ConnectionStatus.Connecting },
+      { ...onConnection, ...connected, connectionMessage: warning },
+      { ...onConnection, ...connected, connectionMessage: null },
+    ])).toEqual([null, warning, null]);
+  });
 });

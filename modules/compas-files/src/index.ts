@@ -29,6 +29,16 @@ interface CompasFilesNativeModule {
   getRoots(): StorageRoot[];
   listDirectory(path: string): Promise<LocalFileEntry[]>;
   collectFiles(paths: string[]): Promise<CollectedFile[]>;
+  uploadFile(taskId: string, url: string, fileUri: string, headers: Record<string, string>): Promise<{ status: number; body: string }>;
+  downloadFile(taskId: string, url: string, fileUri: string, headers: Record<string, string>): Promise<NativeDownloadResult>;
+  cancelTransfer(taskId: string): void;
+  addListener(eventName: 'onUploadProgress', listener: (event: { taskId: string; sent: number; total: number }) => void): { remove(): void };
+}
+
+export interface NativeDownloadResult {
+  status: number;
+  headers: Record<string, string>;
+  errorBody: string;
 }
 
 let nativeModule: CompasFilesNativeModule | null = null;
@@ -94,4 +104,10 @@ export function collectLocalFiles(paths: string[]): Promise<CollectedFile[]> {
 /** Builds a file:// URI that native upload code decodes back to the exact path. */
 export function localFileUri(path: string): string {
   return `file://${path.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+/** Transfers on a native client that never follows a redirect, so the PIN header stays with the player. Null off Android. */
+export function getPinSafeTransfers(): Pick<CompasFilesNativeModule, 'uploadFile' | 'downloadFile' | 'cancelTransfer' | 'addListener'> | null {
+  const module = getNativeModule();
+  return module && typeof module.uploadFile === 'function' ? module : null;
 }

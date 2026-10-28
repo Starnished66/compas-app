@@ -243,8 +243,13 @@ export class WifiHttpTransport implements HttpTransport, ArtworkPreemptibleTrans
       const response = await fetch(fullUrl, {
         method: request.method,
         headers: fetchHeaders,
+        redirect: 'manual',
         signal: controller.signal,
       });
+      // The player never redirects; following one would carry the PIN header to another host.
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        throw new Error('The player redirected the request, so the PIN was not sent there.');
+      }
 
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, key) => {

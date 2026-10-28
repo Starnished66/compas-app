@@ -35,7 +35,8 @@ export class SecurePinStore {
     return fallback && /^[0-9]{4,12}$/.test(fallback) ? fallback : null;
   }
 
-  async put(playerId: string, pin: string): Promise<void> {
+  /** Resolves true when the PIN reached SecureStore, false when it only lives in memory until the app closes. */
+  async put(playerId: string, pin: string): Promise<boolean> {
     if (!playerId) throw new Error('Player ID must not be empty');
     if (!/^[0-9]{4,12}$/.test(pin)) {
       throw new Error('PIN must contain 4 to 12 digits');
@@ -44,12 +45,13 @@ export class SecurePinStore {
     if (SecureStore && typeof SecureStore.setItemAsync === 'function') {
       try {
         await SecureStore.setItemAsync(key, pin);
-        return;
+        return true;
       } catch {
         // Fallback
       }
     }
     this.fallbackStore.set(key, pin);
+    return false;
   }
 
   async remove(playerId: string): Promise<void> {

@@ -35,7 +35,7 @@ import { RemoteEndpoint } from '../data/RemoteEndpoint';
 import { RemoteApi } from '../data/RemoteApi';
 import { SerializedHttpTransport } from '../data/HttpTransport';
 import { createWifiTransport } from '../data/wifiTransport';
-import { SecurePinStore } from '../data/SecurePinStore';
+import { PIN_NOT_SAVED_MESSAGE, SecurePinStore } from '../data/SecurePinStore';
 import { ArtworkDiskCache } from '../data/ArtworkDiskCache';
 import {
   SyncedCatalogStore,
@@ -913,9 +913,8 @@ export function useRemoteSession() {
       autoReconnectEnabledRef.current = true;
       AsyncStorage.setItem(PREF_AUTO_RECONNECT, 'true').catch(() => {});
 
-      if (pinToUse) {
-        await pinStoreRef.current.put(playerKey, pinToUse);
-      }
+      // The session works either way, but the user must know the PIN will be asked for again.
+      const pinNotSaved = !!pinToUse && !(await pinStoreRef.current.put(playerKey, pinToUse));
 
       AsyncStorage.setItem(PREF_LAST_TRANSPORT, transport === ConnectionTransport.Wifi ? 'wifi' : 'bluetooth').catch(() => {});
       if (transport === ConnectionTransport.Wifi) {
@@ -954,7 +953,7 @@ export function useRemoteSession() {
         connectionTransport: transport,
         connectionAttemptTransport: null,
         playerName: 'Compás Player',
-        connectionMessage: null,
+        connectionMessage: pinNotSaved ? PIN_NOT_SAVED_MESSAGE : null,
         pinDialogVisible: false,
         pinInput: '',
         pinError: null,
@@ -969,6 +968,11 @@ export function useRemoteSession() {
         playerVersion: caps.features.includes('device_info') ? status.playerVersion ?? null : null,
         currentTrack: track,
       }));
+
+      if (pinNotSaved) {
+        // The snackbar shows it once; left in state it would read as a library error.
+        setTimeout(() => setState((prev) => (prev.connectionMessage === PIN_NOT_SAVED_MESSAGE ? { ...prev, connectionMessage: null } : prev)), 2000);
+      }
 
       refreshQueue(api);
       loadLibraryCategory(currentLibraryCategoryRef.current, api);

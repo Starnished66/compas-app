@@ -1,3 +1,5 @@
+import { refuseRedirect } from './redirectGuard';
+
 export interface HttpRequest {
   method: 'GET' | 'POST';
   target: string;
@@ -198,6 +200,7 @@ export class FetchHttpTransport implements HttpTransport, ArtworkPreemptibleTran
       this.download = (request, fileUri) =>
         this.withAbortSignal(request, async (signal) => {
           const result = await downloadFile(this.urlFor(request), fileUri, request.headers ?? {}, signal);
+          refuseRedirect(result.status);
           return createHttpResponse(
             result.status,
             '',
@@ -214,8 +217,10 @@ export class FetchHttpTransport implements HttpTransport, ArtworkPreemptibleTran
         method: request.method,
         headers: request.headers,
         body: request.body ? new Blob([request.body as Uint8Array<ArrayBuffer>]) : undefined,
+        redirect: 'manual',
         signal,
       });
+      refuseRedirect(res.status);
       const body = new Uint8Array(await res.arrayBuffer());
       return createHttpResponse(res.status, res.statusText || 'OK', lowerCaseHeaders((visit) => res.headers.forEach(visit)), body);
     });

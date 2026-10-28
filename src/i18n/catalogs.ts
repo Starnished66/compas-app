@@ -15,7 +15,7 @@ export const catalogs: Record<Language, Record<string, TranslationValue>> = {
     'Could not find this player on Wi-Fi.': 'No se pudo encontrar este reproductor por Wi-Fi.', 'Continue': 'Continuar',
     'The player does not expose a public library identity. Update the player firmware and try again.': 'El reproductor no expone una identidad pública de biblioteca. Actualiza el firmware del reproductor e inténtalo de nuevo.',
     'The player cannot rename files on this SD card.': 'El reproductor no puede cambiar el nombre de los archivos en esta tarjeta SD.',
-    'Choose files on this phone, then select an SD card folder. Files upload directly to the player over the authenticated Wi-Fi connection.': 'Elige archivos de este teléfono y selecciona una carpeta de la tarjeta SD. Los archivos se cargan directamente al reproductor mediante una conexión Wi-Fi autenticada.',
+    'Choose files on this phone, then select an SD card folder. Files upload directly to the player over Wi-Fi.': 'Elige archivos de este teléfono y selecciona una carpeta de la tarjeta SD. Los archivos se cargan directamente al reproductor por Wi-Fi.',
     'Searching for this player on Wi-Fi…': 'Buscando este reproductor por Wi-Fi…', 'Could not find the matching player. Turn on Wi-Fi on the player and phone, then try again.': 'No se encontró el reproductor correspondiente. Activa el Wi-Fi del reproductor y del teléfono e inténtalo de nuevo.',
     'Wi-Fi discovery is unavailable. Check Wi-Fi and local network permission, then try again.': 'La búsqueda por Wi-Fi no está disponible. Comprueba el Wi-Fi y el permiso de red local e inténtalo de nuevo.',
     'Wi-Fi player search was cancelled.': 'Se canceló la búsqueda del reproductor por Wi-Fi.', 'Grant Local Network permission to find the player on Wi-Fi.': 'Concede el permiso de red local para encontrar el reproductor por Wi-Fi.',
@@ -365,7 +365,7 @@ Object.assign(catalogs.en, {
   'Update the player firmware to use Wi-Fi import.': 'Update the player firmware to use Wi-Fi import.',
   'Searching for this player on Wi-Fi…': 'Searching for this player on Wi-Fi…',
   'Could not find this player on Wi-Fi.': 'Could not find this player on Wi-Fi.',
-  'Choose files on this phone, then select an SD card folder. Files upload directly to the player over the authenticated Wi-Fi connection.': 'Choose files on this phone, then select an SD card folder. Files upload directly to the player over the authenticated Wi-Fi connection.',
+  'Choose files on this phone, then select an SD card folder. Files upload directly to the player over Wi-Fi.': 'Choose files on this phone, then select an SD card folder. Files upload directly to the player over Wi-Fi.',
   'Selected files': 'Selected files', 'Destination': 'Destination',
   'New name': 'New name', 'Save': 'Save',
   'Uploading file {current} of {total}': 'Uploading file {current} of {total}',
@@ -1614,7 +1614,7 @@ Object.assign(catalogs.de, {
   'Choose an M3U or M3U8 playlist file': 'Wähle eine M3U- oder M3U8-Playlist-Datei',
   'Choose file': 'Datei wählen',
   'Choose files': 'Dateien wählen',
-  'Choose files on this phone, then select an SD card folder. Files upload directly to the player over the authenticated Wi-Fi connection.': 'Wähle Dateien auf diesem Telefon und dann einen Ordner auf der SD-Karte. Die Dateien werden über die authentifizierte WLAN-Verbindung direkt auf den Player hochgeladen.',
+  'Choose files on this phone, then select an SD card folder. Files upload directly to the player over Wi-Fi.': 'Wähle Dateien auf diesem Telefon und dann einen Ordner auf der SD-Karte. Die Dateien werden direkt über WLAN auf den Player hochgeladen.',
   'Choose SD folder': 'SD-Ordner wählen',
   'Compressed · smaller files, some detail removed': 'Komprimiert · kleinere Dateien, einige Details gehen verloren',
   'Connect': 'Verbinden',
@@ -1882,7 +1882,7 @@ Object.assign(catalogs.fr, {
   'Choose an M3U or M3U8 playlist file': 'Choisissez un fichier de playlist M3U ou M3U8',
   'Choose file': 'Choisir un fichier',
   'Choose files': 'Choisir des fichiers',
-  'Choose files on this phone, then select an SD card folder. Files upload directly to the player over the authenticated Wi-Fi connection.': 'Choisissez des fichiers sur ce téléphone, puis un dossier de la carte SD. Les fichiers sont envoyés directement au lecteur via la connexion Wi-Fi authentifiée.',
+  'Choose files on this phone, then select an SD card folder. Files upload directly to the player over Wi-Fi.': 'Choisissez des fichiers sur ce téléphone, puis un dossier de la carte SD. Les fichiers sont envoyés directement au lecteur par Wi-Fi.',
   'Choose SD folder': 'Choisir un dossier SD',
   'Compressed · smaller files, some detail removed': 'Compressé · fichiers plus légers, certains détails perdus',
   'Connect': 'Connecter',
@@ -2150,7 +2150,7 @@ Object.assign(catalogs.it, {
   'Choose an M3U or M3U8 playlist file': 'Scegli un file playlist M3U o M3U8',
   'Choose file': 'Scegli file',
   'Choose files': 'Scegli file',
-  'Choose files on this phone, then select an SD card folder. Files upload directly to the player over the authenticated Wi-Fi connection.': 'Scegli i file su questo telefono, poi una cartella della scheda SD. I file vengono caricati direttamente sul lettore tramite la connessione Wi-Fi autenticata.',
+  'Choose files on this phone, then select an SD card folder. Files upload directly to the player over Wi-Fi.': 'Scegli i file su questo telefono, poi una cartella della scheda SD. I file vengono caricati direttamente sul lettore via Wi-Fi.',
   'Choose SD folder': 'Scegli cartella SD',
   'Compressed · smaller files, some detail removed': 'Compresso · file più piccoli, alcuni dettagli persi',
   'Connect': 'Connetti',
@@ -2418,7 +2418,7 @@ Object.assign(catalogs.ru, {
   'Choose an M3U or M3U8 playlist file': 'Выберите файл плейлиста M3U или M3U8',
   'Choose file': 'Выбрать файл',
   'Choose files': 'Выбрать файлы',
-  'Choose files on this phone, then select an SD card folder. Files upload directly to the player over the authenticated Wi-Fi connection.': 'Выберите файлы на телефоне, затем папку на SD-карте. Файлы загружаются прямо на плеер через защищённое подключение Wi-Fi.',
+  'Choose files on this phone, then select an SD card folder. Files upload directly to the player over Wi-Fi.': 'Выберите файлы на телефоне, затем папку на SD-карте. Файлы загружаются прямо на плеер по Wi-Fi.',
   'Choose SD folder': 'Выбрать папку SD',
   'Compressed · smaller files, some detail removed': 'Сжатый · файлы меньше, часть деталей теряется',
   'Connect': 'Подключить',
@@ -2710,6 +2710,31 @@ Object.assign(catalogs.ru, {
   'Could not open release': 'Не удалось открыть версию',
   'Try again when a browser and internet connection are available.': 'Повторите попытку, когда будут доступны браузер и подключение к интернету.',
   'Could not check releases. Check your internet connection and try again.': 'Не удалось проверить версии. Проверьте подключение к интернету и повторите попытку.',
+});
+
+Object.assign(catalogs.en, {
+  'The PIN could not be saved on this phone. You will be asked for it again.': 'The PIN could not be saved on this phone. You will be asked for it again.',
+  'The player redirected the request, so the PIN was not sent there.': 'The player redirected the request, so the PIN was not sent there.',
+});
+Object.assign(catalogs.es, {
+  'The PIN could not be saved on this phone. You will be asked for it again.': 'No se pudo guardar el PIN en este teléfono. Se te pedirá de nuevo.',
+  'The player redirected the request, so the PIN was not sent there.': 'El reproductor redirigió la solicitud, así que el PIN no se envió allí.',
+});
+Object.assign(catalogs.de, {
+  'The PIN could not be saved on this phone. You will be asked for it again.': 'Die PIN konnte auf diesem Telefon nicht gespeichert werden. Du wirst erneut danach gefragt.',
+  'The player redirected the request, so the PIN was not sent there.': 'Der Player hat die Anfrage weitergeleitet, daher wurde die PIN dorthin nicht gesendet.',
+});
+Object.assign(catalogs.fr, {
+  'The PIN could not be saved on this phone. You will be asked for it again.': 'Le PIN n’a pas pu être enregistré sur ce téléphone. Il vous sera redemandé.',
+  'The player redirected the request, so the PIN was not sent there.': 'Le lecteur a redirigé la requête, le PIN n’y a donc pas été envoyé.',
+});
+Object.assign(catalogs.it, {
+  'The PIN could not be saved on this phone. You will be asked for it again.': 'Non è stato possibile salvare il PIN su questo telefono. Ti verrà richiesto di nuovo.',
+  'The player redirected the request, so the PIN was not sent there.': 'Il lettore ha reindirizzato la richiesta, quindi il PIN non è stato inviato lì.',
+});
+Object.assign(catalogs.ru, {
+  'The PIN could not be saved on this phone. You will be asked for it again.': 'Не удалось сохранить PIN на этом телефоне. Его запросят снова.',
+  'The player redirected the request, so the PIN was not sent there.': 'Плеер перенаправил запрос, поэтому PIN туда не отправлен.',
 });
 
 // Languages with incomplete coverage use the English source copy for new UI strings.

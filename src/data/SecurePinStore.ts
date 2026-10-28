@@ -1,5 +1,8 @@
 import * as SecureStore from 'expo-secure-store';
 
+/** Shown when a PIN worked but could not be kept, so the user knows the player will ask again. */
+export const PIN_NOT_SAVED_MESSAGE = 'The PIN could not be saved on this phone. You will be asked for it again.';
+
 export class SecurePinStore {
   private memoryStore = new Map<string, string>();
 
@@ -23,7 +26,8 @@ export class SecurePinStore {
     }
   }
 
-  async put(playerId: string, pin: string): Promise<void> {
+  /** Resolves true when the PIN reached SecureStore, false when it only lives in memory until the app closes. */
+  async put(playerId: string, pin: string): Promise<boolean> {
     if (!/^[0-9]{4,12}$/.test(pin)) {
       throw new Error('PIN must contain 4 to 12 digits');
     }
@@ -31,8 +35,9 @@ export class SecurePinStore {
     try {
       const key = this.storageKey(playerId);
       await SecureStore.setItemAsync(key, pin);
+      return true;
     } catch {
-      // Memory fallback succeeded
+      return false;
     }
   }
 

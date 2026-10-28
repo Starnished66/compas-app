@@ -1,3 +1,4 @@
+import { refuseRedirect } from './redirectGuard';
 import {
   ArtImage,
   Capabilities,
@@ -248,6 +249,7 @@ export class RemoteApi {
     const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' };
     if (this.pin) headers[RemoteApi.PIN_HEADER] = this.pin;
     const response = await uploadFileNative(`${endpoint.replace(/\/+$/, '')}${this.prefix}/import/files/upload?${params}`, fileUri, headers, onProgress, signal);
+    refuseRedirect(response.status);
     if (response.status !== 201) throw new RemoteApiException(response.status, response.body);
     const json = JSON.parse(response.body);
     if (json.ok !== true || typeof json.path !== 'string' || typeof json.name !== 'string' ||

@@ -1,5 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import type { FileDownloadResult } from './HttpTransport';
+import { nativeTransferError } from './nativeTransferError';
+import { getPinSafeTransfers } from '../../modules/compas-files/src';
 
 function isSuccess(status: number): boolean {
   return status >= 200 && status < 300;
@@ -22,6 +24,19 @@ export async function downloadToFile(
   signal: AbortSignal
 ): Promise<FileDownloadResult> {
   if (signal.aborted) throw new Error('Download aborted');
+  const native = getPinSafeTransfers();
+  if (native) {
+    const taskId = `download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const cancelNative = () => native.cancelTransfer(taskId);
+    signal.addEventListener('abort', cancelNative);
+    try {
+      return await native.downloadFile(taskId, url, fileUri, headers);
+    } catch (error) {
+      throw nativeTransferError(error);
+    } finally {
+      signal.removeEventListener('abort', cancelNative);
+    }
+  }
   // iOS defaults to a background URLSession, which is scheduled by the system and retries
   // unreachable hosts instead of failing, so short player requests stay in the foreground.
   const task = FileSystem.createDownloadResumable(url, fileUri, {

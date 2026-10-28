@@ -1,3 +1,4 @@
+jest.mock('../../../modules/compas-files/src', () => ({ getPinSafeTransfers: () => null }));
 jest.mock('expo-file-system/legacy', () => ({
   FileSystemUploadType: { BINARY_CONTENT: 0 },
   createUploadTask: jest.fn(),

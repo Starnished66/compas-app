@@ -76,6 +76,9 @@ export function initialSessionMemory(state: SessionSnapshot): SessionMemory {
   };
 }
 
+const PIN_NOT_SAVED_SOURCE = 'The PIN could not be saved on this phone. You will be asked for it again.';
+const PIN_NOT_SAVED_TEXT = (t?: Translate) => (t ? t(PIN_NOT_SAVED_SOURCE) : PIN_NOT_SAVED_SOURCE);
+
 type Translate = (source: string, variables?: Record<string, string | number>) => string;
 
 function connectionEvent(memory: SessionMemory, state: SessionSnapshot, next: SessionMemory, t?: Translate): string | null {
@@ -140,5 +143,10 @@ export function stepSession(memory: SessionMemory, state: SessionSnapshot, t?: T
   const connection = connectionEvent(memory, state, next, t);
   const error = errorEvent(memory, state, next, t);
   const sync = syncEvent(memory, state, next, t);
-  return { memory: next, message: connection ?? error ?? sync };
+  // Only the unsaved-PIN warning outranks "Connected" / "Saved PIN updated", which would be untrue.
+  // It is checked directly: the inline-error rule would hide it on the Connection screen, where the user just typed the PIN.
+  const pinWarning = state.connectionMessage === PIN_NOT_SAVED_SOURCE && memory.connectionMessage !== PIN_NOT_SAVED_SOURCE
+    ? PIN_NOT_SAVED_TEXT(t)
+    : null;
+  return { memory: next, message: pinWarning ?? connection ?? error ?? sync };
 }
