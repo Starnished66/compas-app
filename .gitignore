@@ -47,3 +47,10 @@ yarn-error.*
 **/.gradle/
 **/.cxx/
 local.properties
+
+# Tests are local only.
+__tests__/
+*.test.ts
+*.test.tsx
+/jest.config.js
+modules/*/android/src/test/
