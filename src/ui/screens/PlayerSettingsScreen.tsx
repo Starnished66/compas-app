@@ -91,16 +91,6 @@ export function PlayerSettingsScreen({ state, settingsApi, onClose }: PlayerSett
         ) : null}
         {settings.phase === 'ready' && schema ? (
           <>
-            {!settings.writable ? (
-              <MessageCard
-                variant="surface"
-                title={t('Remote changes are off')}
-                body={t('On the player, open Remote Control and turn on “Allow remote settings changes”. It turns off by itself after 30 minutes.')}
-                actionLabel={t('Check again')}
-                actionVariant="raised"
-                onAction={() => void controller?.refresh()}
-              />
-            ) : null}
             {group ? (
               <SettingGroupPanel
                 schema={schema}

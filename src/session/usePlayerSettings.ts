@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import { useAppActive } from '../ui/useAppActive';
 import { SettingsApi } from '../data/SettingsApi';
-import { PlayerSettingsController, shouldRecheckWritable, PlayerSettingsNotice, PlayerSettingsState } from './PlayerSettingsController';
+import { PlayerSettingsController, PlayerSettingsNotice, PlayerSettingsState } from './PlayerSettingsController';
 
 export interface PlayerSettingsStatus {
   revision?: number | null;
@@ -34,19 +33,6 @@ export function usePlayerSettings(
     controller?.syncFromStatus(status.revision, status.epoch);
   }, [controller, status.revision, status.epoch]);
 
-  const foreground = useAppActive();
-  const recheck = useSyncExternalStore(
-    controller ? controller.subscribe : NO_SUBSCRIBE,
-    () => (controller ? shouldRecheckWritable(controller.getState(), true) : false),
-  );
-  // The "Allow remote settings changes" switch does not move the revision, so look again while it is off,
-  // but only on a loaded screen in the foreground (a rejected PIN must not be resent in the background).
-  useEffect(() => {
-    if (!controller || !recheck || !foreground) return;
-    const timer = setInterval(() => { void controller.refresh(); }, RECHECK_WHILE_LOCKED_MS);
-    return () => clearInterval(timer);
-  }, [controller, recheck, foreground]);
-
   const state = useSyncExternalStore(
     controller ? controller.subscribe : NO_SUBSCRIBE,
     controller ? controller.getState : getUnavailable,
@@ -55,7 +41,6 @@ export function usePlayerSettings(
   return { state, controller };
 }
 
-const RECHECK_WHILE_LOCKED_MS = 10_000;
 const UNAVAILABLE: PlayerSettingsState = {
   phase: 'unsupported', schema: null, values: {}, epoch: 0, revision: 0, writable: false,
   busyKeys: [], pendingApply: {}, rescanBusy: false, error: 'unsupported',

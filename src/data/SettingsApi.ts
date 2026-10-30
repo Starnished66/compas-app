@@ -11,7 +11,6 @@ import {
 
 export type SettingsErrorKind =
   | 'pin_required'
-  | 'switch_off'
   | 'read_only'
   | 'revision_mismatch'
   | 'rescan_running'
@@ -86,7 +85,6 @@ export function mapSettingsError(response: HttpResponse): SettingsApiError {
       : keyErrors.length > 0 && keyErrors.every((e) => e.code === 'read_only') ? 'read_only' : 'validation';
     return new SettingsApiError(kind, status, code, keyErrors);
   }
-  if (status === 423 || code === 'remote_changes_disabled') return new SettingsApiError('switch_off', status, code || 'remote_changes_disabled');
   if (code === 'pin_required' || code === 'header_auth_required' || status === 401) return new SettingsApiError('pin_required', status, code || 'pin_required');
   if (code === 'rescan_running') return new SettingsApiError('rescan_running', status, code);
   if (code === 'settings_busy') return new SettingsApiError('busy', status, code);

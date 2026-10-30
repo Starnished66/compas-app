@@ -15,7 +15,7 @@ export interface PlayerSettingsState {
   values: SettingValues;
   epoch: number;
   revision: number;
-  /** False while the player's "Allow remote settings changes" switch is off. */
+  /** False only if the player reports its settings as read-only (older firmware). */
   writable: boolean;
   /** Keys with a change on its way to the player. */
   busyKeys: readonly string[];
@@ -28,15 +28,9 @@ export interface PlayerSettingsState {
 export type PlayerSettingsNotice =
   | { kind: 'saved'; key: string; apply: string | null }
   | { kind: 'conflict' }
-  | { kind: 'switch_off' }
   | { kind: 'failed'; error: SettingsErrorKind; key?: string }
   | { kind: 'rescan_started' }
   | { kind: 'rescan_running' };
-
-/** The switch does not move the revision, so a loaded read-only screen looks again now and then; no other phase does. */
-export function shouldRecheckWritable(state: Pick<PlayerSettingsState, 'phase' | 'writable'>, foreground: boolean): boolean {
-  return foreground && state.phase === 'ready' && !state.writable;
-}
 
 /** True when raising `key` to `next` crosses the player's loud-volume level and needs a confirmation. */
 export function needsLoudConfirmation(descriptor: SettingDescriptor, current: SettingValue | undefined, next: SettingValue): boolean {
@@ -202,10 +196,6 @@ export class PlayerSettingsController {
       else await this.load();
       this.notify({ kind: 'conflict' });
       return false;
-    } else if (kind === 'switch_off') {
-      this.set({ writable: false });
-      this.notify({ kind: 'switch_off' });
-      return false;
     }
     this.notify({ kind: 'failed', error: kind, key });
     // A busy player or a timeout may still have applied the change: look at what the player has.
@@ -221,7 +211,6 @@ export class PlayerSettingsController {
     } catch (error) {
       const kind: SettingsErrorKind = error instanceof SettingsApiError ? error.kind : 'unknown';
       if (kind === 'rescan_running') this.notify({ kind: 'rescan_running' });
-      else if (kind === 'switch_off') { this.set({ writable: false }); this.notify({ kind: 'switch_off' }); }
       else this.notify({ kind: 'failed', error: kind });
     } finally {
       this.set({ rescanBusy: false });

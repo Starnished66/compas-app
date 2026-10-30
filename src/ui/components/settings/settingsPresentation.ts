@@ -154,7 +154,6 @@ export function noticeText(notice: PlayerSettingsNotice, t: (source: string) => 
   switch (notice.kind) {
     case 'saved': return t(savedNotice(notice.apply));
     case 'conflict': return t('This changed on the player. The list was reloaded; try again.');
-    case 'switch_off': return t('Remote changes were turned off on the player.');
     case 'rescan_started': return t('Music scan started on the player.');
     case 'rescan_running': return t('A music scan is already running.');
     case 'failed':

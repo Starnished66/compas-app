@@ -25,7 +25,7 @@ export interface SettingControlProps {
   setting: SettingDescriptor;
   schema: SettingsSchema;
   values: SettingValues;
-  /** False while the player's "Allow remote settings changes" switch is off: values show but cannot change. */
+  /** False if the player reports its settings as read-only: values show but cannot change. */
   writable: boolean;
   busy: boolean;
   /** Set when the player stored the value but applies it later. */
