@@ -1,5 +1,7 @@
 package com.compas.remote.files
 
+import android.content.Context
+import com.facebook.react.modules.network.OkHttpClientProvider
 import expo.modules.kotlin.exception.CodedException
 import java.io.File
 import java.io.IOException
@@ -14,9 +16,66 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.Callback
 import okhttp3.Response
+import okhttp3.ResponseBody
+import okio.Buffer
 import okio.BufferedSink
+import okio.BufferedSource
+import okio.ForwardingSource
+import okio.buffer
 
 const val PIN_HEADER = "X-Compas-PIN"
+
+/** Install before React Native creates its first NetworkingModule. Keep only the
+ * application context; React reloads and lazy Expo module creation cannot remove guards.
+ */
+object PinSafeHttpInstaller {
+    fun install(context: Context) {
+        val application = context.applicationContext
+        OkHttpClientProvider.setOkHttpClientFactory {
+            OkHttpClientProvider.createClientBuilder(application)
+                .addNetworkInterceptor(refusePinRedirects)
+                .addInterceptor(boundManagementResponses)
+                .build()
+        }
+    }
+}
+
+private const val API_RESPONSE_LIMIT = 1024L * 1024L
+
+/** Bound settings/management replies before React Native buffers them. This is an
+ * application interceptor so the limit also covers transparently inflated gzip bodies.
+ * Artwork, music transfers and update downloads retain their own transfer paths.
+ */
+val boundManagementResponses = Interceptor { chain ->
+    val response = chain.proceed(chain.request())
+    val path = chain.request().url.encodedPath
+    val bounded = listOf("settings", "plugin-store", "plugins", "player-layouts", "capabilities", "status")
+        .any { path == "/api/v1/$it" || path.startsWith("/api/v1/$it/") }
+    val body = response.body
+    if (!bounded || body == null) response else {
+        if (body.contentLength() > API_RESPONSE_LIMIT) {
+            response.close()
+            throw IOException("Player API response exceeds the size limit")
+        }
+        val source = object : ForwardingSource(body.source()) {
+            private var consumed = 0L
+            override fun read(sink: Buffer, byteCount: Long): Long {
+                val count = super.read(sink, minOf(byteCount, API_RESPONSE_LIMIT - consumed + 1))
+                if (count > 0) consumed += count
+                if (consumed > API_RESPONSE_LIMIT) {
+                    close()
+                    throw IOException("Player API response exceeds the size limit")
+                }
+                return count
+            }
+        }.buffer()
+        response.newBuilder().body(object : ResponseBody() {
+            override fun contentType() = body.contentType()
+            override fun contentLength() = body.contentLength()
+            override fun source(): BufferedSource = source
+        }).build()
+    }
+}
 
 /**
  * Network interceptor: sees every hop. A redirect to a request that carries the PIN is handed back as the

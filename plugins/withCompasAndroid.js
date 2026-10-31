@@ -1,4 +1,4 @@
-const { withAndroidManifest, withAppBuildGradle } = require('@expo/config-plugins');
+const { withAndroidManifest, withAppBuildGradle, withMainApplication } = require('@expo/config-plugins');
 
 const RELEASE_SIGNING = `
 // Compas release signing: credentials stay in the build environment, never in generated sources.
@@ -23,6 +23,27 @@ if (compasHasSigning) {
 `;
 
 function withCompasAndroid(config) {
+  config = withMainApplication(config, (config) => {
+    const result = config.modResults;
+    if (result.language !== 'kt') throw new Error('Compás HTTP guards require a Kotlin MainApplication');
+    const importLine = 'import com.compas.remote.files.PinSafeHttpInstaller';
+    const call = 'PinSafeHttpInstaller.install(this)';
+    let contents = result.contents;
+    if (!contents.includes(importLine)) {
+      const packageEnd = contents.search(/\n\s*\n/);
+      if (packageEnd < 0) throw new Error('Could not locate MainApplication package declaration');
+      contents = `${contents.slice(0, packageEnd)}\n${importLine}${contents.slice(packageEnd)}`;
+    }
+    if (!contents.includes(call)) {
+      const onCreate = contents.indexOf('override fun onCreate()');
+      const superCall = onCreate < 0 ? -1 : contents.indexOf('super.onCreate()', onCreate);
+      const lineEnd = superCall < 0 ? -1 : contents.indexOf('\n', superCall);
+      if (lineEnd < 0) throw new Error('Could not locate MainApplication onCreate');
+      contents = `${contents.slice(0, lineEnd + 1)}    ${call}\n${contents.slice(lineEnd + 1)}`;
+    }
+    result.contents = contents;
+    return config;
+  });
   config = withAppBuildGradle(config, (config) => {
     if (!config.modResults.contents.includes('// Compas release signing:')) {
       config.modResults.contents += RELEASE_SIGNING;

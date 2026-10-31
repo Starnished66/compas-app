@@ -9,7 +9,6 @@ import android.os.Build
 import android.os.Environment
 import android.os.storage.StorageManager
 import android.provider.Settings
-import com.facebook.react.modules.network.OkHttpClientProvider
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
@@ -39,22 +38,6 @@ class CompasFilesModule : Module() {
         Name("CompasFiles")
 
         Events("onUploadProgress")
-
-        OnCreate {
-            // JavaScript fetch shares this client; it must never carry the PIN across a redirect.
-            OkHttpClientProvider.setOkHttpClientFactory {
-                // Same builder React Native would have used, plus the redirect guard.
-                val reactContext = appContext.reactContext
-                val builder = if (reactContext != null) OkHttpClientProvider.createClientBuilder(reactContext)
-                else OkHttpClientProvider.createClientBuilder()
-                builder.addNetworkInterceptor(refusePinRedirects).build()
-            }
-        }
-
-        // A reload creates a new module; the old one's app context must not stay behind the factory.
-        OnDestroy {
-            OkHttpClientProvider.setOkHttpClientFactory(null)
-        }
 
         /**
          * Raw-body upload on a client that never follows redirects, so the PIN header stays with the player.
