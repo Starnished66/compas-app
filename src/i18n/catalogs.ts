@@ -1,10 +1,21 @@
-export type Language = 'en' | 'es' | 'de' | 'fr' | 'it' | 'ru';
+import { fi } from './catalogs/fi';
+import { ja } from './catalogs/ja';
+import { nl } from './catalogs/nl';
+import { pt_BR } from './catalogs/pt_BR';
+import { pt_PT } from './catalogs/pt_PT';
+import { uk } from './catalogs/uk';
+import { vi } from './catalogs/vi';
+import { zh_CN } from './catalogs/zh_CN';
+
+export type Language = 'en' | 'es' | 'de' | 'fr' | 'it' | 'ru' | 'fi' | 'ja' | 'nl' | 'pt_BR' | 'pt_PT' | 'uk' | 'vi' | 'zh_CN';
 
 export type TranslationValue = string | Partial<Record<Intl.LDMLPluralRule, string>>;
 
 /** English source strings are deliberately the stable keys used by the UI. */
 export const catalogs: Record<Language, Record<string, TranslationValue>> = {
+  fi, ja, nl, pt_BR, pt_PT, uk, vi, zh_CN,
   en: {
+    'Repeat once': 'Repeat one',
     'Open on player': 'Open on player',
     'Preview': 'Preview',
     'Retry preview': 'Retry preview',
@@ -1841,6 +1852,14 @@ export const LANGUAGE_OPTIONS: ReadonlyArray<{ value: Language | 'system'; label
   { value: 'fr', label: 'Français' },
   { value: 'it', label: 'Italiano' },
   { value: 'ru', label: 'Русский' },
+  { value: 'fi', label: 'Suomi' },
+  { value: 'ja', label: '日本語' },
+  { value: 'nl', label: 'Nederlands' },
+  { value: 'pt_BR', label: 'Português (Brasil)' },
+  { value: 'pt_PT', label: 'Português (Portugal)' },
+  { value: 'uk', label: 'Українська' },
+  { value: 'vi', label: 'Tiếng Việt' },
+  { value: 'zh_CN', label: '简体中文' },
 ];
 
 Object.assign(catalogs.en, {
@@ -2320,7 +2339,7 @@ Object.assign(catalogs.de, {
   'Repeating the queue…': 'Warteschlange wird wiederholt…',
   'Repeating this song…': 'Dieser Titel wird wiederholt…',
   'Repeat off…': 'Wiederholung aus…',
-  'Repeat once': 'Einmal wiederholen',
+  'Repeat once': 'Einen Titel wiederholen',
   'Restarting…': 'Neustart…',
   'Save': 'Speichern',
   'Searching for this player on Wi-Fi…': 'Dieser Player wird im WLAN gesucht…',

@@ -1,6 +1,6 @@
 {
   "name": "compas-app",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "main": "index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -39,7 +39,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:translations": "node scripts/check-translations.cjs"
   },
   "private": true,
   "expo": {
