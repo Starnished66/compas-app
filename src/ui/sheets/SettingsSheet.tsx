@@ -34,6 +34,7 @@ export interface SettingsSheetProps {
   onOpenUpdates: () => void;
   onOpenTransfer: () => void;
   onOpenPlayerSettings?: () => void;
+  onOpenPlugins?: () => void;
 }
 
 const THEME_OPTIONS: ReadonlyArray<SegmentedOption<RemoteTheme>> = [
@@ -44,7 +45,7 @@ const THEME_OPTIONS: ReadonlyArray<SegmentedOption<RemoteTheme>> = [
 
 const CHEVRON_SIZE = 18;
 
-export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnection, onOpenUpdates, onOpenTransfer, onOpenPlayerSettings }: SettingsSheetProps) {
+export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnection, onOpenUpdates, onOpenTransfer, onOpenPlayerSettings, onOpenPlugins }: SettingsSheetProps) {
   const updates = useUpdates();
   const { t, languagePreference, setLanguage } = useI18n();
   const [languageOpen, setLanguageOpen] = useState(false);
@@ -138,6 +139,19 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
                   onOpenTransfer();
                 }}
               />
+              {onOpenPlugins && (state.supportedFeatures.includes('plugin_store') || state.supportedFeatures.includes('plugin_management') || state.supportedFeatures.includes('player_layouts')) ? (
+                <>
+                  <Divider />
+                  <ListRow
+                    variant="action"
+                    title={t('Plugins')}
+                    leading={<Icon name="grid" />}
+                    subtitle={t('Browse plugins and player layouts')}
+                    trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
+                    onPress={() => { onClose(); onOpenPlugins(); }}
+                  />
+                </>
+              ) : null}
               {onOpenPlayerSettings && state.supportedFeatures.includes('settings_v1') ? (
                 <>
                   <Divider />

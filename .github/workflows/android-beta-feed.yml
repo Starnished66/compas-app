@@ -1,0 +1,39 @@
+name: Maintain beta update feed
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  update-beta-feed:
+    if: github.event.release.prerelease == true && startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Verify published prerelease and feed assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/beta-release"
+          gh release view "$RELEASE_TAG" --repo "$REPOSITORY" --json tagName,isPrerelease,isDraft,assets > "$RUNNER_TEMP/beta-release/release.json"
+          gh release download "$RELEASE_TAG" --repo "$REPOSITORY" --pattern android-update.json --pattern SHA256SUMS --dir "$RUNNER_TEMP/beta-release"
+          node scripts/create-beta-update-feed.mjs "$RUNNER_TEMP/beta-release/release.json" "$RUNNER_TEMP/beta-release/android-update.json" "$RUNNER_TEMP/beta-release/SHA256SUMS" "$RUNNER_TEMP/beta-release/android-update.json"
+      - name: Create or update the prerelease beta feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if gh release view updates-beta --repo "$REPOSITORY" --json isPrerelease --jq .isPrerelease > "$RUNNER_TEMP/beta-alias-prerelease" 2>/dev/null; then
+            test "$(cat "$RUNNER_TEMP/beta-alias-prerelease")" = "true"
+            gh release upload updates-beta "$RUNNER_TEMP/beta-release/android-update.json" --repo "$REPOSITORY" --clobber
+          else
+            gh release create updates-beta "$RUNNER_TEMP/beta-release/android-update.json" --repo "$REPOSITORY" --prerelease --title "Compás Remote beta update feed" --notes "Owner-maintained manifest pointing to the latest published beta APK."
+          fi

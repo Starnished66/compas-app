@@ -4152,6 +4152,7 @@ export function useRemoteSession() {
     currentLibraryCategory: currentLibraryCategoryRef.current,
     libraryArtwork,
     playerSettingsApi: () => apiRef.current?.settings() ?? null,
+    playerPluginsApi: () => apiRef.current?.plugins() ?? null,
   };
 }
 

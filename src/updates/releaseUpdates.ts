@@ -1,3 +1,6 @@
+import { Platform } from 'react-native';
+import { fetchAppUpdateManifest } from '../../modules/compas-updates/src';
+
 export const FIRMWARE_RELEASES_API_URL =
   'https://api.github.com/repos/Starnished66/compas-player/releases/latest';
 
@@ -12,9 +15,13 @@ export const SUPPORTED_FIRMWARE_ASSETS = [
 
 export const RELEASE_CHECK_TIMEOUT_MS = 10_000;
 
-/** Application distribution URLs are intentionally unset pending a real feed. */
-export const APP_UPDATE_URL: string | null = null;
-export const APP_RELEASES_API_URL: string | null = null;
+/** Canonical latest-release manifest and app release page. */
+export const APP_UPDATE_URL = 'https://github.com/Starnished66/compas-app/releases/latest/download/android-update.json';
+export const APP_BETA_UPDATE_URL = 'https://github.com/Starnished66/compas-app/releases/download/updates-beta/android-update.json';
+export const APP_RELEASES_API_URL = 'https://github.com/Starnished66/compas-app/releases';
+export const MAX_APPLICATION_APK_SIZE = 268435456;
+const APPLICATION_PACKAGE = 'com.compas.remote';
+export type ApplicationUpdateChannel = 'stable' | 'beta';
 
 export type ReleaseNoticeKind = 'firmware' | 'application';
 
@@ -25,19 +32,20 @@ export interface ReleaseNotice {
   releaseUrl: string;
   publishedAt: string | null;
   releaseId: string;
+  versionCode?: number;
+  size?: number;
+  sha256?: string;
+  minSdk?: number;
+  channel?: ApplicationUpdateChannel;
 }
 
-/**
- * The application updater intentionally has no source or destination yet.
- * Populate these only after a real, supported distribution channel exists.
- */
+/** Stable manifest source. Beta uses the owner-maintained prerelease alias feed. */
 export interface ApplicationUpdateConfig {
-  sourceUrl: string | null;
-  updateUrl: string | null;
+  sourceUrl: string;
 }
 
 export const APPLICATION_UPDATE_CONFIG: Readonly<ApplicationUpdateConfig> =
-  Object.freeze({ sourceUrl: null, updateUrl: null });
+  Object.freeze({ sourceUrl: APP_UPDATE_URL });
 
 type LatestReleasePayload = {
   id: number | string;
@@ -114,6 +122,7 @@ function toFirmwareNotice(payload: unknown): ReleaseNotice | null {
 export async function fetchLatestFirmwareRelease(
   fetchImpl: typeof fetch = fetch,
   timeoutMs = RELEASE_CHECK_TIMEOUT_MS,
+  channel: ApplicationUpdateChannel = 'stable',
 ): Promise<ReleaseNotice | null> {
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -207,26 +216,100 @@ export function isFirmwareReleaseNewer(installed: string | null | undefined, rel
   return compareApplicationVersions(installed.trim(), release) === -1;
 }
 
-/**
- * The app updater remains dormant until both a real feed and destination have
- * been configured. In particular, the default placeholder causes no request.
- */
+/** Read a bounded release manifest and accept only the canonical GitHub asset URL. */
 export async function fetchApplicationUpdateNotice(
   config: Readonly<ApplicationUpdateConfig> = APPLICATION_UPDATE_CONFIG,
-  _fetchImpl: typeof fetch = fetch,
+  fetchImpl?: typeof fetch,
+  installedVersionCode = 0,
+  deviceApiLevel = 0,
+  timeoutMs = RELEASE_CHECK_TIMEOUT_MS,
+  channel: ApplicationUpdateChannel = 'stable',
 ): Promise<ReleaseNotice | null> {
-  if (!config.sourceUrl || !config.updateUrl) return null;
-  // Feed parsing and installation are intentionally unavailable until the
-  // application distribution source is selected and its contract is defined.
-  return null;
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    let text: string;
+    let status: number;
+    if (fetchImpl) {
+      const feedUrl = channel === 'beta' ? APP_BETA_UPDATE_URL : config.sourceUrl;
+      const request = fetchImpl(feedUrl, { method: 'GET', headers: { Accept: 'application/json' }, signal: controller.signal });
+      const timeoutRequest = new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => { controller.abort(); reject(new Error('Application update check timed out')); }, Math.max(1, timeoutMs));
+      });
+      const response = await Promise.race([request, timeoutRequest]);
+      status = response.status;
+      if (status !== 404 && !response.ok) throw new Error(`Application update check failed with HTTP status ${status}`);
+      const declaredLength = Number(response.headers.get('content-length'));
+      if (Number.isFinite(declaredLength) && declaredLength > 16 * 1024) throw new Error('Application update manifest is too large');
+      if (response.body?.getReader) {
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+        while (true) {
+          const { done, value } = await Promise.race([reader.read(), timeoutRequest]);
+          if (done) break;
+          total += value.byteLength;
+          if (total > 16 * 1024) { await reader.cancel(); throw new Error('Application update manifest is too large'); }
+          chunks.push(value);
+        }
+        const bytes = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+        text = new TextDecoder().decode(bytes);
+      } else {
+        text = await Promise.race([response.text(), timeoutRequest]);
+        if (new TextEncoder().encode(text).byteLength > 16 * 1024) throw new Error('Application update manifest is too large');
+      }
+    } else {
+      if (Platform.OS !== 'android') return null;
+      const response = await fetchAppUpdateManifest(channel);
+      status = response.status;
+      text = response.body;
+    }
+    if (status === 404) return null;
+    if (new TextEncoder().encode(text).byteLength > 16 * 1024) throw new Error('Application update manifest is too large');
+    let payload: unknown;
+    try { payload = JSON.parse(text); } catch { throw new Error('Application update manifest is invalid'); }
+    if (!isRecord(payload) || payload.schema !== 1 || payload.packageName !== APPLICATION_PACKAGE ||
+      !isApplicationVersion(payload.version, channel) || !Number.isSafeInteger(payload.versionCode) || (payload.versionCode as number) < 1 || (payload.versionCode as number) > 2147483647 || (payload.versionCode as number) <= installedVersionCode ||
+      !Number.isSafeInteger(payload.minSdk) || (payload.minSdk as number) < 28 || (payload.minSdk as number) > deviceApiLevel ||
+      !Number.isSafeInteger(payload.size) || (payload.size as number) < 1 || (payload.size as number) > MAX_APPLICATION_APK_SIZE ||
+      typeof payload.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(payload.sha256) || typeof payload.url !== 'string' ||
+      payload.url !== `https://github.com/Starnished66/compas-app/releases/download/v${payload.version}/compas-${payload.version}.apk`) return null;
+    return {
+      kind: 'application', title: `Compás Remote ${payload.version}`, version: payload.version as string,
+      releaseUrl: `https://github.com/Starnished66/compas-app/releases/tag/v${payload.version}`,
+      publishedAt: null, releaseId: `v${payload.version}`, versionCode: payload.versionCode as number,
+      size: payload.size as number, sha256: payload.sha256, minSdk: payload.minSdk as number, channel,
+    };
+  } finally { if (timeout !== undefined) clearTimeout(timeout); }
 }
 
-/** Checks the configured sources; the application result stays null today. */
+function isApplicationVersion(value: unknown, channel: ApplicationUpdateChannel): value is string {
+  if (typeof value !== 'string' || value.length > 64) return false;
+  const pattern = channel === 'stable'
+    ? /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
+    : /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))$/;
+  const match = pattern.exec(value);
+  return !!match && match.slice(1, 4).every((part) => Number.isSafeInteger(Number(part)));
+}
+
+/** Check firmware and Android app feeds independently so either can succeed alone. */
 export async function checkReleaseUpdates(
   _installedAppVersion: string,
-  fetchImpl: typeof fetch = fetch,
-): Promise<{ firmware: ReleaseNotice | null; application: ReleaseNotice | null }> {
-  const firmware = await fetchLatestFirmwareRelease(fetchImpl);
-  const application = await fetchApplicationUpdateNotice(APPLICATION_UPDATE_CONFIG, fetchImpl);
-  return { firmware, application };
+  installedVersionCode = 0,
+  deviceApiLevel = 0,
+  fetchImpl?: typeof fetch,
+  applicationChannel: ApplicationUpdateChannel = 'stable',
+): Promise<{ firmware: ReleaseNotice | null; application: ReleaseNotice | null; firmwareError: boolean; applicationError: boolean }> {
+  const [firmwareResult, applicationResult] = await Promise.allSettled([
+    fetchLatestFirmwareRelease(fetchImpl),
+    fetchApplicationUpdateNotice(APPLICATION_UPDATE_CONFIG, fetchImpl, installedVersionCode, deviceApiLevel, RELEASE_CHECK_TIMEOUT_MS, applicationChannel),
+  ]);
+  return {
+    firmware: firmwareResult.status === 'fulfilled' ? firmwareResult.value : null,
+    application: applicationResult.status === 'fulfilled' ? applicationResult.value : null,
+    firmwareError: firmwareResult.status === 'rejected',
+    applicationError: applicationResult.status === 'rejected',
+  };
 }

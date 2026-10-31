@@ -11,6 +11,35 @@ interface CompasUpdatesNativeModule {
   getAppVersion(): AppVersion;
   notificationsEnabled(): boolean;
   notifyRelease(kind: ReleaseKind, version: string, url: string): boolean;
+  canInstallAppUpdates(): boolean;
+  openAppUpdatePermissionSettings(): void;
+  getDeviceApiLevel(): number;
+  installAppUpdate(url: string, sha256: string, versionCode: number, size: number): Promise<void>;
+  fetchAppUpdateManifest(channel: 'stable' | 'beta'): Promise<{ status: number; body: string }>;
+}
+
+export function canInstallAppUpdates(): boolean {
+  try { return getNativeModule()?.canInstallAppUpdates() ?? false; } catch { return false; }
+}
+
+export function openAppUpdatePermissionSettings(): void {
+  getNativeModule()?.openAppUpdatePermissionSettings();
+}
+
+export function getDeviceApiLevel(): number {
+  try { return getNativeModule()?.getDeviceApiLevel() ?? 0; } catch { return 0; }
+}
+
+export async function installAppUpdate(url: string, sha256: string, versionCode: number, size: number): Promise<void> {
+  const module = getNativeModule();
+  if (!module) throw new Error('Application updates are available only on Android.');
+  await module.installAppUpdate(url, sha256, versionCode, size);
+}
+
+export async function fetchAppUpdateManifest(channel: 'stable' | 'beta' = 'stable'): Promise<{ status: number; body: string }> {
+  const module = getNativeModule();
+  if (!module) throw new Error('Application update feed is available only on Android.');
+  return module.fetchAppUpdateManifest(channel);
 }
 
 let nativeModule: CompasUpdatesNativeModule | null = null;

@@ -1,6 +1,34 @@
-const { withAndroidManifest } = require('@expo/config-plugins');
+const { withAndroidManifest, withAppBuildGradle } = require('@expo/config-plugins');
+
+const RELEASE_SIGNING = `
+// Compas release signing: credentials stay in the build environment, never in generated sources.
+def compasStore = System.getenv('COMPAS_ANDROID_KEYSTORE_PATH')
+def compasReleaseRequired = System.getenv('COMPAS_ANDROID_RELEASE') == '1'
+def compasStorePassword = System.getenv('COMPAS_ANDROID_STORE_PASSWORD')
+def compasKeyAlias = System.getenv('COMPAS_ANDROID_KEY_ALIAS')
+def compasKeyPassword = System.getenv('COMPAS_ANDROID_KEY_PASSWORD')
+def compasHasSigning = compasStore && compasStorePassword && compasKeyAlias && compasKeyPassword
+if (compasReleaseRequired && !compasHasSigning) {
+    throw new GradleException('Release signing credentials are required for a distributed Compas APK')
+}
+if (compasHasSigning) {
+    android.signingConfigs.create('compasRelease') {
+        storeFile file(compasStore)
+        storePassword compasStorePassword
+        keyAlias compasKeyAlias
+        keyPassword compasKeyPassword
+    }
+    android.buildTypes.release.signingConfig = android.signingConfigs.compasRelease
+}
+`;
 
 function withCompasAndroid(config) {
+  config = withAppBuildGradle(config, (config) => {
+    if (!config.modResults.contents.includes('// Compas release signing:')) {
+      config.modResults.contents += RELEASE_SIGNING;
+    }
+    return config;
+  });
   return withAndroidManifest(config, async (config) => {
     const androidManifest = config.modResults.manifest;
 

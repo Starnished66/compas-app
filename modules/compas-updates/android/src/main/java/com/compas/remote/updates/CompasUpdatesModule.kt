@@ -9,10 +9,15 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.Promise
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val CHANNEL_ID = "compas-updates"
 private const val CHANNEL_NAME = "Compás Updates"
@@ -21,12 +26,50 @@ private const val APPLICATION_NOTIFICATION_ID = 9402
 private const val MAX_VERSION_LENGTH = 64
 
 class CompasUpdatesModule : Module() {
+    private val installInFlight = AtomicBoolean(false)
     private val context: Context
         get() = appContext.reactContext?.applicationContext
             ?: throw IllegalStateException("React context is unavailable")
 
     override fun definition() = ModuleDefinition {
         Name("CompasUpdates")
+
+        AsyncFunction("fetchAppUpdateManifest") { channel: String, promise: Promise ->
+            Thread({
+                try { promise.resolve(AppUpdateInstaller.fetchManifest(channel)) }
+                catch (error: Exception) { promise.reject("ERR_UPDATE_CHECK", error.message, error) }
+            }, "compas-app-update-check").start()
+        }
+
+        Function("getDeviceApiLevel") { Build.VERSION.SDK_INT }
+        Function("canInstallAppUpdates") { context.packageManager.canRequestPackageInstalls() }
+        Function("openAppUpdatePermissionSettings") {
+            context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+        AsyncFunction("installAppUpdate") { url: String, hash: String, versionCode: Long, size: Long, promise: Promise ->
+            val application = context
+            if (!application.packageManager.canRequestPackageInstalls()) {
+                promise.reject("ERR_INSTALL_PERMISSION", "Allow application updates in Android Settings, then retry.", null)
+            } else if (!installInFlight.compareAndSet(false, true)) {
+                promise.reject("ERR_UPDATE_BUSY", "An application update is already being prepared.", null)
+            } else {
+                // Request-scoped worker: no service, wake lock or idle thread is retained.
+                Thread({
+                    try {
+                        val file = AppUpdateInstaller.prepare(application, url, hash, versionCode, size)
+                        Handler(Looper.getMainLooper()).post {
+                            try { AppUpdateInstaller.openInstaller(application, file); promise.resolve() }
+                            catch (error: Exception) { promise.reject("ERR_UPDATE_INSTALL", error.message, error) }
+                            finally { installInFlight.set(false) }
+                        }
+                    } catch (error: Exception) {
+                        installInFlight.set(false)
+                        promise.reject("ERR_UPDATE_INSTALL", error.message, error)
+                    }
+                }, "compas-app-update").start()
+            }
+        }
 
         Function("getAppVersion") {
             val packageManager = context.packageManager
@@ -123,7 +166,8 @@ class CompasUpdatesModule : Module() {
 
     private fun isTrustedReleaseUrl(url: String, repository: String, version: String): Boolean {
         if (url.length > 512) return false
-        val expectedPath = "/Starnished66/$repository/releases/tag/$version"
+        val tag = if (repository == "compas-app") "v${version.removePrefix("v")}" else version
+        val expectedPath = "/Starnished66/$repository/releases/tag/$tag"
         val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
         return uri.scheme == "https" &&
             uri.host == "github.com" &&

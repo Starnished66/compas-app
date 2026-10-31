@@ -24,6 +24,9 @@ const FEATURE_LABELS: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'playlist_import', label: 'Import playlist files' },
   { id: 'player_accent', label: 'Player accent color' },
   { id: 'device_info', label: 'Device information' },
+  { id: 'plugin_store', label: 'Plugin store' },
+  { id: 'plugin_management', label: 'Plugin management' },
+  { id: 'player_layouts', label: 'Player layouts' },
 ];
 
 const FEATURE_ICON_SIZE = 16;

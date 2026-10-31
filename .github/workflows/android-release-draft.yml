@@ -1,0 +1,72 @@
+name: Android signed release draft
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate release version before building
+        run: node scripts/validate-android-release-tag.mjs "$GITHUB_REF_NAME"
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Install Android SDK packages and accept licenses
+        run: |
+          set +o pipefail
+          yes | sdkmanager --licenses
+          set -o pipefail
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "ndk;27.1.12297006"
+      - name: Generate Android project
+        env:
+          COMPAS_ANDROID_RELEASE: '1'
+        run: npx expo prebuild --platform android --no-install
+      - name: Configure Android signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/compas-release.jks"
+          chmod 600 "$RUNNER_TEMP/compas-release.jks"
+          echo "COMPAS_ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/compas-release.jks" >> "$GITHUB_ENV"
+      - name: Build signed release APK
+        env:
+          COMPAS_ANDROID_RELEASE: '1'
+          COMPAS_ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          COMPAS_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          COMPAS_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd android
+          ./gradlew assembleRelease --max-workers=2 -Dorg.gradle.jvmargs='-Xmx3g -XX:MaxMetaspaceSize=1g'
+      - name: Create manifest and checksums
+        run: |
+          mkdir -p release-assets
+          cp android/app/build/outputs/apk/release/app-release.apk "release-assets/compas-${GITHUB_REF_NAME#v}.apk"
+          node scripts/create-android-update-manifest.mjs "release-assets/compas-${GITHUB_REF_NAME#v}.apk" "$GITHUB_REF_NAME"
+          mv android-update.json SHA256SUMS release-assets/
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            gh release create "$GITHUB_REF_NAME" release-assets/* --draft --prerelease --title "$GITHUB_REF_NAME" --notes "Signed Android beta release draft. Review the APK and generated update manifest before publishing."
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* --draft --title "$GITHUB_REF_NAME" --notes "Signed Android release draft. Review the APK and generated update manifest before publishing."
+          fi
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/compas-release.jks"

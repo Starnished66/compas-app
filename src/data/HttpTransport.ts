@@ -218,7 +218,9 @@ export class FetchHttpTransport implements HttpTransport, ArtworkPreemptibleTran
       const res = await fetch(this.urlFor(request), {
         method: request.method,
         headers: request.headers,
-        body: request.body ? new Blob([request.body as Uint8Array<ArrayBuffer>]) : undefined,
+        // React Native's Blob implementation rejects ArrayBufferView parts. Pass
+        // a concrete ArrayBuffer, copying the view so subarray offsets are kept.
+        body: request.body ? new Uint8Array(request.body).buffer : undefined,
         redirect: 'manual',
         signal,
       });

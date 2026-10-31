@@ -27,6 +27,7 @@ import {
 } from './types';
 import type { NativeUploadProgress } from './nativeFileUpload';
 import { SettingsApi } from './SettingsApi';
+import { PluginsApi } from './PluginsApi';
 import {
   HttpTransport,
   HttpRequest,
@@ -172,10 +173,16 @@ export class RemoteApi {
   }
 
   private settingsClient: SettingsApi | null = null;
+  private pluginsClient: PluginsApi | null = null;
 
   /** Client for the player's remote settings; shares this connection's transport and follows PIN changes. */
   settings(): SettingsApi {
     return (this.settingsClient ??= new SettingsApi(this.transport, () => this.pin));
+  }
+
+  /** Client for plugin management; shares the connection transport and follows PIN changes. */
+  plugins(): PluginsApi {
+    return (this.pluginsClient ??= new PluginsApi(this.transport, () => this.pin));
   }
 
   preemptArtworkRequest(index?: number): void {
