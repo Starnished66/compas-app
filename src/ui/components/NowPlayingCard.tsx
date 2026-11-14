@@ -28,6 +28,7 @@ import { SLIDER_THUMB_OVERHANG } from './Slider';
 import { TransportControls } from './TransportControls';
 import { VolumeRow } from './VolumeRow';
 import { useI18n } from '../../i18n';
+import { useDisplayTrack } from '../useDisplayTrack';
 
 export interface NowPlayingCardProps {
   state: RemoteUiState;
@@ -69,7 +70,8 @@ export function NowPlayingCard({
   const liveOpacity = useOpacityTransition(dimmed, DIMMED_OPACITY, DIM_DURATION);
   const metaOpacity = useOpacityTransition(commands.skipping, SKIPPING_META_OPACITY, DIM_DURATION);
   const canFavorite = state.supportedFeatures.includes('favorites_edit');
-  const subtitle = track.artist || t('Unknown artist');
+  const shown = useDisplayTrack(track, state.dacMode, state.isPlaying) ?? track;
+  const subtitle = shown.artist || t('Unknown artist');
   const pending = commands.pendingLabel !== null;
   const showCollapsedProgress = compact && !pending;
 
@@ -78,6 +80,7 @@ export function NowPlayingCard({
     onPrevious: commands.previous,
     onNext: commands.next,
     pending,
+    disabled: commands.disabled,
   };
 
   return (
@@ -126,14 +129,14 @@ export function NowPlayingCard({
 
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`${track.title}, ${subtitle}`}
+            accessibilityLabel={`${shown.title}, ${subtitle}`}
             onPress={onOpenNowPlaying}
             style={styles.meta}
           >
             <Animated.View style={[styles.metaText, { opacity: metaOpacity }]}>
               <Animated.View style={[styles.metaText, metaStyle]}>
                 <AppText variant="headline" numberOfLines={compact ? 1 : 2}>
-                  {track.title}
+                  {shown.title}
                 </AppText>
                 <AppText variant="body" tone="inkMuted" numberOfLines={1}>
                   {subtitle}
@@ -154,7 +157,7 @@ export function NowPlayingCard({
 
           <Reanimated.View style={[styles.clip, animated.favorite]} pointerEvents={compact ? 'none' : 'box-none'}>
             {canFavorite ? (
-              <FavoriteButton favorite={state.currentFavorite} onChange={commands.setFavorite} />
+              <FavoriteButton favorite={state.currentFavorite} onChange={commands.setFavorite} disabled={commands.disabled} />
             ) : null}
           </Reanimated.View>
 
@@ -183,6 +186,7 @@ export function NowPlayingCard({
           <SeekBar
             playing={state.isPlaying}
             onSeek={commands.seek}
+            disabled={commands.disabled}
             pendingLabel={commands.pendingLabel}
             collapse={collapse}
           />
@@ -195,6 +199,7 @@ export function NowPlayingCard({
             {...transportCallbacks}
             onToggleShuffle={commands.toggleShuffle}
             onCycleRepeat={commands.cycleRepeat}
+            disabled={commands.disabled}
             style={styles.fullTransport}
           />
         </Reanimated.View>

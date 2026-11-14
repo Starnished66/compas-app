@@ -61,6 +61,7 @@ export interface CollectionJob {
 }
 
 export interface PlaybackStatus {
+  dacMode?: 'none' | 'bluetooth' | 'usb';
   playing: boolean;
   paused: boolean;
   title: string;
@@ -302,6 +303,7 @@ export interface WifiPlayer {
 }
 
 export interface RemoteUiState {
+  dacMode?: 'none' | 'bluetooth' | 'usb';
   connectionAttemptTransport?: ConnectionTransport | null;
   collectionBusy?: boolean;
   librarySorting?: LibrarySortingSnapshot | null;

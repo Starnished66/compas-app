@@ -9,6 +9,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { IconButton } from '../components/IconButton';
 import { InlineError } from '../components/InlineError';
 import { QueueNowPlayingCard } from '../components/QueueNowPlayingCard';
+import { useDisplayTrack } from '../useDisplayTrack';
 import { DragHandle } from '../components/DragHandle';
 import { DragReorderCell } from '../components/DragReorderCell';
 import { DragReorderCellContext } from '../components/dragReorderCellContext';
@@ -139,6 +140,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
   useEffect(() => { if (!visible) setSelectedIds(new Set()); }, [visible]);
   const lastPageRequest = useRef('');
   const firstRow = useRef<RemovableRowHandle | null>(null);
+  const nowPlaying = useDisplayTrack(state.currentTrack, state.dacMode, state.isPlaying);
   const canEditQueue = state.supportedFeatures.includes('queue_edit');
   const queueRemovalRunning = state.bulkActionProgress?.action === 'queueRemove' && state.bulkActionProgress.phase === 'writing';
   const bulkJobRunning = state.bulkActionProgress?.phase === 'resolving' || state.bulkActionProgress?.phase === 'writing';
@@ -341,9 +343,9 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
       </View>
       {queueRemovalRunning ? <View style={styles.progress}><AppText>{t('{completed} of {total} processed', { completed: state.bulkActionProgress?.completed ?? 0, total: state.bulkActionProgress?.total ?? 0 })}</AppText><Button label={t('Stop')} variant="plain" onPress={() => onAction({ type: 'CancelBulkAction' })} /></View> : null}
       {queueRemovalFinished ? <View style={styles.progress}><AppText>{state.bulkActionProgress?.message ? t(state.bulkActionProgress.message, state.bulkActionProgress.messageValues) : null}</AppText><Button label={t('Done')} variant="plain" onPress={() => setDismissedBulkStatus(true)} /></View> : null}
-      {state.currentTrack ? (
+      {nowPlaying ? (
         <QueueNowPlayingCard
-          track={state.currentTrack}
+          track={nowPlaying}
           isPlaying={state.isPlaying}
           style={styles.nowPlaying}
         />

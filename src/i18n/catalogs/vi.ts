@@ -2,6 +2,12 @@ import type { TranslationValue } from '../catalogs';
 
 // Machine-assisted translation, reviewed for audio terminology and interpolation.
 export const vi: Record<string, TranslationValue> = {
+  "USB DAC": "USB DAC",
+  "Bluetooth DAC": "Bluetooth DAC",
+  "Waiting for USB audio": "Đang chờ âm thanh USB",
+  "Receiving USB audio": "Đang nhận âm thanh USB",
+  "Waiting for Bluetooth audio": "Đang chờ âm thanh Bluetooth",
+  "Receiving Bluetooth audio": "Đang nhận âm thanh Bluetooth",
   "Open on player": "Mở trên trình phát",
   "Preview": "Xem trước",
   "Retry preview": "Thử xem trước lại",

@@ -8,8 +8,10 @@ import { trackKey } from './trackKey';
 import { usePlaybackPositionStore } from './usePlaybackPosition';
 import { isShuffleMode, toggleRepeatMode } from '../session/playbackModes';
 import { useI18n } from '../i18n';
+import { dacControlsDisabled } from '../data/dacMode';
 
 export interface PlayerCommands {
+  disabled: boolean;
   pendingLabel: string | null;
   skipping: boolean;
   togglePlayback(): void;
@@ -73,6 +75,7 @@ export function usePlayerCommands(state: RemoteUiState, onAction: (action: Remot
 
   const commands = useMemo(() => {
     const run = (action: RemoteAction, label: string, options: Omit<PendingCommand, 'id' | 'label'> = { skipping: false }) => {
+      if (dacControlsDisabled(latest.current.state.dacMode)) return;
       counter.current += 1;
       setPending({ id: counter.current, label: latest.current.t(label), ...options });
       latest.current.watchResult();
@@ -132,5 +135,5 @@ export function usePlayerCommands(state: RemoteUiState, onAction: (action: Remot
     };
   }, []);
 
-  return { ...commands, pendingLabel: pending?.label ?? null, skipping: Boolean(pending?.skipping) };
+  return { ...commands, disabled: dacControlsDisabled(state.dacMode), pendingLabel: pending?.label ?? null, skipping: Boolean(pending?.skipping) };
 }

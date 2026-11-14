@@ -10,6 +10,7 @@ export interface Capabilities {
 }
 
 export interface PlaybackStatus {
+  dacMode?: 'none' | 'bluetooth' | 'usb';
   playing: boolean;
   paused: boolean;
   title: string;

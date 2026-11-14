@@ -40,7 +40,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "check:translations": "node scripts/check-translations.cjs"
+    "check:translations": "node scripts/check-translations.cjs",
+    "test:dac-mode": "node scripts/test-dac-mode.cjs"
   },
   "private": true,
   "expo": {

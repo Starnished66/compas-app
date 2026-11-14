@@ -2,9 +2,11 @@ import { useEffect } from 'react';
 import { clearMediaState, updateMediaState } from '../../modules/compas-media-session/src/index';
 import { ConnectionStatus, RemoteUiState } from '../data/types';
 import { PlaybackPositionStore } from './PlaybackPositionStore';
+import { useDisplayTrack } from '../ui/useDisplayTrack';
 
 export function useMediaSessionSync(state: RemoteUiState, positionStore: PlaybackPositionStore): void {
-  const { connectionStatus, currentTrack, isPlaying, volume, playerName } = state;
+  const { connectionStatus, isPlaying, volume, playerName } = state;
+  const currentTrack = useDisplayTrack(state.currentTrack, state.dacMode, isPlaying);
 
   useEffect(() => {
     if (connectionStatus === ConnectionStatus.Disconnected) {

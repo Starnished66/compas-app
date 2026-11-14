@@ -10,6 +10,7 @@ import { MiniPlayer } from './MiniPlayer';
 import { ChromeInset, MiniPlayerBottom, TabBarRightInset } from './bottomChromeLayout';
 import { useScreenInsets } from '../useScreenInsets';
 import { insetBeyond } from '../insetBeyond';
+import { useDisplayTrack } from '../useDisplayTrack';
 
 export interface AppChromeProps {
   state: RemoteUiState;
@@ -25,6 +26,7 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
   const { expand, requestScrollToTop } = useChromeState();
   const insets = useScreenInsets();
   const { preference: progressPreference } = useMiniProgressPreference();
+  const miniTrack = useDisplayTrack(state.currentTrack, state.dacMode, state.isPlaying);
 
   const selectTab = (tab: TabKey) => {
     if (tab === activeTab) {
@@ -40,10 +42,10 @@ export function AppChrome({ state, onAction, activeTab, showMiniPlayer, onSelect
       style={[StyleSheet.absoluteFill, { bottom: insetBeyond(insets.bottom, ChromeInset) }]}
       pointerEvents="box-none"
     >
-      {showMiniPlayer && state.currentTrack ? (
+      {showMiniPlayer && miniTrack ? (
         <View style={styles.miniPlayer} pointerEvents="box-none">
           <MiniPlayer
-            track={state.currentTrack}
+            track={miniTrack}
             isPlaying={state.isPlaying}
             progressStyle={resolveMiniProgressStyle(progressPreference, state.playbackMode)}
             onOpen={onOpenNowPlaying}

@@ -25,6 +25,7 @@ import {
   WifiImportFileEntry,
   WifiImportUploadResult,
 } from './types';
+import { parseDacMode } from './dacMode';
 import type { NativeUploadProgress } from './nativeFileUpload';
 import { SettingsApi } from './SettingsApi';
 import { PluginsApi } from './PluginsApi';
@@ -295,7 +296,9 @@ export class RemoteApi {
 
   async status(): Promise<PlaybackStatus> {
     const json = await this.jsonGet(`${this.prefix}/status`);
+    const dacMode = parseDacMode(json.dac_mode, json.bluetooth_dac_mode);
     return {
+      dacMode,
       playing: jsonBoolean(json.playing),
       paused: jsonBoolean(json.paused),
       title: String(json.title || ''),

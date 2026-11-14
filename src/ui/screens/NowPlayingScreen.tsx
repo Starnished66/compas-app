@@ -42,6 +42,7 @@ import { useTrackChangeMotion } from '../useTrackChangeMotion';
 import { useScreenInsets } from '../useScreenInsets';
 import { insetBeyond } from '../insetBeyond';
 import { useI18n } from '../../i18n';
+import { useDisplayTrack } from '../useDisplayTrack';
 import {
   shouldCommitNowPlayingGestureClose,
   shouldDismissNowPlaying,
@@ -82,6 +83,7 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
   const artScale = useRef(new RNAnimated.Value(state.isPlaying ? 1 : PAUSED_ART_SCALE)).current;
 
   const track = state.currentTrack;
+  const shown = useDisplayTrack(track, state.dacMode, state.isPlaying);
   const lastVisibleArtwork = useRef(track?.artwork ?? null);
   if (visible) lastVisibleArtwork.current = track?.artwork ?? null;
   const reconnecting = isReconnecting(state);
@@ -268,7 +270,7 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
   };
 
   const artSize = Math.max(0, Math.min(artArea.width, artArea.height - ART_TOP_PADDING));
-  const subtitle = track ? [track.artist || t('Unknown artist'), track.album].filter(Boolean).join(' · ') : '';
+  const subtitle = shown ? [shown.artist || t('Unknown artist'), shown.album].filter(Boolean).join(' · ') : '';
   const canFavorite = state.supportedFeatures.includes('favorites_edit');
 
   const onArtAreaLayout = (event: LayoutChangeEvent) => {
@@ -331,7 +333,7 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
                 <RNAnimated.View style={[styles.meta, { opacity: metaOpacity }]}>
                   <RNAnimated.View style={[styles.metaText, metaStyle]}>
                     <AppText variant="title" numberOfLines={2} accessibilityRole="header">
-                      {track?.title ?? t('Nothing playing')}
+                      {shown?.title ?? t('Nothing playing')}
                     </AppText>
                     {subtitle ? (
                       <AppText variant="body" tone="inkMuted" numberOfLines={1}>
@@ -344,6 +346,7 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
                   <FavoriteButton
                     favorite={state.currentFavorite}
                     onChange={commands.setFavorite}
+                    disabled={commands.disabled}
                     style={FAVORITE_PULL}
                   />
                 ) : null}
@@ -352,6 +355,7 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
               <SeekBar
                 playing={visible && state.isPlaying}
                 onSeek={commands.seek}
+                disabled={commands.disabled}
                 pendingLabel={commands.pendingLabel}
               />
             </View>
@@ -360,6 +364,7 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
               isPlaying={state.isPlaying}
               playbackMode={state.playbackMode}
               pending={commands.pendingLabel !== null}
+              disabled={commands.disabled}
               onTogglePlayback={commands.togglePlayback}
               onPrevious={commands.previous}
               onNext={commands.next}

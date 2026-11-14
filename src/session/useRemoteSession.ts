@@ -85,6 +85,7 @@ import { loadServerOrderedAlbumGroups } from './librarySorting';
 import { playlistNameIssue } from '../ui/playlistName';
 import { withPolledPlayback } from './polledPlayback';
 import { useMediaSessionSync } from './useMediaSessionSync';
+import { isDacActive } from '../data/dacMode';
 import { BluetoothRequestPolicy } from './BluetoothRequestPolicy';
 import {
   BluetoothTransport,
@@ -203,6 +204,7 @@ export function useRemoteSession() {
     pinError: null,
     pinRetryDelaySeconds: 0,
     currentTrack: null,
+    dacMode: 'none',
     isPlaying: false,
     volume: 0.68,
     playbackMode: PlaybackMode.RepeatAll,
@@ -926,7 +928,7 @@ export function useRemoteSession() {
       const mode =
         fromNumeric(status.playMode, featureSetRef.current.has('shuffle_modes'));
 
-      const track: RemoteTrack | null = status.title
+      const track: RemoteTrack | null = status.title || isDacActive(status.dacMode)
         ? {
             id: 'now_playing',
             title: status.title,
@@ -959,6 +961,7 @@ export function useRemoteSession() {
         pinError: null,
         pinRetryDelaySeconds: 0,
         isPlaying: status.playing,
+        dacMode: status.dacMode ?? 'none',
         volume: normalizedVolume(status.volume),
         playbackMode: mode,
         currentFavorite: !!status.favorite,
@@ -1603,7 +1606,7 @@ export function useRemoteSession() {
         const artworkUri = status.title ? nowPlayingArtwork.sync(status, artworkRequest) ?? undefined : undefined;
 
         const hasTrackMetadata = !!(status.title || status.artist || status.album);
-        const nextTrack: RemoteTrack | null = status.title
+        const nextTrack: RemoteTrack | null = status.title || isDacActive(status.dacMode)
           ? {
               id: 'now_playing',
               title: status.title,
@@ -1676,6 +1679,8 @@ export function useRemoteSession() {
           playbackMode: mode,
           currentFavorite: !!status.favorite,
         }));
+        setState((prev) => prev.dacMode === (status.dacMode ?? 'none')
+          ? prev : { ...prev, dacMode: status.dacMode ?? 'none' });
         setState((prev) => {
           const playerAccentColor = featureSetRef.current.has('player_accent') ? status.accentColor ?? null : null;
           const deviceModel = featureSetRef.current.has('device_info') ? status.deviceModel ?? null : null;
@@ -1940,8 +1945,9 @@ export function useRemoteSession() {
         connectionTransport: ConnectionTransport.Wifi,
         connectionMessage: null,
         isPlaying: status.playing && !status.paused,
+        dacMode: status.dacMode ?? 'none',
         volume: normalizedVolume(status.volume),
-        currentTrack: status.title ? {
+        currentTrack: status.title || isDacActive(status.dacMode) ? {
           id: 'now_playing',
           title: status.title,
           artist: status.artist,
@@ -1957,7 +1963,7 @@ export function useRemoteSession() {
         deviceModel: caps.features.includes('device_info') ? status.deviceModel ?? null : null,
         playerVersion: caps.features.includes('device_info') ? status.playerVersion ?? null : null,
       }));
-      currentTrackRef.current = status.title ? {
+      currentTrackRef.current = status.title || isDacActive(status.dacMode) ? {
         id: 'now_playing',
         title: status.title,
         artist: status.artist,
