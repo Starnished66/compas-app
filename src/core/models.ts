@@ -9,23 +9,6 @@ export interface Capabilities {
   features: string[];
 }
 
-export interface PlaybackStatus {
-  dacMode?: 'none' | 'bluetooth' | 'usb';
-  playing: boolean;
-  paused: boolean;
-  title: string;
-  artist: string;
-  album: string;
-  positionSeconds: number;
-  durationSeconds: number;
-  volume: number; // 0.0 to 1.0
-  playMode: number; // 0: sequential, 1: repeat all, 2: repeat one, 3: shuffle
-  codec?: string;
-  sourceBitDepth?: number;
-  sourceSampleRateHz?: number;
-  bluetoothAudioOutput?: boolean | null;
-}
-
 export interface Song {
   index: number;
   title: string;
