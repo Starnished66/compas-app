@@ -563,7 +563,6 @@ export const ja: Record<string, TranslationValue> = {
     "other": "{count}つのフォルダー"
   },
   "Preparing files…": "ファイルを準備しています…",
-  "Send to {folder}": "{folder} に送信します",
   "Transfer files": "ファイルを転送する",
   "File transfer works when connected over Wi-Fi.": "ファイル転送は Wi-Fi 経由で接続すると機能します。",
   "Send music from this device to the player SD card": "このデバイスからプレーヤーの SD カードに音楽を送信します",
@@ -852,5 +851,9 @@ export const ja: Record<string, TranslationValue> = {
   "Power": "電源",
   "Playback": "再生",
   "Connections": "接続",
-  "Update Music Database": "音楽データベースを更新"
+  "Update Music Database": "音楽データベースを更新",
+  "Save to folder": "保存先フォルダ",
+  "Save here": "ここに保存",
+  "Upload": "アップロード",
+  "Retry": "再試行"
 };

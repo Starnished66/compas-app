@@ -608,7 +608,6 @@ export const uk: Record<string, TranslationValue> = {
     "other": "{count} папки"
   },
   "Preparing files…": "Підготовка файлів…",
-  "Send to {folder}": "Надіслати до {folder}",
   "Transfer files": "Передача файлів",
   "File transfer works when connected over Wi-Fi.": "Передача файлів працює при підключенні через Wi-Fi.",
   "Send music from this device to the player SD card": "Надсилайте музику з цього пристрою на SD-карту плеєра",
@@ -912,5 +911,9 @@ export const uk: Record<string, TranslationValue> = {
   "Power": "Живлення",
   "Playback": "Відтворення",
   "Connections": "Підключення",
-  "Update Music Database": "Оновити музичну базу даних"
+  "Update Music Database": "Оновити музичну базу даних",
+  "Save to folder": "Зберегти в папку",
+  "Save here": "Зберегти тут",
+  "Upload": "Завантажити",
+  "Retry": "Спробувати знову"
 };

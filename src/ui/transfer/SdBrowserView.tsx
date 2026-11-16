@@ -1,0 +1,94 @@
+import React, { useEffect, useMemo } from 'react';
+import { FlatList, ScrollView, StyleSheet, View } from 'react-native';
+import { WifiImportFileEntry } from '../../data/types';
+import { useI18n } from '../../i18n';
+import { formatBytes, sdBreadcrumb, sdParent } from '../../session/transferPlan';
+import { AppText } from '../components/AppText';
+import { Button } from '../components/Button';
+import { Icon } from '../components/Icon';
+import { IconButton } from '../components/IconButton';
+import { InlineError } from '../components/InlineError';
+import { ListRow } from '../components/ListRow';
+import { Spinner } from '../components/Spinner';
+import { TextField } from '../components/TextField';
+import { Space } from '../tokens';
+import { SdBrowser } from './useSdBrowser';
+
+interface Props {
+  browser: SdBrowser;
+  canBrowse: boolean;
+  canMutate: boolean;
+  foldersOnly?: boolean;
+  onEntryActions?: (entry: WifiImportFileEntry) => void;
+}
+
+export function SdBrowserError({ browser, canBrowse }: Pick<Props, 'browser' | 'canBrowse'>) {
+  const { t } = useI18n();
+  if (!browser.error) return null;
+  return (
+    <View style={styles.message}>
+      <InlineError message={browser.error} />
+      {browser.canRetry && !browser.editing ? (
+        <Button size="sm" variant="plain" label={t('Retry')} disabled={!canBrowse || browser.loading}
+          onPress={() => void browser.retry()} />
+      ) : null}
+    </View>
+  );
+}
+
+export function SdBrowserView({ browser, canBrowse, canMutate, foldersOnly, onEntryActions }: Props) {
+  const { t } = useI18n();
+  const parent = sdParent(browser.path);
+  const locked = !canBrowse || browser.loading || !!browser.editing;
+  const mutationsLocked = locked || !canMutate;
+  const entries = useMemo(() => foldersOnly ? browser.entries.filter((entry) => entry.isDirectory) : browser.entries, [browser.entries, foldersOnly]);
+  const more = () => { if (!locked && browser.nextOffset !== null) void browser.load(browser.path, true); };
+  // A page may contain only files. Continue until folders or the end are reached.
+  useEffect(() => {
+    if (foldersOnly && canBrowse && !browser.loading && !browser.editing && !browser.error && browser.loaded && entries.length === 0 && browser.nextOffset !== null) {
+      void browser.load(browser.path, true);
+    }
+  }, [foldersOnly, canBrowse, browser.loading, browser.editing, browser.error, browser.loaded, browser.nextOffset, browser.path, browser.load, entries.length]);
+  return (
+    <View style={styles.flex}>
+      <View style={styles.row}>
+        <IconButton icon="chevronLeft" label={t('Up')} size="sm" disabled={parent === null || locked} onPress={() => parent !== null && void browser.load(parent)} />
+        <ScrollView horizontal style={styles.flex}>
+          <AppText variant="bodyStrong">{sdBreadcrumb(browser.path, t('Player SD card'))}</AppText>
+        </ScrollView>
+        {browser.loading ? <Spinner /> : null}
+        <IconButton icon="plus" label={t('New folder')} size="sm" disabled={mutationsLocked || !browser.loaded} onPress={() => { browser.setEditing({ kind: 'mkdir' }); browser.setEditValue(''); }} />
+        <IconButton icon="refresh" label={t('Refresh')} size="sm" disabled={locked} onPress={() => void browser.load(browser.path)} />
+      </View>
+      {browser.editing ? (
+        <View style={styles.row}>
+          <View style={styles.flex}>
+            <TextField value={browser.editValue} onChangeText={browser.setEditValue} autoFocus autoCapitalize="none"
+              placeholder={browser.editing.kind === 'mkdir' ? t('Folder name') : t('New name')}
+              accessibilityLabel={browser.editing.kind === 'mkdir' ? t('Folder name') : t('New name')}
+              onSubmitEditing={() => canBrowse && canMutate && void browser.saveEdit()} />
+          </View>
+          <Button size="sm" label={browser.editing.kind === 'mkdir' ? t('Create') : t('Save')} disabled={!canBrowse || !canMutate || !browser.editValue.trim() || browser.loading} onPress={() => void browser.saveEdit()} />
+          <Button size="sm" variant="plain" label={t('Cancel')} disabled={browser.loading} onPress={() => browser.setEditing(null)} />
+        </View>
+      ) : null}
+      <SdBrowserError browser={browser} canBrowse={canBrowse} />
+      <FlatList data={entries} keyExtractor={(entry) => entry.path} style={styles.flex} keyboardShouldPersistTaps="handled"
+        onEndReached={foldersOnly && !browser.error ? more : undefined}
+        ListEmptyComponent={browser.loaded && !browser.loading && !browser.error && browser.nextOffset === null ? <AppText variant="caption" tone="inkMuted" style={styles.message}>{t('This folder is empty.')}</AppText> : null}
+        ListFooterComponent={browser.nextOffset !== null ? <Button size="sm" variant="plain" label={t('Load more')} disabled={locked} onPress={more} /> : null}
+        renderItem={({ item }) => (
+          <ListRow title={item.name} accessibilityLabel={item.name} subtitle={item.isDirectory ? t('Folder') : formatBytes(item.size)}
+            leading={<Icon name={item.isDirectory ? 'folder' : 'file'} />} disabled={locked}
+            trailing={onEntryActions ? <IconButton icon="moreHorizontal" label={t('More options for {name}', { name: item.name })} size="sm" disabled={mutationsLocked} onPress={() => onEntryActions(item)} /> : undefined}
+            onPress={item.isDirectory ? () => void browser.load(item.path) : undefined}
+            onLongPress={onEntryActions && !mutationsLocked ? () => onEntryActions(item) : undefined} />
+        )} />
+    </View>
+  );
+}
+const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: Space.xs, paddingHorizontal: Space.sm, minHeight: 44 },
+  message: { padding: Space.lg },
+});

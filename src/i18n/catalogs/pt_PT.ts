@@ -593,7 +593,6 @@ export const pt_PT: Record<string, TranslationValue> = {
     "many": "{count} pastas"
   },
   "Preparing files…": "A preparar ficheiros…",
-  "Send to {folder}": "Enviar para {folder}",
   "Transfer files": "Transferir ficheiros",
   "File transfer works when connected over Wi-Fi.": "A transferência de ficheiros funciona quando ligado por Wi-Fi.",
   "Send music from this device to the player SD card": "Envie música deste dispositivo para o cartão SD do leitor",
@@ -892,5 +891,9 @@ export const pt_PT: Record<string, TranslationValue> = {
   "Power": "Energia",
   "Playback": "Reprodução",
   "Connections": "Ligações",
-  "Update Music Database": "Atualizar base de dados de música"
+  "Update Music Database": "Atualizar base de dados de música",
+  "Save to folder": "Guardar na pasta",
+  "Save here": "Guardar aqui",
+  "Upload": "Enviar",
+  "Retry": "Tentar novamente"
 };

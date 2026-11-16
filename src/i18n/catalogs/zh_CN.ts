@@ -563,7 +563,6 @@ export const zh_CN: Record<string, TranslationValue> = {
     "other": "{count} 个文件夹"
   },
   "Preparing files…": "正在准备文件...",
-  "Send to {folder}": "发送至{folder}",
   "Transfer files": "传输文件",
   "File transfer works when connected over Wi-Fi.": "通过 Wi-Fi 连接时可以进行文件传输。",
   "Send music from this device to the player SD card": "将音乐从此设备发送到播放器 SD 卡",
@@ -852,5 +851,9 @@ export const zh_CN: Record<string, TranslationValue> = {
   "Power": "电源",
   "Playback": "播放",
   "Connections": "连接",
-  "Update Music Database": "更新音乐数据库"
+  "Update Music Database": "更新音乐数据库",
+  "Save to folder": "保存到文件夹",
+  "Save here": "保存到此处",
+  "Upload": "上传",
+  "Retry": "重试"
 };

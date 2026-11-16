@@ -1715,7 +1715,6 @@ Object.assign(catalogs.es, {
   "Select files or folders on this device": "Selecciona archivos o carpetas de este dispositivo",
   "{count} folders": { one: "{count} carpeta", other: "{count} carpetas" },
   "Preparing files…": "Preparando archivos…",
-  "Send to {folder}": "Enviar a {folder}",
   "Transfer files": "Transferir archivos",
   "File transfer works when connected over Wi-Fi.": "La transferencia de archivos funciona cuando estás conectado por Wi-Fi.",
   "Send music from this device to the player SD card": "Envía música de este dispositivo a la tarjeta SD del reproductor",
@@ -1748,7 +1747,6 @@ Object.assign(catalogs.de, {
   "Select files or folders on this device": "Wähle Dateien oder Ordner auf diesem Gerät",
   "{count} folders": { one: "{count} Ordner", other: "{count} Ordner" },
   "Preparing files…": "Dateien werden vorbereitet…",
-  "Send to {folder}": "An {folder} senden",
   "Transfer files": "Dateien übertragen",
   "File transfer works when connected over Wi-Fi.": "Die Dateiübertragung funktioniert bei einer WLAN-Verbindung.",
   "Send music from this device to the player SD card": "Musik von diesem Gerät auf die SD-Karte des Players senden",
@@ -1781,7 +1779,6 @@ Object.assign(catalogs.fr, {
   "Select files or folders on this device": "Sélectionnez des fichiers ou des dossiers sur cet appareil",
   "{count} folders": { one: "{count} dossier", other: "{count} dossiers" },
   "Preparing files…": "Préparation des fichiers…",
-  "Send to {folder}": "Envoyer vers {folder}",
   "Transfer files": "Transférer des fichiers",
   "File transfer works when connected over Wi-Fi.": "Le transfert de fichiers fonctionne en connexion Wi-Fi.",
   "Send music from this device to the player SD card": "Envoyer de la musique de cet appareil vers la carte SD du lecteur",
@@ -1814,7 +1811,6 @@ Object.assign(catalogs.it, {
   "Select files or folders on this device": "Seleziona file o cartelle su questo dispositivo",
   "{count} folders": { one: "{count} cartella", other: "{count} cartelle" },
   "Preparing files…": "Preparazione dei file…",
-  "Send to {folder}": "Invia a {folder}",
   "Transfer files": "Trasferisci file",
   "File transfer works when connected over Wi-Fi.": "Il trasferimento file funziona con la connessione Wi-Fi.",
   "Send music from this device to the player SD card": "Invia musica da questo dispositivo alla scheda SD del lettore",
@@ -1847,7 +1843,6 @@ Object.assign(catalogs.ru, {
   "Select files or folders on this device": "Выберите файлы или папки на этом устройстве",
   "{count} folders": { one: "{count} папка", few: "{count} папки", many: "{count} папок", other: "{count} папки" },
   "Preparing files…": "Подготовка файлов…",
-  "Send to {folder}": "Отправить в {folder}",
   "Transfer files": "Передать файлы",
   "File transfer works when connected over Wi-Fi.": "Передача файлов работает при подключении по Wi-Fi.",
   "Send music from this device to the player SD card": "Отправка музыки с этого устройства на SD-карту плеера",
@@ -3542,3 +3537,45 @@ for (const language of ['es', 'de', 'fr', 'it', 'ru'] as const) {
     if (!(source in catalogs[language])) catalogs[language][source] = value;
   }
 }
+
+Object.assign(catalogs.en, {
+  "Save to folder": "Save to folder",
+  "Save here": "Save here",
+  "Upload": "Upload",
+  "Retry": "Retry"
+});
+
+Object.assign(catalogs.es, {
+  "Save to folder": "Guardar en carpeta",
+  "Save here": "Guardar aquí",
+  "Upload": "Subir",
+  "Retry": "Reintentar"
+});
+
+Object.assign(catalogs.de, {
+  "Save to folder": "In Ordner speichern",
+  "Save here": "Hier speichern",
+  "Upload": "Hochladen",
+  "Retry": "Erneut versuchen"
+});
+
+Object.assign(catalogs.fr, {
+  "Save to folder": "Enregistrer dans un dossier",
+  "Save here": "Enregistrer ici",
+  "Upload": "Envoyer",
+  "Retry": "Réessayer"
+});
+
+Object.assign(catalogs.it, {
+  "Save to folder": "Salva nella cartella",
+  "Save here": "Salva qui",
+  "Upload": "Carica",
+  "Retry": "Riprova"
+});
+
+Object.assign(catalogs.ru, {
+  "Save to folder": "Сохранить в папку",
+  "Save here": "Сохранить здесь",
+  "Upload": "Загрузить",
+  "Retry": "Повторить"
+});

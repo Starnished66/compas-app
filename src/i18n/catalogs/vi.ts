@@ -563,7 +563,6 @@ export const vi: Record<string, TranslationValue> = {
     "other": "{count} thư mục"
   },
   "Preparing files…": "Đang chuẩn bị tệp…",
-  "Send to {folder}": "Gửi tới {folder}",
   "Transfer files": "Truyền tệp",
   "File transfer works when connected over Wi-Fi.": "Truyền tệp hoạt động khi được kết nối qua Wi-Fi.",
   "Send music from this device to the player SD card": "Gửi nhạc từ thiết bị này tới thẻ SD của trình phát",
@@ -852,5 +851,9 @@ export const vi: Record<string, TranslationValue> = {
   "Power": "Nguồn",
   "Playback": "Phát lại",
   "Connections": "Kết nối",
-  "Update Music Database": "Cập nhật cơ sở dữ liệu nhạc"
+  "Update Music Database": "Cập nhật cơ sở dữ liệu nhạc",
+  "Save to folder": "Lưu vào thư mục",
+  "Save here": "Lưu tại đây",
+  "Upload": "Tải lên",
+  "Retry": "Thử lại"
 };

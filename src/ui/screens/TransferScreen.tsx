@@ -18,7 +18,7 @@ import {
   WifiImportStatus,
 } from '../../data/types';
 import { useI18n } from '../../i18n';
-import { formatBytes, joinSdPath, planTransfer, sdParent } from '../../session/transferPlan';
+import { formatBytes, planTransfer, selectionTotals } from '../../session/transferPlan';
 import { AppText } from '../components/AppText';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
@@ -31,7 +31,10 @@ import { ProgressBar } from '../components/ProgressBar';
 import { ScreenTitleBar } from '../components/ScreenTitleBar';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { Spinner } from '../components/Spinner';
-import { TextField } from '../components/TextField';
+import { SdBrowserError, SdBrowserView } from '../transfer/SdBrowserView';
+import { useSdBrowser } from '../transfer/useSdBrowser';
+import { TransferDestinationSheet } from '../sheets/TransferDestinationSheet';
+import { isConnectionError, isTransferUnavailable } from '../../session/transferAvailability';
 import { localizedMessage } from '../localizedLabels';
 import { usePalette } from '../PaletteProvider';
 import { Space } from '../tokens';
@@ -39,6 +42,7 @@ import { useStorageAccess } from '../useStorageAccess';
 
 export interface TransferApi {
   status: WifiImportStatus;
+  refresh: () => Promise<void>;
   start: () => Promise<void>;
   finish: () => Promise<void>;
   list: (path: string, offset: number) => Promise<{ path: string; entries: WifiImportFileEntry[]; nextOffset: number | null }>;
@@ -63,13 +67,6 @@ const PROGRESS_INTERVAL_MS = 150;
 // minute while the interrupted one times out; an upload keeps retrying that long before giving up.
 const RECONNECT_WAIT_MS = 120000;
 const UPLOAD_RETRY_DELAY_MS = 3000;
-
-/** A failure to reach the player, or a session a reconnect replaced, as opposed to the player refusing the request. */
-function isConnectionError(cause: any): boolean {
-  if (typeof cause?.statusCode === 'number') return false;
-  return /fetch failed|failed to connect|network request failed|connectexception|sockettimeout|timed? ?out|connection (reset|refused|abort)|broken pipe|end of stream|unreachable|import session ended/i
-    .test(String(cause?.message ?? ''));
-}
 
 type Pane = 'phone' | 'sd';
 
@@ -183,14 +180,14 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
   const phoneGenerationRef = useRef(0);
 
   // Player side
-  const [sdPath, setSdPath] = useState('');
-  const [sdEntries, setSdEntries] = useState<WifiImportFileEntry[]>([]);
-  const [sdNextOffset, setSdNextOffset] = useState<number | null>(null);
-  const [sdLoading, setSdLoading] = useState(false);
-  const [sdLoaded, setSdLoaded] = useState(false);
-  const [editing, setEditing] = useState<{ kind: 'mkdir' } | { kind: 'rename'; entry: WifiImportFileEntry } | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const sdGenerationRef = useRef(0);
+  const sd = useSdBrowser(transfer, '', (cause) => { if (isTransferUnavailable(cause)) destinationUnavailable(); });
+  const { path: sdPath, loaded: sdLoaded, load: loadSd, setEditing, setEditValue } = sd;
+  const [choosingDestination, setChoosingDestination] = useState(false);
+  const destinationUnavailable = useCallback(() => {
+    sd.reset();
+    setChoosingDestination(false);
+    setError(t('The player SD card is unavailable'));
+  }, [sd.reset, t]);
 
   const [starting, setStarting] = useState(false);
   const [finishing, setFinishing] = useState(false);
@@ -232,35 +229,22 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
     }
   }, [openPhoneDirectory, t]);
 
-  const loadSd = useCallback(async (path: string, append = false, offset = 0, keepError = false) => {
-    const generation = ++sdGenerationRef.current;
-    setSdLoading(true);
-    if (!keepError) setError(null);
-    try {
-      const page = await transferRef.current.list(path, append ? offset : 0);
-      if (!aliveRef.current || generation !== sdGenerationRef.current) return;
-      setSdPath(page.path);
-      setSdEntries((previous) => append ? [...previous, ...page.entries] : page.entries);
-      setSdNextOffset(page.nextOffset);
-      setSdLoaded(true);
-    } catch (cause: any) {
-      if (aliveRef.current && generation === sdGenerationRef.current) setError(errorText(cause, t('Could not read the SD card.')));
-    } finally {
-      if (aliveRef.current && generation === sdGenerationRef.current) setSdLoading(false);
-    }
-  }, [errorText, t]);
-
   // Set once the import session opens and cleared by Finish, so a reconnect reopens it.
   const wantSessionRef = useRef(false);
   const sdPathRef = useRef('');
   sdPathRef.current = sdPath;
-  const startSession = useCallback(async (path = '') => {
+  // An upload that ended offline shows its destination once the session reopens.
+  const reopenPathRef = useRef<string | null>(null);
+  const startSession = useCallback(async (requested = '') => {
     setStarting(true);
     setError(null);
     try {
       await transferRef.current.start();
       wantSessionRef.current = true;
-      if (aliveRef.current) await loadSd(path);
+      // Read after start: an upload may have ended while it was pending.
+      const path = reopenPathRef.current ?? requested;
+      reopenPathRef.current = null;
+      if (aliveRef.current && !uploadControllerRef.current) await loadSd(path);
     } catch (cause: any) {
       if (aliveRef.current) setError(errorText(cause, t('Could not start Wi-Fi import.')));
     } finally {
@@ -282,14 +266,8 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
   }, [active, startSession]);
 
   useEffect(() => {
-    if (status === 'stopped') {
-      sdGenerationRef.current++;
-      setSdLoaded(false);
-      setSdEntries([]);
-      setSdNextOffset(null);
-      setEditing(null);
-    }
-  }, [status]);
+    if (status === 'stopped' || status === 'error') sd.reset();
+  }, [status, sd.reset]);
 
   const toggleSelected = (entry: LocalFileEntry) => {
     setSelected((previous) => {
@@ -300,19 +278,15 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
     });
   };
 
-  const selectedFileBytes = useMemo(() => {
-    let bytes = 0;
-    selected.forEach((entry) => { if (!entry.isDirectory) bytes += entry.size; });
-    return bytes;
-  }, [selected]);
-  const selectedFolders = useMemo(() => [...selected.values()].filter((entry) => entry.isDirectory).length, [selected]);
+  const { bytes: selectedFileBytes, folders: selectedFolders, count: selectedCount } = useMemo(
+    () => selectionTotals([...selected.values()]), [selected]);
 
-  const upload = async () => {
-    if (uploading || !ready || selected.size === 0) return;
+  const upload = async (destination: string) => {
+    if (uploadControllerRef.current || uploading || !ready || !connected || selected.size === 0) return;
+    setChoosingDestination(false);
     const controller = new AbortController();
     uploadControllerRef.current = controller;
     const api = transferRef.current;
-    const destination = sdPath;
     setError(null);
     setNotice(null);
     setPreparing(true);
@@ -388,8 +362,10 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
         setPreparing(false);
         setJob(null);
         if (uploaded) setUploadedSinceFinish((count) => count + uploaded);
-        // Keeps the upload's own message; a failed refresh still replaces it.
-        if (transferRef.current.status.state === 'ready') void loadSd(destination, false, 0, true);
+        // Show the chosen folder while preserving the upload summary.
+        setPane('sd');
+        if (transferRef.current.status.state === 'ready') void loadSd(destination);
+        else reopenPathRef.current = destination;
       }
     }
   };
@@ -422,24 +398,6 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
     }
   };
 
-  const saveEdit = async () => {
-    if (!editing) return;
-    const name = editValue.trim();
-    if (!name) return;
-    setSdLoading(true);
-    setError(null);
-    try {
-      if (editing.kind === 'mkdir') await transferRef.current.mkdir(sdPath, name);
-      else await transferRef.current.rename(editing.entry.path, name);
-      if (!aliveRef.current) return;
-      setEditing(null);
-      setEditValue('');
-      await loadSd(sdPath);
-    } catch (cause: any) {
-      if (aliveRef.current) { setError(cause?.message || t('Could not rename file.')); setSdLoading(false); }
-    }
-  };
-
   const sdEntryActions = (entry: WifiImportFileEntry) => {
     if (uploading) return;
     Alert.alert(entry.name, undefined, [
@@ -454,9 +412,7 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
       { text: t('Cancel'), style: 'cancel' },
       { text: t('Delete'), style: 'destructive', onPress: () => {
         setError(null);
-        void transferRef.current.remove(entry.path)
-          .then(() => loadSd(sdPath))
-          .catch((cause: any) => { if (aliveRef.current) setError(cause?.message || t('Could not delete file.')); });
+        void sd.mutate(() => transferRef.current.remove(entry.path));
       } },
     ]);
   };
@@ -465,7 +421,6 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
   const rootLabel = (item: StorageRoot) => (item.name === 'Internal storage' ? t('Internal storage') : item.name);
   const phoneRelative = phonePath && root ? phonePath.slice(root.path.length).replace(/^\//, '') : '';
   const phoneParent = phonePath && root && phonePath !== root.path ? phonePath.slice(0, phonePath.lastIndexOf('/')) : null;
-  const sdUp = sdParent(sdPath);
 
   const phonePane = (
     <Card variant="surface" style={[styles.pane, wide && styles.paneWide]}>
@@ -527,51 +482,10 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
       <View style={styles.paneHeader}>
         <Icon name="sdCard" size={18} color={palette.inkMuted} />
         <AppText variant="eyebrow" tone="inkMuted" style={styles.flex}>{t('Player SD card')}</AppText>
-        {sdLoading || starting ? <Spinner /> : null}
-        <IconButton icon="plus" label={t('New folder')} size="sm" disabled={!ready || !sdLoaded || uploading} onPress={() => { setEditing({ kind: 'mkdir' }); setEditValue(''); }} />
-        <IconButton icon="refresh" label={t('Refresh')} size="sm" disabled={!ready || sdLoading} onPress={() => void loadSd(sdPath)} />
+        {starting ? <Spinner /> : null}
       </View>
-      <View style={styles.pathRow}>
-        <IconButton icon="chevronLeft" label={t('Up')} size="sm" disabled={sdUp === null || sdLoading || !ready} onPress={() => sdUp !== null && void loadSd(sdUp)} />
-        <AppText variant="bodyStrong" numberOfLines={1} style={styles.flex}>{sdPath ? `SD/${sdPath}` : 'SD/'}</AppText>
-      </View>
-      {editing ? (
-        <View style={styles.editRow}>
-          <View style={styles.flex}>
-            <TextField
-              value={editValue}
-              onChangeText={setEditValue}
-              autoFocus
-              autoCapitalize="none"
-              placeholder={editing.kind === 'mkdir' ? t('Folder name') : t('New name')}
-              accessibilityLabel={editing.kind === 'mkdir' ? t('Folder name') : t('New name')}
-              onSubmitEditing={() => void saveEdit()}
-            />
-          </View>
-          <Button size="sm" label={editing.kind === 'mkdir' ? t('Create') : t('Save')} disabled={!editValue.trim() || sdLoading} onPress={() => void saveEdit()} />
-          <Button size="sm" variant="plain" label={t('Cancel')} onPress={() => setEditing(null)} />
-        </View>
-      ) : null}
-      {ready || sdLoaded ? (
-        <FlatList
-          data={sdEntries}
-          keyExtractor={(entry) => entry.path}
-          style={styles.list}
-          ListEmptyComponent={sdLoaded && !sdLoading ? <AppText variant="caption" tone="inkMuted" style={styles.empty}>{t('This folder is empty.')}</AppText> : null}
-          ListFooterComponent={sdNextOffset != null ? (
-            <Button size="sm" variant="plain" label={t('Load more')} disabled={sdLoading} onPress={() => void loadSd(sdPath, true, sdNextOffset)} />
-          ) : null}
-          renderItem={({ item }) => (
-            <ListRow
-              title={item.name}
-              subtitle={item.isDirectory ? t('Folder') : formatBytes(item.size)}
-              leading={<Icon name={item.isDirectory ? 'folder' : 'file'} />}
-              trailing={<IconButton icon="moreHorizontal" label={t('More options for {name}', { name: item.name })} size="sm" disabled={uploading} onPress={() => sdEntryActions(item)} />}
-              onPress={item.isDirectory ? () => void loadSd(item.path) : undefined}
-              onLongPress={() => sdEntryActions(item)}
-            />
-          )}
-        />
+      {ready ? (
+        <SdBrowserView browser={sd} canBrowse={ready && connected} canMutate={ready && connected && !uploading} onEntryActions={sdEntryActions} />
       ) : (
         <View style={styles.sessionState}>
           {starting || status === 'starting' ? (
@@ -601,6 +515,9 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
 
   return (
     <View style={styles.workspace}>
+      <TransferDestinationSheet visible={choosingDestination} transfer={transfer} initialPath={sdPath} seed={sd} itemCount={selectedCount}
+        available={connected && ready} onClose={(created) => { setChoosingDestination(false); if (created) void loadSd(sdPath); }}
+        onUnavailable={destinationUnavailable} onSave={(path, created) => { if (created) void loadSd(sdPath); void upload(path); }} />
       {!wide ? (
         <SegmentedControl
           options={[
@@ -617,6 +534,7 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
         {wide || pane === 'sd' ? sdPane : null}
       </View>
       {error ? <InlineError message={error} style={styles.message} /> : null}
+      {!wide && pane === 'phone' ? <SdBrowserError browser={sd} canBrowse={ready && connected} /> : null}
       {notice ? <AppText variant="caption" tone="accent" style={styles.message}>{notice}</AppText> : null}
       <Card variant="surface" style={styles.actionBar}>
         {job || preparing ? (
@@ -646,9 +564,9 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
             <Button
               size="md"
               icon="import"
-              label={t('Send to {folder}', { folder: sdPath ? `SD/${sdPath}` : 'SD/' })}
-              disabled={!ready || !sdLoaded || selected.size === 0}
-              onPress={() => void upload()}
+              label={t('Upload')}
+              disabled={!connected || !ready || !sdLoaded || !!sd.editing || selected.size === 0}
+              onPress={() => setChoosingDestination(true)}
             />
             {ready && uploadedSinceFinish > 0 ? (
               <Button size="md" variant="container" icon="check" label={t('Finish and rescan library')} busy={finishing} onPress={() => void finish()} />
@@ -674,7 +592,6 @@ const styles = StyleSheet.create({
   paneHeader: { flexDirection: 'row', alignItems: 'center', gap: Space.sm, paddingHorizontal: Space.lg, minHeight: 40 },
   rootPicker: { marginHorizontal: Space.lg, marginBottom: Space.xs },
   pathRow: { flexDirection: 'row', alignItems: 'center', gap: Space.xs, paddingHorizontal: Space.sm, minHeight: 44 },
-  editRow: { flexDirection: 'row', alignItems: 'center', gap: Space.xs, paddingHorizontal: Space.lg, paddingBottom: Space.sm },
   list: { flex: 1 },
   empty: { padding: Space.lg },
   sessionState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Space.md, padding: Space.lg },

@@ -61,3 +61,16 @@ export function formatBytes(bytes: number): string {
   while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
 }
+
+export function sdBreadcrumb(path: string, rootLabel: string): string {
+  return [rootLabel, ...path.split('/').filter(Boolean)].join(' / ');
+}
+
+/** Counts picked items, without walking folders or double-counting their contents. */
+export function selectionTotals(entries: readonly { isDirectory: boolean; size: number }[]) {
+  return entries.reduce((total, entry) => ({
+    count: total.count + 1,
+    folders: total.folders + (entry.isDirectory ? 1 : 0),
+    bytes: total.bytes + (entry.isDirectory ? 0 : entry.size),
+  }), { count: 0, folders: 0, bytes: 0 });
+}

@@ -69,12 +69,13 @@ function accentSourceFor(state: RemoteUiState, accentStyle: AccentStyle): Accent
 }
 
 export default function App() {
-  const { state, onAction, playbackPosition, libraryArtwork, wifiImportStatus, startWifiImport, stopWifiImport, listWifiImportFiles, uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile, createWifiImportDirectory, playerSettingsApi, playerPluginsApi } = useRemoteSession();
+  const { state, onAction, playbackPosition, libraryArtwork, wifiImportStatus, refreshWifiImport, startWifiImport, stopWifiImport, listWifiImportFiles, uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile, createWifiImportDirectory, playerSettingsApi, playerPluginsApi } = useRemoteSession();
   const transfer: TransferApi = {
     status: wifiImportStatus,
     start: startWifiImport,
     finish: stopWifiImport,
     list: listWifiImportFiles,
+    refresh: refreshWifiImport,
     upload: uploadWifiImportFile,
     rename: renameWifiImportFile,
     remove: deleteWifiImportFile,

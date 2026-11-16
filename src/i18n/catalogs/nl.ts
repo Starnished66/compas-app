@@ -578,7 +578,6 @@ export const nl: Record<string, TranslationValue> = {
     "other": "{count} mappen"
   },
   "Preparing files…": "Bestanden voorbereiden…",
-  "Send to {folder}": "Verzenden naar {folder}",
   "Transfer files": "Bestanden overbrengen",
   "File transfer works when connected over Wi-Fi.": "Bestandsoverdracht werkt wanneer verbonden via Wi-Fi.",
   "Send music from this device to the player SD card": "Stuur muziek vanaf dit apparaat naar de SD-kaart van de speler",
@@ -872,5 +871,9 @@ export const nl: Record<string, TranslationValue> = {
   "Power": "Voeding",
   "Playback": "Afspelen",
   "Connections": "Verbindingen",
-  "Update Music Database": "Muziekdatabase bijwerken"
+  "Update Music Database": "Muziekdatabase bijwerken",
+  "Save to folder": "Opslaan in map",
+  "Save here": "Hier opslaan",
+  "Upload": "Uploaden",
+  "Retry": "Opnieuw proberen"
 };

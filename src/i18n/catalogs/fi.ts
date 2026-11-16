@@ -578,7 +578,6 @@ export const fi: Record<string, TranslationValue> = {
     "other": "{count} kansiota"
   },
   "Preparing files…": "Valmistellaan tiedostoja…",
-  "Send to {folder}": "Lähetä osoitteeseen {folder}",
   "Transfer files": "Siirrä tiedostoja",
   "File transfer works when connected over Wi-Fi.": "Tiedostonsiirto toimii, kun yhteys on muodostettu Wi-Fi-yhteyden kautta.",
   "Send music from this device to the player SD card": "Lähetä musiikkia tästä laitteesta soittimen SD-kortille",
@@ -872,5 +871,9 @@ export const fi: Record<string, TranslationValue> = {
   "Power": "Virta",
   "Playback": "Toisto",
   "Connections": "Yhteydet",
-  "Update Music Database": "Päivitä musiikkitietokanta"
+  "Update Music Database": "Päivitä musiikkitietokanta",
+  "Save to folder": "Tallenna kansioon",
+  "Save here": "Tallenna tähän",
+  "Upload": "Lähetä",
+  "Retry": "Yritä uudelleen"
 };

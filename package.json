@@ -41,7 +41,8 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "check:translations": "node scripts/check-translations.cjs",
-    "test:dac-mode": "node scripts/test-dac-mode.cjs"
+    "test:dac-mode": "node scripts/test-dac-mode.cjs",
+    "test:sd-browser": "node scripts/test-sd-browser.cjs"
   },
   "private": true,
   "expo": {
