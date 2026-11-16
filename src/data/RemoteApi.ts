@@ -229,11 +229,12 @@ export class RemoteApi {
     if (response.statusCode !== 202) throw new RemoteApiException(response.statusCode, response.text());
   }
 
-  async importFiles(path: string = '', offset: number = 0, limit: number = 50): Promise<WifiImportDirectoryPage> {
+  async importFiles(path: string = '', offset: number = 0, limit: number = 50, showHidden = false): Promise<WifiImportDirectoryPage> {
     assertIntegerArgument(offset, 'Offset', 0);
     assertIntegerArgument(limit, 'Limit', 1, 100);
     const json = await this.jsonGet(`${this.prefix}/import/files`, [
       ['path', validateImportPath(path, true)], ['offset', String(offset)], ['limit', String(limit)],
+      ...(showHidden ? [['show_hidden', '1'] as [string, string]] : []),
     ]);
     if (!Array.isArray(json.entries) || typeof json.path !== 'string' ||
         !Number.isSafeInteger(json.offset) || !Number.isSafeInteger(json.total) ||

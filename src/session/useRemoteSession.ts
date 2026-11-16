@@ -3308,9 +3308,9 @@ export function useRemoteSession() {
     if (!session || !ownsWifiImportSession(session)) throw new Error('The Wi-Fi import session ended. Reopen import for the connected player.');
     return session;
   };
-  const listWifiImportFiles = async (path: string, offset: number): Promise<WifiImportDirectoryPage> => {
+  const listWifiImportFiles = async (path: string, offset: number, showHidden = false): Promise<WifiImportDirectoryPage> => {
     const session = requireWifiImportSession();
-    const page = await session.api.importFiles(path, offset, 50);
+    const page = await session.api.importFiles(path, offset, 50, showHidden);
     if (!ownsWifiImportSession(session)) throw new Error('The Wi-Fi import session ended.');
     return page;
   };

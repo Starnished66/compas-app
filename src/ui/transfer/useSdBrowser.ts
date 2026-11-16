@@ -9,8 +9,10 @@ type Edit = { kind: 'mkdir' } | { kind: 'rename'; entry: WifiImportFileEntry };
 type Listing = { entries: WifiImportFileEntry[]; nextOffset: number | null; loaded: boolean; loading: boolean; error?: unknown; failed?: { offset: number; append: boolean } };
 const emptyListing: Listing = { entries: [], nextOffset: null, loaded: false, loading: false };
 
-export function useSdBrowser(api: TransferApi, initialPath = '', onFailure?: (cause: unknown) => void, seed?: Pick<Listing, 'entries' | 'nextOffset'>) {
+export function useSdBrowser(api: TransferApi, initialPath = '', onFailure?: (cause: unknown) => void, seed?: Pick<Listing, 'entries' | 'nextOffset'>, initialShowHidden = false) {
   const { t } = useI18n();
+  const [showHidden, setShowHidden] = useState(initialShowHidden);
+  const hidden = useRef(initialShowHidden);
   const [path, setPath] = useState(initialPath);
   const [listing, setListing] = useState<Listing>(() => ({ ...emptyListing, entries: seed?.entries ?? [], nextOffset: seed?.nextOffset ?? null }));
   const [saving, setSaving] = useState(false);
@@ -37,7 +39,7 @@ export function useSdBrowser(api: TransferApi, initialPath = '', onFailure?: (ca
     const base = nextPath === previous.path ? previous.listing : emptyListing;
     publish(nextPath, { ...base, loaded: false, loading: true, error: undefined, failed: undefined });
     try {
-      const page = await refs.current.api.list(nextPath, offset);
+      const page = await refs.current.api.list(nextPath, offset, hidden.current);
       if (request !== generation.current) return;
       publish(nextPath, { entries: append ? [...base.entries, ...page.entries] : page.entries, nextOffset: page.nextOffset, loaded: true, loading: false });
     } catch (cause) {
@@ -46,6 +48,12 @@ export function useSdBrowser(api: TransferApi, initialPath = '', onFailure?: (ca
       refs.current.onFailure?.(cause);
     }
   }, []);
+  const toggleHidden = async () => {
+    hidden.current = !hidden.current;
+    setShowHidden(hidden.current);
+    publish(current.current.path, emptyListing);
+    await load(current.current.path);
+  };
   const retry = async () => {
     const { path: folder, listing: { failed } } = current.current;
     if (failed) await load(folder, failed.append, failed.offset);
@@ -81,6 +89,6 @@ export function useSdBrowser(api: TransferApi, initialPath = '', onFailure?: (ca
     await mutate(() => editing.kind === 'mkdir' ? refs.current.api.mkdir(path, name) : refs.current.api.rename(editing.entry.path, name));
   };
   return { ...listing, path, loading: saving || listing.loading, error: listing.error ? sdBrowserError(listing.error, t) : null, canRetry: !!listing.failed,
-    editing, editValue, setEditing, setEditValue, load, retry, reset, saveEdit, mutate };
+    showHidden, toggleHidden, editing, editValue, setEditing, setEditValue, load, retry, reset, saveEdit, mutate };
 }
 export type SdBrowser = ReturnType<typeof useSdBrowser>;

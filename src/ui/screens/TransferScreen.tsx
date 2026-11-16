@@ -32,6 +32,7 @@ import { ScreenTitleBar } from '../components/ScreenTitleBar';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { Spinner } from '../components/Spinner';
 import { SdBrowserError, SdBrowserView } from '../transfer/SdBrowserView';
+import { HiddenFilesButton } from '../transfer/HiddenFilesButton';
 import { useSdBrowser } from '../transfer/useSdBrowser';
 import { TransferDestinationSheet } from '../sheets/TransferDestinationSheet';
 import { isConnectionError, isTransferUnavailable } from '../../session/transferAvailability';
@@ -45,7 +46,7 @@ export interface TransferApi {
   refresh: () => Promise<void>;
   start: () => Promise<void>;
   finish: () => Promise<void>;
-  list: (path: string, offset: number) => Promise<{ path: string; entries: WifiImportFileEntry[]; nextOffset: number | null }>;
+  list: (path: string, offset: number, showHidden?: boolean) => Promise<{ path: string; entries: WifiImportFileEntry[]; nextOffset: number | null }>;
   upload: (uri: string, path: string, name: string, onProgress: (sent: number, total: number) => void, signal: AbortSignal) => Promise<void>;
   rename: (path: string, name: string) => Promise<void>;
   remove: (path: string) => Promise<void>;
@@ -174,6 +175,8 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
   const [roots, setRoots] = useState<StorageRoot[]>([]);
   const [root, setRoot] = useState<StorageRoot | null>(null);
   const [phonePath, setPhonePath] = useState<string | null>(null);
+  const [phoneShowHidden, setPhoneShowHidden] = useState(false);
+  const phoneHiddenRef = useRef(false);
   const [phoneEntries, setPhoneEntries] = useState<LocalFileEntry[]>([]);
   const [phoneLoading, setPhoneLoading] = useState(false);
   const [selected, setSelected] = useState<Map<string, LocalFileEntry>>(() => new Map());
@@ -206,7 +209,7 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
     setPhoneLoading(true);
     setError(null);
     try {
-      const entries = await listLocalDirectory(path);
+      const entries = await listLocalDirectory(path, phoneHiddenRef.current);
       if (!aliveRef.current || generation !== phoneGenerationRef.current) return;
       setPhonePath(path);
       setPhoneEntries(entries);
@@ -294,7 +297,7 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
     let skipped = 0;
     const failed: string[] = [];
     try {
-      const collected = await collectLocalFiles([...selected.keys()]);
+      const collected = await collectLocalFiles([...selected.keys()], phoneHiddenRef.current);
       const tooLarge = collected.filter((file) => file.size > MAX_FILE_BYTES);
       failed.push(...tooLarge.map((file) => file.name));
       const plan = planTransfer(collected.filter((file) => file.size <= MAX_FILE_BYTES), destination);
@@ -445,6 +448,14 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
       <View style={styles.pathRow}>
         <IconButton icon="chevronLeft" label={t('Up')} size="sm" disabled={!phoneParent || phoneLoading} onPress={() => phoneParent && void openPhoneDirectory(phoneParent)} />
         <AppText variant="bodyStrong" numberOfLines={1} style={styles.flex}>{phoneRelative ? `/${phoneRelative}` : root ? rootLabel(root) : ''}</AppText>
+        <HiddenFilesButton title={t('This device')} showHidden={phoneShowHidden}
+          disabled={uploading || phoneLoading || !phonePath} onPress={() => {
+            if (!phonePath) return;
+            phoneHiddenRef.current = !phoneHiddenRef.current;
+            setPhoneShowHidden(phoneHiddenRef.current);
+            setPhoneEntries([]);
+            void openPhoneDirectory(phonePath);
+          }} />
       </View>
       <FlatList
         data={phoneEntries}
@@ -515,7 +526,7 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
 
   return (
     <View style={styles.workspace}>
-      <TransferDestinationSheet visible={choosingDestination} transfer={transfer} initialPath={sdPath} seed={sd} itemCount={selectedCount}
+      <TransferDestinationSheet visible={choosingDestination} transfer={transfer} initialPath={sdPath} initialShowHidden={sd.showHidden} seed={sd} itemCount={selectedCount}
         available={connected && ready} onClose={(created) => { setChoosingDestination(false); if (created) void loadSd(sdPath); }}
         onUnavailable={destinationUnavailable} onSave={(path, created) => { if (created) void loadSd(sdPath); void upload(path); }} />
       {!wide ? (

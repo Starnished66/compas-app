@@ -855,5 +855,7 @@ export const zh_CN: Record<string, TranslationValue> = {
   "Save to folder": "保存到文件夹",
   "Save here": "保存到此处",
   "Upload": "上传",
-  "Retry": "重试"
+  "Retry": "重试",
+  "Show hidden files": "显示隐藏文件",
+  "Hide hidden files": "隐藏隐藏文件"
 };

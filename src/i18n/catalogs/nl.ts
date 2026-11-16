@@ -875,5 +875,7 @@ export const nl: Record<string, TranslationValue> = {
   "Save to folder": "Opslaan in map",
   "Save here": "Hier opslaan",
   "Upload": "Uploaden",
-  "Retry": "Opnieuw proberen"
+  "Retry": "Opnieuw proberen",
+  "Show hidden files": "Verborgen bestanden weergeven",
+  "Hide hidden files": "Verborgen bestanden verbergen"
 };

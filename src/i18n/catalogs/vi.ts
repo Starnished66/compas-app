@@ -855,5 +855,7 @@ export const vi: Record<string, TranslationValue> = {
   "Save to folder": "Lưu vào thư mục",
   "Save here": "Lưu tại đây",
   "Upload": "Tải lên",
-  "Retry": "Thử lại"
+  "Retry": "Thử lại",
+  "Show hidden files": "Hiện tệp ẩn",
+  "Hide hidden files": "Ẩn tệp ẩn"
 };

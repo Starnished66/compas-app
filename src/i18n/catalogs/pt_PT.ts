@@ -895,5 +895,7 @@ export const pt_PT: Record<string, TranslationValue> = {
   "Save to folder": "Guardar na pasta",
   "Save here": "Guardar aqui",
   "Upload": "Enviar",
-  "Retry": "Tentar novamente"
+  "Retry": "Tentar novamente",
+  "Show hidden files": "Mostrar ficheiros ocultos",
+  "Hide hidden files": "Ocultar ficheiros ocultos"
 };

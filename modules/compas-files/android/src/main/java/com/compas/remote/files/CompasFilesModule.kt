@@ -102,23 +102,23 @@ class CompasFilesModule : Module() {
             storageRoots()
         }
 
-        AsyncFunction("listDirectory") { path: String ->
+        AsyncFunction("listDirectory") { path: String, showHidden: Boolean ->
             requireAccess()
             val directory = resolveDirectory(path)
             val children = directory.listFiles() ?: throw StorageAccessException("Could not read ${directory.name}")
             children
-                .filter { !it.name.startsWith(".") }
+                .filter { showHidden || !it.name.startsWith(".") }
                 .sortedWith(compareBy<File>({ !it.isDirectory }, { it.name.lowercase() }))
                 .map { entryOf(it) }
         }
 
         /** Expands selected files and folders into a flat upload list; folders keep their own name as the top level. */
-        AsyncFunction("collectFiles") { paths: List<String> ->
+        AsyncFunction("collectFiles") { paths: List<String>, showHidden: Boolean ->
             requireAccess()
             val collected = ArrayList<Map<String, Any>>()
             for (path in paths) {
                 val file = resolveExisting(path)
-                if (file.isDirectory) walk(file, file.name, 0, collected)
+                if (file.isDirectory) walk(file, file.name, 0, collected, showHidden)
                 else addFile(file, "", collected)
             }
             collected
@@ -195,14 +195,14 @@ class CompasFilesModule : Module() {
         ))
     }
 
-    private fun walk(directory: File, relativeDir: String, depth: Int, out: MutableList<Map<String, Any>>) {
+    private fun walk(directory: File, relativeDir: String, depth: Int, out: MutableList<Map<String, Any>>, showHidden: Boolean) {
         if (depth > MAX_WALK_DEPTH) return
         val children = directory.listFiles() ?: return
         children
-            .filter { !it.name.startsWith(".") }
+            .filter { showHidden || !it.name.startsWith(".") }
             .sortedWith(compareBy<File>({ it.isDirectory }, { it.name.lowercase() }))
             .forEach { child ->
-                if (child.isDirectory) walk(child, "$relativeDir/${child.name}", depth + 1, out)
+                if (child.isDirectory) walk(child, "$relativeDir/${child.name}", depth + 1, out, showHidden)
                 else if (child.isFile) addFile(child, relativeDir, out)
             }
     }

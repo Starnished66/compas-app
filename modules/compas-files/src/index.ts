@@ -27,8 +27,8 @@ interface CompasFilesNativeModule {
   usesAllFilesAccess(): boolean;
   openAllFilesAccessSettings(): boolean;
   getRoots(): StorageRoot[];
-  listDirectory(path: string): Promise<LocalFileEntry[]>;
-  collectFiles(paths: string[]): Promise<CollectedFile[]>;
+  listDirectory(path: string, showHidden: boolean): Promise<LocalFileEntry[]>;
+  collectFiles(paths: string[], showHidden: boolean): Promise<CollectedFile[]>;
   uploadFile(taskId: string, url: string, fileUri: string, headers: Record<string, string>): Promise<{ status: number; body: string }>;
   downloadFile(taskId: string, url: string, fileUri: string, headers: Record<string, string>): Promise<NativeDownloadResult>;
   cancelTransfer(taskId: string): void;
@@ -93,12 +93,12 @@ export function getStorageRoots(): StorageRoot[] {
   return requireModule().getRoots();
 }
 
-export function listLocalDirectory(path: string): Promise<LocalFileEntry[]> {
-  return requireModule().listDirectory(path);
+export function listLocalDirectory(path: string, showHidden = false): Promise<LocalFileEntry[]> {
+  return requireModule().listDirectory(path, showHidden);
 }
 
-export function collectLocalFiles(paths: string[]): Promise<CollectedFile[]> {
-  return requireModule().collectFiles(paths);
+export function collectLocalFiles(paths: string[], showHidden = false): Promise<CollectedFile[]> {
+  return requireModule().collectFiles(paths, showHidden);
 }
 
 /** Builds a file:// URI that native upload code decodes back to the exact path. */

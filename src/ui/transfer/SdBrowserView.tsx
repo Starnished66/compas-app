@@ -12,6 +12,7 @@ import { ListRow } from '../components/ListRow';
 import { Spinner } from '../components/Spinner';
 import { TextField } from '../components/TextField';
 import { Space } from '../tokens';
+import { HiddenFilesButton } from './HiddenFilesButton';
 import { SdBrowser } from './useSdBrowser';
 
 interface Props {
@@ -56,6 +57,8 @@ export function SdBrowserView({ browser, canBrowse, canMutate, foldersOnly, onEn
         <ScrollView horizontal style={styles.flex}>
           <AppText variant="bodyStrong">{sdBreadcrumb(browser.path, t('Player SD card'))}</AppText>
         </ScrollView>
+        <HiddenFilesButton title={t('Player SD card')} showHidden={browser.showHidden}
+          disabled={locked} onPress={() => void browser.toggleHidden()} />
         {browser.loading ? <Spinner /> : null}
         <IconButton icon="plus" label={t('New folder')} size="sm" disabled={mutationsLocked || !browser.loaded} onPress={() => { browser.setEditing({ kind: 'mkdir' }); browser.setEditValue(''); }} />
         <IconButton icon="refresh" label={t('Refresh')} size="sm" disabled={locked} onPress={() => void browser.load(browser.path)} />

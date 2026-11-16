@@ -3579,3 +3579,33 @@ Object.assign(catalogs.ru, {
   "Upload": "Загрузить",
   "Retry": "Повторить"
 });
+
+Object.assign(catalogs.en, {
+  "Show hidden files": "Show hidden files",
+  "Hide hidden files": "Hide hidden files"
+});
+
+Object.assign(catalogs.es, {
+  "Show hidden files": "Mostrar archivos ocultos",
+  "Hide hidden files": "Ocultar archivos ocultos"
+});
+
+Object.assign(catalogs.de, {
+  "Show hidden files": "Versteckte Dateien anzeigen",
+  "Hide hidden files": "Versteckte Dateien ausblenden"
+});
+
+Object.assign(catalogs.fr, {
+  "Show hidden files": "Afficher les fichiers cachés",
+  "Hide hidden files": "Masquer les fichiers cachés"
+});
+
+Object.assign(catalogs.it, {
+  "Show hidden files": "Mostra file nascosti",
+  "Hide hidden files": "Nascondi file nascosti"
+});
+
+Object.assign(catalogs.ru, {
+  "Show hidden files": "Показать скрытые файлы",
+  "Hide hidden files": "Скрыть скрытые файлы"
+});

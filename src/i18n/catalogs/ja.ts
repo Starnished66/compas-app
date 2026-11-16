@@ -855,5 +855,7 @@ export const ja: Record<string, TranslationValue> = {
   "Save to folder": "保存先フォルダ",
   "Save here": "ここに保存",
   "Upload": "アップロード",
-  "Retry": "再試行"
+  "Retry": "再試行",
+  "Show hidden files": "隠しファイルを表示",
+  "Hide hidden files": "隠しファイルを非表示"
 };

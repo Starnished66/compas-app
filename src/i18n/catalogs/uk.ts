@@ -915,5 +915,7 @@ export const uk: Record<string, TranslationValue> = {
   "Save to folder": "Зберегти в папку",
   "Save here": "Зберегти тут",
   "Upload": "Завантажити",
-  "Retry": "Спробувати знову"
+  "Retry": "Спробувати знову",
+  "Show hidden files": "Показати приховані файли",
+  "Hide hidden files": "Приховати приховані файли"
 };

@@ -23,7 +23,7 @@ const errors = load('src/ui/transfer/sdBrowserError.ts', {
   '../../data/nativeTransferError': load('src/data/nativeTransferError.ts'),
   '../../session/transferAvailability': availability,
 });
-function browser(api, seed, t = (value) => value, initialPath = '') {
+function browser(api, seed, t = (value) => value, initialShowHidden = false, initialPath = '') {
   const slots = [];
   let cursor = 0;
   let cleanup;
@@ -46,7 +46,7 @@ function browser(api, seed, t = (value) => value, initialPath = '') {
     './sdBrowserError': errors,
     '../../session/transferAvailability': availability,
   });
-  const render = () => { cursor = 0; return useSdBrowser(api, initialPath, undefined, seed); };
+  const render = () => { cursor = 0; return useSdBrowser(api, initialPath, undefined, seed, initialShowHidden); };
   render.unmount = () => cleanup?.();
   return render;
 }
@@ -113,6 +113,88 @@ async function checkBrowser() {
   assert.equal(independent().entries.length, 0);
   console.log('Hook: seed validation, navigation, pagination, Retry, mkdir reload, missing folder, failed delete and reset passed');
 }
+async function checkHidden() {
+  const requests = [];
+  const api = { list: (path, offset, showHidden) => {
+    const request = deferred(); requests.push({ ...request, path, offset, showHidden }); return request.promise;
+  } };
+  const render = browser(api);
+  const first = render().load('Music');
+  requests[0].resolve({ ...page('visible'), nextOffset: 50 }); await first;
+  const old = render().load('Music', true);
+  const toggled = render().toggleHidden();
+  assert.equal(requests[1].offset, 50);
+  assert.equal(requests[2].offset, 0);
+  assert.equal(requests[2].path, 'Music');
+  assert.equal(requests[2].showHidden, true);
+  assert.equal(render().entries.length, 0);
+  requests[2].resolve(page('.hidden')); await toggled;
+  requests[1].resolve(page('stale')); await old;
+  assert.equal(render().entries[0].name, '.hidden');
+  const off = render().toggleHidden();
+  assert.equal(requests[3].showHidden, false);
+  assert.equal(requests[3].offset, 0);
+  requests[3].resolve(page('visible')); await off;
+
+  // Execute the picker with its own hook and the screen's opening props.
+  const screen = fs.readFileSync(`${__dirname}/../src/ui/screens/TransferScreen.tsx`, 'utf8');
+  assert.match(screen, /initialShowHidden=\{sd.showHidden\}/);
+  const source = fs.readFileSync(`${__dirname}/../src/ui/sheets/TransferDestinationSheet.tsx`, 'utf8');
+  const body = source.slice(source.indexOf('function DestinationBrowser'), source.indexOf('const styles'));
+  for (const choice of [true, false]) {
+    let picker;
+    const effects = [];
+    const context = {
+      React: { createElement: () => null }, styles: {},
+      useI18n: () => ({ t: (text) => text }), useRef: (current) => ({ current }),
+      useEffect: (effect) => effects.push(effect),
+      useSdBrowser: (transfer, path, failure, seed, hidden) => {
+        picker = browser(transfer, seed, undefined, hidden, path);
+        return picker();
+      },
+      SheetStepTitle: () => null, AppText: () => null, SdBrowserView: () => null, View: () => null, Button: () => null,
+      props: { visible: true, available: true, initialPath: '.destination', initialShowHidden: choice, transfer: api },
+    };
+    vm.runInNewContext(ts.transpileModule(`${body}\nDestinationBrowser(props);`, {
+      compilerOptions: { target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React },
+    }).outputText, context);
+    effects[0]();
+    const request = requests.at(-1);
+    assert.equal(request.showHidden, choice);
+    assert.equal(request.path, '.destination');
+    assert.equal(request.offset, 0);
+    request.resolve(page('.child')); await new Promise(setImmediate);
+    assert.equal(picker().showHidden, choice);
+    assert.equal(render().showHidden, false, 'Picker does not change the screen');
+  }
+  console.log('Hidden files: page-zero reload, stale response rejection, independent picker opening choice passed');
+}
+
+async function checkRemoteHidden() {
+  const { RemoteApi } = load('src/data/RemoteApi.ts', {
+    './redirectGuard': {}, './cryptoUtils': {}, './dacMode': {}, './SettingsApi': {}, './PluginsApi': {}, './HttpTransport': {},
+  });
+  const api = new RemoteApi({});
+  const queries = [];
+  api.jsonGet = async (path, params) => {
+    queries.push(params);
+    return { path: '', entries: [], offset: 0, total: 0, next_offset: null };
+  };
+  for (const choice of [undefined, false, true]) await api.importFiles('', 0, 50, choice);
+  assert.equal(queries[0].some(([key]) => key === 'show_hidden'), false);
+  assert.equal(queries[1].some(([key]) => key === 'show_hidden'), false);
+  assert.equal(queries[2].find(([key]) => key === 'show_hidden')[1], '1');
+  api.send = async (method, path) => ({ statusCode: path.endsWith('mkdir') ? 201 : 200 });
+  await api.renameImportFile('.old', '.new');
+  await api.createImportDirectory('.parent', '.child');
+  for (const name of ['.', '..', 'bad/name']) {
+    await assert.rejects(api.renameImportFile('.old', name), /Enter a valid file name/);
+    await assert.rejects(api.createImportDirectory('', name), /Enter a valid file name/);
+  }
+  assert.equal(errors.sdBrowserError(new Error('Enter a valid file name'), (key) => `translated:${key}`), 'translated:Enter a valid file name');
+  console.log('Remote API: hidden query opt-in and hidden rename/mkdir validation passed');
+}
+
 async function checkUpload(outcome) {
   const source = fs.readFileSync(`${__dirname}/../src/ui/screens/TransferScreen.tsx`, 'utf8');
   const body = source.slice(source.indexOf('  const upload = async'), source.indexOf('  // The app may not have noticed'));
@@ -132,7 +214,7 @@ async function checkUpload(outcome) {
   };
   const noop = () => {};
   const context = {
-    AbortController, Date, Error, Map, uploadControllerRef: controller,
+    AbortController, Date, Error, Map, uploadControllerRef: controller, phoneHiddenRef: { current: false },
     uploading: false, ready: true, connected: true, selected: new Map([['phone', {}]]),
     transferRef: { current: api }, aliveRef: { current: true }, MAX_FILE_BYTES: Infinity, PROGRESS_INTERVAL_MS: 150,
     collectLocalFiles: async () => Array.from({ length: 3 }, (_, i) => ({ path: String(i), name: String(i), relativeDir: 'Album', size: 1 })),
@@ -150,6 +232,8 @@ async function checkUpload(outcome) {
 }
 (async () => {
   await checkBrowser();
+  await checkHidden();
+  await checkRemoteHidden();
   for (const outcome of ['finished', 'failed', 'cancelled']) await checkUpload(outcome);
   console.log('Upload: one destination reload after completion, failure or cancellation; no per-file reloads');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

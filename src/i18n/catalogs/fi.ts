@@ -875,5 +875,7 @@ export const fi: Record<string, TranslationValue> = {
   "Save to folder": "Tallenna kansioon",
   "Save here": "Tallenna tähän",
   "Upload": "Lähetä",
-  "Retry": "Yritä uudelleen"
+  "Retry": "Yritä uudelleen",
+  "Show hidden files": "Näytä piilotetut tiedostot",
+  "Hide hidden files": "Piilota piilotetut tiedostot"
 };

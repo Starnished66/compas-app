@@ -16,6 +16,7 @@ interface Props {
   visible: boolean;
   transfer: TransferApi;
   initialPath: string;
+  initialShowHidden: boolean;
   seed: Pick<SdBrowser, 'entries' | 'nextOffset'>;
   itemCount: number;
   available: boolean;
@@ -53,11 +54,11 @@ export function TransferDestinationSheet(props: Props) {
   );
 }
 
-function DestinationBrowser({ visible, transfer, initialPath, seed, itemCount, available, onClose, onUnavailable, onSave }: Props) {
+function DestinationBrowser({ visible, transfer, initialPath, initialShowHidden, seed, itemCount, available, onClose, onUnavailable, onSave }: Props) {
   const { t } = useI18n();
   const browser = useSdBrowser(transfer, initialPath, (cause) => {
     if (visible && isTransferUnavailable(cause)) onUnavailable();
-  }, seed);
+  }, seed, initialShowHidden);
   const { load, reset } = browser;
   const openingPath = useRef(initialPath);
   useEffect(() => {
