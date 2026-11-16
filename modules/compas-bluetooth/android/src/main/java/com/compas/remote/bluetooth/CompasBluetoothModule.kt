@@ -24,6 +24,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledThreadPoolExecutor
@@ -50,6 +51,11 @@ class CompasBluetoothModule : Module() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var discoveryTimeout: Runnable? = null
     private val pendingPairing = ConcurrentHashMap.newKeySet<String>()
+    private val pairingBlockLock = Any()
+    private val pairingBlockedDeviceIds = ConcurrentHashMap.newKeySet<String>()
+    private val rfcommDeviceIds = ConcurrentHashMap.newKeySet<String>()
+    private var pairingReceiver: BroadcastReceiver? = null
+    private var pairingReceiverContext: Context? = null
     /** Reuse one worker: creating an executor for every request leaked a native thread per call. */
     private val rfcommRequestExecutor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "compas-rfcomm-request").apply { isDaemon = true }
@@ -64,9 +70,10 @@ class CompasBluetoothModule : Module() {
     private val activeArtworkExchanges = LinkedHashSet<ArtworkExchange>()
 
     /** Settles its promise once, so OnDestroy and a still-running worker can't both settle it. */
-    private class PendingRfcommRequest(private val promise: Promise) {
+    private class PendingRfcommRequest(val deviceId: String, private val promise: Promise) {
         private val settled = AtomicBoolean(false)
         @Volatile var socket: BluetoothSocket? = null
+        val isSettled: Boolean get() = settled.get()
 
         fun resolve(value: Any?) {
             if (settled.compareAndSet(false, true)) promise.resolve(value)
@@ -319,13 +326,33 @@ class CompasBluetoothModule : Module() {
             promise.resolve(count)
         }
 
+        AsyncFunction("resetPairingBlock") { deviceId: String, promise: Promise ->
+            val normalizedId = normalizeDeviceId(deviceId)
+            synchronized(pairingBlockLock) {
+                if (normalizedId in pairingBlockedDeviceIds) {
+                    rejectRfcommRequestsForDevice(normalizedId, "RFCOMM_CANCELLED", "Bluetooth request was cancelled")
+                    pairingBlockedDeviceIds.remove(normalizedId)
+                }
+            }
+            promise.resolve(true)
+        }
+
         AsyncFunction("executeRfcommRequest") { deviceId: String, method: String, target: String, headers: Map<String, String>?, isArtwork: Boolean, artworkIndex: Double?, bodyBase64: String?, promise: Promise ->
-            val pending = PendingRfcommRequest(promise)
+            val normalizedId = normalizeDeviceId(deviceId)
+            val pending = PendingRfcommRequest(normalizedId, promise)
+            rfcommDeviceIds.add(normalizedId)
             pendingRfcommRequests.add(pending)
             // Checked after registering so a concurrent OnDestroy either sees this request or we see the flag.
             if (destroyed) {
                 pendingRfcommRequests.remove(pending)
                 pending.reject("MODULE_DESTROYED", "Bluetooth module was destroyed", null)
+                return@AsyncFunction
+            }
+            try {
+                ensurePairingReceiverRegistered()
+            } catch (e: Exception) {
+                pendingRfcommRequests.remove(pending)
+                pending.reject("BLUETOOTH_ERROR", e.message, e)
                 return@AsyncFunction
             }
             val idx = artworkIndex?.toLong()
@@ -338,7 +365,9 @@ class CompasBluetoothModule : Module() {
             val task = Runnable {
                 var socket: BluetoothSocket? = null
                 try {
+                    if (pending.isSettled) return@Runnable
                     val adapter = bluetoothAdapter ?: throw IOException("Bluetooth adapter not available")
+                    if (!adapter.isEnabled) throw IOException("Bluetooth adapter is disabled")
                     runCatching { adapter.cancelDiscovery() }
 
                     if (exchange != null && exchange.preempted) {
@@ -346,60 +375,64 @@ class CompasBluetoothModule : Module() {
                     }
 
                     val device = adapter.getRemoteDevice(deviceId)
-                    var connectedSocket: BluetoothSocket? = null
-
-                    for (attempt in 0..1) {
-                        if (exchange != null && exchange.preempted) {
-                            throw IOException("Artwork request preempted by foreground command")
+                    val candidate = synchronized(pairingBlockLock) {
+                        if (pending.isSettled) return@Runnable
+                        if (destroyed) throw IOException("Bluetooth module was destroyed")
+                        if (normalizedId in pairingBlockedDeviceIds) throw PairingRequiredException()
+                        if (!adapter.isEnabled) throw IOException("Bluetooth adapter is disabled")
+                        if (device.bondState != BluetoothDevice.BOND_BONDED) {
+                            pairingBlockedDeviceIds.add(normalizedId)
+                            rejectRfcommRequestsForDevice(normalizedId)
+                            throw PairingRequiredException()
                         }
-                        val candidate = device.createRfcommSocketToServiceRecord(COMPAS_REMOTE_UUID)
-                        pending.socket = candidate
-                        if (destroyed) {
-                            runCatching { candidate.close() }
-                            throw IOException("Bluetooth module was destroyed")
-                        }
-                        if (exchange != null) {
-                            synchronized(artworkLock) {
-                                if (exchange.preempted) {
-                                    runCatching { candidate.close() }
-                                    throw IOException("Artwork request preempted by foreground command")
-                                }
-                                exchange.socket = candidate
+                        device.createRfcommSocketToServiceRecord(COMPAS_REMOTE_UUID).also { pending.socket = it }
+                    }
+                    if (destroyed) {
+                        runCatching { candidate.close() }
+                        throw IOException("Bluetooth module was destroyed")
+                    }
+                    if (exchange != null) {
+                        synchronized(artworkLock) {
+                            if (exchange.preempted) {
+                                runCatching { candidate.close() }
+                                throw IOException("Artwork request preempted by foreground command")
                             }
-                        }
-                        val connectExecutor = Executors.newSingleThreadExecutor { task ->
-                            Thread(task, "compas-rfcomm-connect").apply { isDaemon = true }
-                        }
-                        try {
-                            val connecting = connectExecutor.submit { candidate.connect() }
-                            try {
-                                connecting.get(15_000, TimeUnit.MILLISECONDS)
-                            } catch (timeout: TimeoutException) {
-                                connecting.cancel(true)
-                                throw SocketTimeoutException("Timed out connecting to Compás over Bluetooth").apply {
-                                    initCause(timeout)
-                                }
-                            }
-                            connectedSocket = candidate
-                            break
-                        } catch (e: Exception) {
-                            runCatching { candidate.close() }
-                            val failure = (e as? ExecutionException)?.cause ?: e
-                            // Match the Android transport: retry transient I/O failures, but do not
-                            // turn a 15-second connect timeout into a second 15-second wait.
-                            if (failure is IOException && failure !is SocketTimeoutException &&
-                                attempt == 0 && exchange?.preempted != true
-                            ) {
-                                Thread.sleep(250)
-                            } else {
-                                throw failure
-                            }
-                        } finally {
-                            connectExecutor.shutdownNow()
+                            exchange.socket = candidate
                         }
                     }
-
-                    val activeSocket = connectedSocket ?: throw IOException("Could not connect to Compás over Bluetooth")
+                    val connectExecutor = Executors.newSingleThreadExecutor { connectTask ->
+                        Thread(connectTask, "compas-rfcomm-connect").apply { isDaemon = true }
+                    }
+                    val activeSocket: BluetoothSocket
+                    try {
+                        val connecting = connectExecutor.submit {
+                            synchronized(pairingBlockLock) {
+                                if (pending.isSettled) throw IOException("Bluetooth request was cancelled")
+                                if (normalizedId in pairingBlockedDeviceIds) throw PairingRequiredException()
+                                if (!adapter.isEnabled) throw IOException("Bluetooth adapter is disabled")
+                                if (device.bondState != BluetoothDevice.BOND_BONDED) {
+                                    pairingBlockedDeviceIds.add(normalizedId)
+                                    rejectRfcommRequestsForDevice(normalizedId)
+                                    throw PairingRequiredException()
+                                }
+                            }
+                            candidate.connect()
+                        }
+                        try {
+                            connecting.get(15_000, TimeUnit.MILLISECONDS)
+                        } catch (timeout: TimeoutException) {
+                            connecting.cancel(true)
+                            throw SocketTimeoutException("Timed out connecting to Compás over Bluetooth").apply {
+                                initCause(timeout)
+                            }
+                        }
+                        activeSocket = candidate
+                    } catch (e: Exception) {
+                        runCatching { candidate.close() }
+                        throw ((e as? ExecutionException)?.cause ?: e)
+                    } finally {
+                        connectExecutor.shutdownNow()
+                    }
                     socket = activeSocket
                     pending.socket = activeSocket
                     if (exchange != null) {
@@ -441,6 +474,10 @@ class CompasBluetoothModule : Module() {
                 } catch (e: Exception) {
                     if (destroyed) {
                         pending.reject("MODULE_DESTROYED", "Bluetooth module was destroyed", e)
+                    } else if (e is PairingRequiredException) {
+                        pending.reject("BLUETOOTH_PAIRING_REQUIRED", PAIRING_REQUIRED_MESSAGE, e)
+                    } else if (pending.isSettled) {
+                        // The pairing receiver or an explicit reset already settled this request.
                     } else if (exchange != null && exchange.preempted) {
                         pending.reject("ARTWORK_PREEMPTED", "Artwork request was preempted", e)
                     } else {
@@ -469,6 +506,14 @@ class CompasBluetoothModule : Module() {
 
         OnDestroy {
             stopDiscoveryInternal(cancelAdapterDiscovery = true)
+            synchronized(pairingBlockLock) {
+                destroyed = true
+                pairingReceiver?.let { receiver ->
+                    runCatching { pairingReceiverContext?.unregisterReceiver(receiver) }
+                    pairingReceiver = null
+                    pairingReceiverContext = null
+                }
+            }
             synchronized(artworkLock) {
                 activeArtworkExchanges.forEach { exchange ->
                     exchange.preempted = true
@@ -476,7 +521,6 @@ class CompasBluetoothModule : Module() {
                 }
                 activeArtworkExchanges.clear()
             }
-            destroyed = true
             rfcommRequestExecutor.shutdownNow()
             pendingRfcommRequests.forEach { pending ->
                 pending.socket?.let { socket -> runCatching { socket.close() } }
@@ -500,6 +544,67 @@ class CompasBluetoothModule : Module() {
         }
     }
 
+    private fun ensurePairingReceiverRegistered() {
+        synchronized(pairingBlockLock) {
+            if (destroyed || pairingReceiver != null) return
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    @Suppress("DEPRECATION")
+                    val device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE) as? BluetoothDevice ?: return
+                    val id = normalizeDeviceId(device.address)
+                    // A pairing broadcast can arrive after the socket already failed, between requests.
+                    if (id !in rfcommDeviceIds || bluetoothAdapter?.isEnabled != true) return
+                    when (intent.action) {
+                        BluetoothDevice.ACTION_PAIRING_REQUEST -> {
+                            // Observe the system pairing UI without changing or cancelling its flow.
+                            blockDeviceForPairing(id)
+                        }
+                        BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
+                            val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
+                            if (state == BluetoothDevice.BOND_NONE || state == BluetoothDevice.BOND_BONDING) {
+                                blockDeviceForPairing(id)
+                            }
+                        }
+                    }
+                }
+            }
+            val filter = IntentFilter().apply {
+                addAction(BluetoothDevice.ACTION_PAIRING_REQUEST)
+                addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+            }
+            val receiverContext = context.applicationContext
+            if (Build.VERSION.SDK_INT >= 33) {
+                receiverContext.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+            } else {
+                receiverContext.registerReceiver(receiver, filter)
+            }
+            pairingReceiver = receiver
+            pairingReceiverContext = receiverContext
+        }
+    }
+
+    private fun blockDeviceForPairing(deviceId: String) {
+        synchronized(pairingBlockLock) {
+            pairingBlockedDeviceIds.add(deviceId)
+            rejectRfcommRequestsForDevice(deviceId)
+        }
+    }
+
+    private fun rejectRfcommRequestsForDevice(
+        deviceId: String,
+        code: String = "BLUETOOTH_PAIRING_REQUIRED",
+        message: String = PAIRING_REQUIRED_MESSAGE
+    ) {
+        pendingRfcommRequests.filter { it.deviceId == deviceId }.forEach { pending ->
+            pending.reject(code, message, null)
+            pending.socket?.let { runCatching { it.close() } }
+        }
+    }
+
+    private fun normalizeDeviceId(deviceId: String): String = deviceId.uppercase(Locale.ROOT)
+
+    private class PairingRequiredException : IOException(PAIRING_REQUIRED_MESSAGE)
+
     private data class ParsedResponse(
         val statusCode: Int,
         val reason: String,
@@ -508,6 +613,7 @@ class CompasBluetoothModule : Module() {
     )
 
     private companion object {
+        const val PAIRING_REQUIRED_MESSAGE = "Select a paired Bluetooth player first."
         val responseTimeoutExecutor = ScheduledThreadPoolExecutor(1) { task ->
             Thread(task, "compas-rfcomm-response-timeout").apply { isDaemon = true }
         }.apply {

@@ -68,6 +68,12 @@ export async function pairDevice(deviceId: string): Promise<boolean> {
   return await mod.pairDevice(deviceId);
 }
 
+export async function resetPairingBlock(deviceId: string): Promise<boolean> {
+  const mod = getNativeModule();
+  if (!mod || !mod.resetPairingBlock) return false;
+  return await mod.resetPairingBlock(deviceId);
+}
+
 export async function preemptArtwork(index?: number | null): Promise<number> {
   const mod = getNativeModule();
   if (!mod || !mod.preemptArtwork) return 0;

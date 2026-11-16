@@ -1,6 +1,6 @@
 {
   "name": "compas-app",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "main": "index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -42,7 +42,9 @@
     "typecheck": "tsc --noEmit",
     "check:translations": "node scripts/check-translations.cjs",
     "test:dac-mode": "node scripts/test-dac-mode.cjs",
-    "test:sd-browser": "node scripts/test-sd-browser.cjs"
+    "test:sd-browser": "node scripts/test-sd-browser.cjs",
+    "test:connection-transport-errors": "node scripts/test-connection-transport-errors.cjs",
+    "test:auto-reconnect": "node scripts/test-auto-reconnect.cjs"
   },
   "private": true,
   "expo": {

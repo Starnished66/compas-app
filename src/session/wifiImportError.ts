@@ -11,17 +11,26 @@ const ERROR_MESSAGES: Record<string, string> = {
   wifi_import_unavailable: 'Update the player firmware to use Wi-Fi import.',
 };
 
-export function wifiImportErrorMessage(value: unknown): string {
-  if (typeof value === 'string') return ERROR_MESSAGES[value] ?? 'The transfer service reported an error.';
+function knownWifiImportErrorMessage(value: unknown): string | null {
+  if (typeof value === 'string') return ERROR_MESSAGES[value] ?? null;
   if (value && typeof value === 'object') {
-    const error = value as { statusCode?: number; responseBody?: string };
+    const error = value as { statusCode?: number; responseBody?: string; message?: string };
     if (error.statusCode === 404 || error.statusCode === 501) return ERROR_MESSAGES.unavailable;
-    if (!(typeof error.statusCode === 'number') && value instanceof Error) return value.message;
+    if (typeof error.message === 'string' && ERROR_MESSAGES[error.message]) return ERROR_MESSAGES[error.message];
     try {
       const body = JSON.parse(error.responseBody ?? '{}');
       if (typeof body.code === 'string' && ERROR_MESSAGES[body.code]) return ERROR_MESSAGES[body.code];
       if (typeof body.error === 'string' && ERROR_MESSAGES[body.error]) return ERROR_MESSAGES[body.error];
     } catch { /* Use the generic transfer-service message below. */ }
+    const responseCode = error.responseBody?.trim();
+    if (responseCode && ERROR_MESSAGES[responseCode]) return ERROR_MESSAGES[responseCode];
   }
-  return 'The transfer service reported an error.';
+  return null;
+}
+
+export function wifiImportErrorMessage(value: unknown, fallbackMessage?: string): string {
+  const known = knownWifiImportErrorMessage(value);
+  if (known) return known;
+  if (value instanceof Error && typeof (value as { statusCode?: number }).statusCode !== 'number') return value.message;
+  return fallbackMessage ?? 'The transfer service reported an error.';
 }

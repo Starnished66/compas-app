@@ -1,5 +1,5 @@
 import React, { ReactNode, useEffect, useRef, useState } from 'react';
-import { Animated, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { usePalette } from '../PaletteProvider';
 import { Durations, Easings, motionDuration } from '../motion';
 import { Radius, Space } from '../tokens';
@@ -58,7 +58,7 @@ export function Dialog({ visible, onClose, title, message, children, actions, di
 
   return (
     <Modal transparent statusBarTranslucent animationType="none" visible onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={styles.root} behavior="padding">
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: scrim }]}>
           <Pressable
             accessibilityRole={dismissable ? 'button' : undefined}
@@ -82,18 +82,25 @@ export function Dialog({ visible, onClose, title, message, children, actions, di
             },
           ]}
         >
-          <View style={styles.header}>
-            <AppText variant="title" accessibilityRole="header">
-              {title}
-            </AppText>
-            {message ? (
-              <AppText variant="body" tone="inkMuted">
-                {message}
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.header}>
+              <AppText variant="title" accessibilityRole="header">
+                {title}
               </AppText>
-            ) : null}
-          </View>
-          {children}
-          {actions ? <View style={styles.actions}>{actions}</View> : null}
+              {message ? (
+                <AppText variant="body" tone="inkMuted">
+                  {message}
+                </AppText>
+              ) : null}
+            </View>
+            {children}
+            {actions ? <View style={styles.actions}>{actions}</View> : null}
+          </ScrollView>
         </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
@@ -109,10 +116,11 @@ const styles = StyleSheet.create({
   },
   card: {
     alignSelf: 'stretch',
+    flexShrink: 1,
+    maxHeight: '100%',
     borderWidth: 1,
     borderRadius: Radius.xl,
     padding: Space.xl,
-    gap: Space.lg,
     shadowOffset: { width: 0, height: SHADOW_OFFSET_Y },
     shadowOpacity: 1,
     shadowRadius: SHADOW_RADIUS,
@@ -120,6 +128,12 @@ const styles = StyleSheet.create({
   },
   header: {
     gap: Space.sm,
+  },
+  scroll: {
+    flexShrink: 1,
+  },
+  content: {
+    gap: Space.lg,
   },
   actions: {
     flexDirection: 'row',

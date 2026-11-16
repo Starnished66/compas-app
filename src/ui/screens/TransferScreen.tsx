@@ -36,6 +36,7 @@ import { HiddenFilesButton } from '../transfer/HiddenFilesButton';
 import { useSdBrowser } from '../transfer/useSdBrowser';
 import { TransferDestinationSheet } from '../sheets/TransferDestinationSheet';
 import { isConnectionError, isTransferUnavailable } from '../../session/transferAvailability';
+import { wifiImportErrorMessage } from '../../session/wifiImportError';
 import { localizedMessage } from '../localizedLabels';
 import { usePalette } from '../PaletteProvider';
 import { Space } from '../tokens';
@@ -164,8 +165,11 @@ function TransferWorkspace({ transfer, active, connected }: { transfer: Transfer
   transferRef.current = transfer;
   const aliveRef = useRef(true);
   useEffect(() => () => { aliveRef.current = false; }, []);
-  const errorText = useCallback((cause: any, fallback: string) =>
-    isConnectionError(cause) ? t('Connection to Compás player was lost.') : cause?.message || fallback, [t]);
+  const errorText = useCallback((cause: any, fallback: string) => {
+    if (isConnectionError(cause)) return t('Connection to Compás player was lost.');
+    const message = typeof cause === 'string' ? cause : cause?.message;
+    return localizedMessage(wifiImportErrorMessage(cause, message || fallback), t);
+  }, [t]);
 
   const [pane, setPane] = useState<Pane>('phone');
   const [error, setError] = useState<string | null>(null);

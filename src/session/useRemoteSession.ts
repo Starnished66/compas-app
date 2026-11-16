@@ -66,6 +66,7 @@ import {
   songFromCatalog,
 } from './libraryCategoryLoader';
 import { reconcileEntries } from './reconcileEntries';
+import { selectConnectionTransport } from './connectionTransportSelection';
 import {
   matchesStoredCatalogSnapshot,
   canFinishCatalogSyncFromSnapshot,
@@ -89,6 +90,7 @@ import { isDacActive } from '../data/dacMode';
 import { BluetoothRequestPolicy } from './BluetoothRequestPolicy';
 import {
   BluetoothTransport,
+  resetPairingBlock,
   getBondedDevices,
   startDiscovery as startBtDiscovery,
   stopDiscovery as stopBtDiscovery,
@@ -319,6 +321,10 @@ export function useRemoteSession() {
   const pinCooldownTimerRef = useRef<any>(null);
   const autoReconnectTimerRef = useRef<any>(null);
   const autoReconnectEnabledRef = useRef<boolean>(true);
+  const lastConnectionTransportRef = useRef<ConnectionTransport | null>(null);
+  const bluetoothPairingRequiredRef = useRef(false);
+  const autoReconnectGenerationRef = useRef(0);
+  const autoReconnectRunningRef = useRef(false);
   const searchDebounceTimerRef = useRef<any>(null);
 
   const wifiAddressEditedRef = useRef<boolean>(false);
@@ -380,6 +386,9 @@ export function useRemoteSession() {
 
         const autoReconnect = savedAuto !== 'false';
         autoReconnectEnabledRef.current = autoReconnect;
+        lastConnectionTransportRef.current = savedTransport === 'bluetooth'
+          ? ConnectionTransport.Bluetooth
+          : savedWifi ? ConnectionTransport.Wifi : savedBt ? ConnectionTransport.Bluetooth : null;
 
         setState((prev) => ({
           ...prev,
@@ -724,13 +733,15 @@ export function useRemoteSession() {
   // Connect flows
   const scheduleAutoReconnect = (initialDelayMs: number = 15000) => {
     if (!autoReconnectEnabledRef.current || autoReconnectTimerRef.current) return;
+    if (lastConnectionTransportRef.current === ConnectionTransport.Bluetooth && bluetoothPairingRequiredRef.current) return;
     autoReconnectDueAtRef.current = Date.now() + initialDelayMs;
     autoReconnectTimerRef.current = setTimeout(runAutoReconnect, initialDelayMs);
   };
 
   const runAutoReconnect = async () => {
     autoReconnectTimerRef.current = null;
-    if (!autoReconnectEnabledRef.current || apiRef.current) return;
+    if (!autoReconnectEnabledRef.current || apiRef.current || autoReconnectRunningRef.current) return;
+    if (lastConnectionTransportRef.current === ConnectionTransport.Bluetooth && bluetoothPairingRequiredRef.current) return;
     if (stateRef.current.pinDialogVisible) {
       // Editing the PIN while a dropped link waits: try again later instead of leaving "Connecting" stuck.
       // A PIN rejection sets Error, and that wait is for the user, not for us.
@@ -738,35 +749,56 @@ export function useRemoteSession() {
       return;
     }
 
-    const savedWifi = await AsyncStorage.getItem(PREF_WIFI_ADDRESS);
-    const savedBt = await AsyncStorage.getItem(PREF_BLUETOOTH_ID);
-
-    let connected = false;
-    if (savedWifi && savedWifi.trim().length > 0) {
-      const wifiPerms = getRequiredPermissionsForWifi();
-      const wifiOk = wifiPerms.length === 0 || (await checkPermissions(wifiPerms));
-      if (wifiOk) {
-        startPlaybackService('Reconnecting to player…').catch(() => {});
-        try {
-          connected = await connectDirect(ConnectionTransport.Wifi, savedWifi.trim());
-        } catch {}
+    const generation = autoReconnectGenerationRef.current;
+    const isCurrent = () => generation === autoReconnectGenerationRef.current && autoReconnectEnabledRef.current && !apiRef.current;
+    autoReconnectRunningRef.current = true;
+    try {
+      const [savedWifi, savedBt] = await Promise.all([
+        AsyncStorage.getItem(PREF_WIFI_ADDRESS), AsyncStorage.getItem(PREF_BLUETOOTH_ID),
+      ]);
+      if (!isCurrent()) return;
+      // A saved address on another transport may belong to another player or have a stale bond.
+      // Recovery follows the working session, not an unsubmitted transport selection.
+      const transport = lastConnectionTransportRef.current ?? (savedWifi ? ConnectionTransport.Wifi : ConnectionTransport.Bluetooth);
+      let connected = false;
+      if (transport === ConnectionTransport.Wifi && savedWifi && savedWifi.trim().length > 0) {
+        const wifiPerms = getRequiredPermissionsForWifi();
+        const wifiOk = wifiPerms.length === 0 || (await checkPermissions(wifiPerms));
+        if (wifiOk && isCurrent()) {
+          startPlaybackService('Reconnecting to player…').catch(() => {});
+          try {
+            connected = await connectDirect(ConnectionTransport.Wifi, savedWifi.trim(), undefined, undefined, generation);
+          } catch {}
+        }
       }
-    }
 
-    if (!connected && savedBt && autoReconnectEnabledRef.current && !apiRef.current) {
-      const btPerms = getRequiredPermissionsForBluetooth();
-      const btOk = await checkPermissions(btPerms);
-      if (btOk) {
-        startPlaybackService('Reconnecting to player…').catch(() => {});
-        try {
-          connected = await connectDirect(ConnectionTransport.Bluetooth, undefined, savedBt);
-        } catch {}
+      if (transport === ConnectionTransport.Bluetooth && savedBt && isCurrent() && !bluetoothPairingRequiredRef.current) {
+        const btPerms = getRequiredPermissionsForBluetooth();
+        const btOk = await checkPermissions(btPerms);
+        if (btOk && isCurrent()) {
+          startPlaybackService('Reconnecting to player…').catch(() => {});
+          try {
+            connected = await connectDirect(ConnectionTransport.Bluetooth, undefined, savedBt, undefined, generation);
+          } catch {}
+        }
       }
-    }
 
-    if (!connected && autoReconnectEnabledRef.current && !apiRef.current && !stateRef.current.pinDialogVisible) {
-      scheduleAutoReconnect(15000);
+      if (!connected && isCurrent() && !stateRef.current.pinDialogVisible) {
+        scheduleAutoReconnect(15000);
+      }
+    } finally {
+      autoReconnectRunningRef.current = false;
     }
+  };
+
+  const pauseForBluetoothPairing = (err: any): boolean => {
+    if (err?.code !== 'BLUETOOTH_PAIRING_REQUIRED') return false;
+    bluetoothPairingRequiredRef.current = true;
+    if (autoReconnectTimerRef.current) clearTimeout(autoReconnectTimerRef.current);
+    autoReconnectTimerRef.current = null;
+    stopPlaybackService().catch(() => {});
+    setState((prev) => ({ ...prev, connectionStatus: ConnectionStatus.Error, connectionMessage: 'Select a paired Bluetooth player first.' }));
+    return true;
   };
 
   // A choice rejected before connecting must not tear down a session that still works.
@@ -791,11 +823,17 @@ export function useRemoteSession() {
     transport: ConnectionTransport,
     wifiAddr?: string,
     btId?: string,
-    explicitPin?: string
+    explicitPin?: string,
+    reconnectGeneration?: number
   ): Promise<boolean> => {
+    const generation = reconnectGeneration ?? autoReconnectGenerationRef.current;
+    const cancelled = () => generation !== autoReconnectGenerationRef.current ||
+      (reconnectGeneration !== undefined && !autoReconnectEnabledRef.current);
+    if (cancelled()) return false;
     if (transport === ConnectionTransport.Bluetooth) {
       const btPerms = getRequiredPermissionsForBluetooth();
       const permResult = await requestMissingPermissions(btPerms);
+      if (cancelled()) return false;
       if (!permResult.granted) {
         rejectConnectChoice('Bluetooth permission was denied. Grant Nearby devices permission to connect to this player.');
         return false;
@@ -804,6 +842,7 @@ export function useRemoteSession() {
       const wifiPerms = getRequiredPermissionsForWifi();
       if (wifiPerms.length > 0) {
         const permResult = await requestMissingPermissions(wifiPerms);
+        if (cancelled()) return false;
         if (!permResult.granted) {
           rejectConnectChoice('Local network permission was denied. Grant Local Network permission to connect to this player.');
           return false;
@@ -838,9 +877,11 @@ export function useRemoteSession() {
       try {
         bondedDevices = await getBondedDevices();
       } catch (err: any) {
+        if (cancelled()) return false;
         rejectConnectChoice(err?.message || 'Could not check Bluetooth pairing status. Turn Bluetooth on and try again.');
         return false;
       }
+      if (cancelled()) return false;
       const bondedPlayer = bondedDevices.find(
         (device) => device.id.toLowerCase() === devId.toLowerCase()
       );
@@ -857,8 +898,10 @@ export function useRemoteSession() {
       playerKey = `bt:${devId}`;
     }
 
+    if (cancelled() || (reconnectGeneration !== undefined && apiRef.current)) return false;
     // Validation is done; only now invalidate the current session's in-flight work.
     const attempt = ++connectionAttemptRef.current;
+    const isCurrentAttempt = () => attempt === connectionAttemptRef.current && !cancelled();
     activeWifiEndpointRef.current = null;
     wifiImportOperationRef.current++;
     setWifiImportStatus({ state: 'stopped', error: null });
@@ -878,18 +921,24 @@ export function useRemoteSession() {
     if (!pinToUse) {
       pinToUse = (await pinStoreRef.current.get(playerKey)) || undefined;
     }
+    if (!isCurrentAttempt()) return false;
     if (pinToUse) {
       api.setPin(pinToUse);
     }
 
     try {
       const caps = await api.capabilities();
+      if (!isCurrentAttempt()) return false;
       if (caps.version !== 1) {
         throw new Error('Unsupported Compás protocol version');
       }
 
       const status = await api.status();
-      if (attempt !== connectionAttemptRef.current) return false;
+      if (!isCurrentAttempt()) return false;
+
+      // Persist before committing the session; cancellation during secure storage must not revive it.
+      const pinNotSaved = !!pinToUse && !(await pinStoreRef.current.put(playerKey, pinToUse));
+      if (!isCurrentAttempt()) return false;
 
       // lastPlayerKeyRef survives a dropped link, so reconnecting to the same player keeps navigation.
       if (lastPlayerKeyRef.current !== playerKey) {
@@ -913,16 +962,15 @@ export function useRemoteSession() {
       bluetoothAudioOutputRef.current = status.bluetoothAudioOutput ?? null;
       lastQueueRefreshAtRef.current = Date.now();
       autoReconnectEnabledRef.current = true;
+      lastConnectionTransportRef.current = transport;
+      if (transport === ConnectionTransport.Bluetooth) bluetoothPairingRequiredRef.current = false;
       AsyncStorage.setItem(PREF_AUTO_RECONNECT, 'true').catch(() => {});
-
-      // The session works either way, but the user must know the PIN will be asked for again.
-      const pinNotSaved = !!pinToUse && !(await pinStoreRef.current.put(playerKey, pinToUse));
 
       AsyncStorage.setItem(PREF_LAST_TRANSPORT, transport === ConnectionTransport.Wifi ? 'wifi' : 'bluetooth').catch(() => {});
       if (transport === ConnectionTransport.Wifi) {
-        AsyncStorage.setItem(PREF_WIFI_ADDRESS, stateRef.current.wifiAddress).catch(() => {});
-      } else if (stateRef.current.selectedBluetoothPlayerId) {
-        AsyncStorage.setItem(PREF_BLUETOOTH_ID, stateRef.current.selectedBluetoothPlayerId).catch(() => {});
+        AsyncStorage.setItem(PREF_WIFI_ADDRESS, playerKey).catch(() => {});
+      } else {
+        AsyncStorage.setItem(PREF_BLUETOOTH_ID, playerKey.slice(3)).catch(() => {});
       }
 
       const mode =
@@ -983,11 +1031,13 @@ export function useRemoteSession() {
       startCatalogSync(api, attempt, caps.features);
       return true;
     } catch (err: any) {
-      if (attempt !== connectionAttemptRef.current) return false;
+      if (!isCurrentAttempt()) return false;
       dropLiveSession();
+      if (transport === ConnectionTransport.Bluetooth && pauseForBluetoothPairing(err)) return false;
       const statusCode = err?.statusCode || err?.status;
       if (statusCode === 401) {
         if (pinToUse) await pinStoreRef.current.remove(playerKey);
+        if (!isCurrentAttempt()) return false;
         stopPlaybackService().catch(() => {});
         setState((prev) => ({
           ...prev,
@@ -1017,21 +1067,35 @@ export function useRemoteSession() {
     }
   };
 
-  const connect = (explicitPin?: string) => {
+  const connect = async (explicitPin?: string) => {
+    const generation = ++autoReconnectGenerationRef.current;
     // A pending auto-reconnect would otherwise fire mid-attempt and replace the user's choice.
     if (autoReconnectTimerRef.current) {
       clearTimeout(autoReconnectTimerRef.current);
       autoReconnectTimerRef.current = null;
     }
-    connectDirect(
-      stateRef.current.selectedConnectionTransport,
-      stateRef.current.wifiAddress,
-      stateRef.current.selectedBluetoothPlayerId ?? undefined,
+    const target = stateRef.current;
+    if (target.selectedConnectionTransport === ConnectionTransport.Bluetooth && target.selectedBluetoothPlayerId) {
+      try {
+        await resetPairingBlock(target.selectedBluetoothPlayerId);
+      } catch (err: any) {
+        if (generation !== autoReconnectGenerationRef.current) return;
+        rejectConnectChoice(err?.message || 'Could not check Bluetooth pairing status. Turn Bluetooth on and try again.');
+        return;
+      }
+    }
+    if (generation !== autoReconnectGenerationRef.current) return;
+    bluetoothPairingRequiredRef.current = false;
+    await connectDirect(
+      target.selectedConnectionTransport,
+      target.wifiAddress,
+      target.selectedBluetoothPlayerId ?? undefined,
       explicitPin
     );
   };
 
   const disconnect = () => {
+    autoReconnectGenerationRef.current++;
     bulkActionCancelledRef.current = true;
     connectionAttemptRef.current++;
     queueRefreshGenerationRef.current++;
@@ -1755,6 +1819,7 @@ export function useRemoteSession() {
           return;
         }
         // Unexpected connection loss during poll
+        if (transport === ConnectionTransport.Bluetooth && pauseForBluetoothPairing(err)) return;
         if (autoReconnectEnabledRef.current) {
           setState((prev) => ({
             ...prev,
@@ -1937,6 +2002,7 @@ export function useRemoteSession() {
       lastQueueRefreshAtRef.current = Date.now();
       gateRef.current.reset();
       AsyncStorage.setItem(PREF_LAST_TRANSPORT, 'wifi').catch(() => {});
+      lastConnectionTransportRef.current = ConnectionTransport.Wifi;
       AsyncStorage.setItem(PREF_WIFI_ADDRESS, endpoint).catch(() => {});
       positionStoreRef.current.set(status.positionSeconds * 1000, status.durationSeconds * 1000);
       setState((prev) => ({
@@ -3685,7 +3751,7 @@ export function useRemoteSession() {
         break;
 
       case 'SelectConnectionTransport':
-        setState((prev) => ({ ...prev, selectedConnectionTransport: action.transport }));
+        setState((prev) => selectConnectionTransport(prev, action.transport));
         break;
 
       case 'ScanBluetoothPlayers': {
