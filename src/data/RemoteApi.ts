@@ -787,6 +787,10 @@ export class RemoteApi {
     return this.groups(`${this.prefix}/library/albums`, params);
   }
 
+  async topRatedAlbums(): Promise<LibraryGroup[]> {
+    return this.groups(`${this.prefix}/library/top_rated_albums`, [], 'albums');
+  }
+
   async playlists(): Promise<Playlist[]> {
     const json = await this.jsonGet(`${this.prefix}/playlists`);
     const playlists = Array.isArray(json.playlists) ? json.playlists : [];
@@ -914,9 +918,12 @@ export class RemoteApi {
       .replace(/%20/g, '+');
   }
 
-  private async groups(path: string, params: [string, string][] = []): Promise<LibraryGroup[]> {
+  private async groups(
+    path: string,
+    params: [string, string][] = [],
+    key = path.endsWith('/albums') ? 'albums' : path.endsWith('/genres') ? 'genres' : 'artists',
+  ): Promise<LibraryGroup[]> {
     const json = await this.jsonGet(path, params);
-    const key = path.endsWith('/albums') ? 'albums' : path.endsWith('/genres') ? 'genres' : 'artists';
     const arr = Array.isArray(json[key]) ? json[key] : [];
     return arr.map((g: any) => ({
       name: String(g.name || ''),

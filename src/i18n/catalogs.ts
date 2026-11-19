@@ -15,6 +15,10 @@ export type TranslationValue = string | Partial<Record<Intl.LDMLPluralRule, stri
 export const catalogs: Record<Language, Record<string, TranslationValue>> = {
   fi, ja, nl, pt_BR, pt_PT, uk, vi, zh_CN,
   en: {
+    'No songs rated 3 stars or higher yet': 'No songs rated 3 stars or higher yet',
+    'Top rated': 'Top rated',
+    'Top rated albums': 'Top rated albums',
+    '{count} top rated tracks': { one: '{count} top rated track', other: '{count} top rated tracks' },
     'Repeat once': 'Repeat one',
     'Open on player': 'Open on player',
     'Preview': 'Preview',
@@ -99,6 +103,10 @@ export const catalogs: Record<Language, Record<string, TranslationValue>> = {
     'This removes the plugin from the player.': 'This removes the plugin from the player.',
     'The player only returned the first {count} installed plugins.': 'The player only returned the first {count} installed plugins.', '{count} song': { one: '{count} song', other: '{count} songs' } },
   es: {
+    'No songs rated 3 stars or higher yet': 'Aún no hay canciones con 3 estrellas o más',
+    'Top rated': 'Mejor valoradas',
+    'Top rated albums': 'Álbumes mejor valorados',
+    '{count} top rated tracks': { one: '{count} canción mejor valorada', other: '{count} canciones mejor valoradas' },
     'USB DAC': 'USB DAC',
     'Bluetooth DAC': 'Bluetooth DAC',
     'Waiting for USB audio': 'Esperando audio USB',
@@ -249,6 +257,10 @@ export const catalogs: Record<Language, Record<string, TranslationValue>> = {
     'Checks while the app is open, at most every six hours.': 'Busca actualizaciones mientras la aplicación está abierta, como máximo cada seis horas.',
   },
   de: {
+    'No songs rated 3 stars or higher yet': 'Noch keine Titel mit 3 oder mehr Sternen',
+    'Top rated': 'Bestbewertet',
+    'Top rated albums': 'Bestbewertete Alben',
+    '{count} top rated tracks': { one: '{count} bestbewerteter Titel', other: '{count} bestbewertete Titel' },
     'USB DAC': 'USB DAC',
     'Bluetooth DAC': 'Bluetooth DAC',
     'Waiting for USB audio': 'Warte auf USB-Audio',
@@ -375,6 +387,10 @@ export const catalogs: Record<Language, Record<string, TranslationValue>> = {
     'Checks while the app is open, at most every six hours.': 'Sucht bei geöffneter App höchstens alle sechs Stunden nach Updates.',
   },
   fr: {
+    'No songs rated 3 stars or higher yet': 'Aucun titre noté 3 étoiles ou plus pour le moment',
+    'Top rated': 'Les mieux notés',
+    'Top rated albums': 'Albums les mieux notés',
+    '{count} top rated tracks': { one: '{count} titre parmi les mieux notés', other: '{count} titres parmi les mieux notés' },
     'USB DAC': 'USB DAC',
     'Bluetooth DAC': 'Bluetooth DAC',
     'Waiting for USB audio': 'En attente de l’audio USB',
@@ -500,6 +516,10 @@ export const catalogs: Record<Language, Record<string, TranslationValue>> = {
     'Checks while the app is open, at most every six hours.': 'Vérifie les mises à jour lorsque l’application est ouverte, au maximum toutes les six heures.',
   },
   it: {
+    'No songs rated 3 stars or higher yet': 'Ancora nessun brano con 3 o più stelle',
+    'Top rated': 'Più votati',
+    'Top rated albums': 'Album più votati',
+    '{count} top rated tracks': { one: '{count} brano tra i più votati', other: '{count} brani tra i più votati' },
     'USB DAC': 'USB DAC',
     'Bluetooth DAC': 'Bluetooth DAC',
     'Waiting for USB audio': 'In attesa dell’audio USB',
@@ -623,6 +643,10 @@ export const catalogs: Record<Language, Record<string, TranslationValue>> = {
     'Checks while the app is open, at most every six hours.': 'Controlla mentre l’app è aperta, al massimo ogni sei ore.',
   },
   ru: {
+    'No songs rated 3 stars or higher yet': 'Пока нет песен с оценкой 3 звезды или выше',
+    'Top rated': 'С высокой оценкой',
+    'Top rated albums': 'Альбомы с высокой оценкой',
+    '{count} top rated tracks': { one: '{count} трек с высокой оценкой', few: '{count} трека с высокой оценкой', many: '{count} треков с высокой оценкой', other: '{count} трека с высокой оценкой' },
     'USB DAC': 'USB DAC',
     'Bluetooth DAC': 'Bluetooth DAC',
     'Waiting for USB audio': 'Ожидание USB-аудио',

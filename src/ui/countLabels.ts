@@ -19,7 +19,7 @@ export function localizedCountLabel(label: string | null | undefined, t: Transla
   const groupsTracks = source.match(/^(\d+) groups · (\d+) tracks$/);
   if (groupsTracks) return t('{groups} groups · {tracks} tracks', { groups: Number(groupsTracks[1]), tracks: Number(groupsTracks[2]) });
 
-  const countAndSuffix = source.match(/^(\d+) (tracks|songs|albums|artists|album artists|genres|items|folders|playlists|favorites|recently played tracks|recently played songs|songs?)$/);
+  const countAndSuffix = source.match(/^(\d+) (tracks|songs|albums|artists|album artists|genres|items|folders|playlists|favorites|top rated tracks|recently played tracks|recently played songs|songs?)$/);
   if (countAndSuffix) {
     const count = Number(countAndSuffix[1]);
     const suffix = countAndSuffix[2];

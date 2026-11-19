@@ -2,6 +2,10 @@ import type { TranslationValue } from '../catalogs';
 
 // Machine-assisted translation, reviewed for audio terminology and interpolation.
 export const uk: Record<string, TranslationValue> = {
+  "No songs rated 3 stars or higher yet": "Поки що немає пісень з оцінкою 3 зірки або вище",
+  "Top rated": "З найвищими оцінками",
+  "Top rated albums": "Альбоми з найвищими оцінками",
+  "{count} top rated tracks": { one: "{count} пісня з найвищими оцінками", few: "{count} пісні з найвищими оцінками", many: "{count} пісень з найвищими оцінками", other: "{count} пісні з найвищими оцінками" },
   "USB DAC": "USB DAC",
   "Bluetooth DAC": "Bluetooth DAC",
   "Waiting for USB audio": "Очікування аудіо USB",

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../i18n';
-import { localizedCountLabel, localizedEntrySubtitle } from '../localizedLabels';
+import { localizedCountLabel } from '../localizedLabels';
 import { StyleSheet, View } from 'react-native';
 import {
   ConnectionStatus,
@@ -12,7 +12,7 @@ import {
 } from '../../data/types';
 import { AlphabetRail } from '../components/AlphabetRail';
 import { CategoryChips } from '../components/CategoryChips';
-import { CollectionHeader } from '../components/CollectionHeader';
+import { AlbumCollectionHeader } from '../components/AlbumCollectionHeader';
 import { CollectionPlayButtons } from '../components/CollectionPlayButtons';
 import { FlipGhostLayer } from '../components/FlipGhostLayer';
 import { InlineError } from '../components/InlineError';
@@ -31,16 +31,15 @@ import { useReducedMotion } from '../useReducedMotion';
 import { useScreenInsets } from '../useScreenInsets';
 import { letterOfEntry, railLetters } from '../library/alphabetIndex';
 import { FlipContext, FlipMode, FlipRegistry } from '../library/flipRegistry';
-import { availableCategoryOptions, categoryNoun, isSortableCategory } from '../library/libraryCategories';
+import { availableCategoryOptions, categoryNoun, favoritesLabels, isSortableCategory } from '../library/libraryCategories';
 import { LibraryEntryKind, opensCollection } from '../library/libraryEntryKind';
-import { LibraryItem, entryItems, nodeItem, songIds, withLetterHeaders } from '../library/libraryItems';
+import { LibraryItem, entryItems, nodeItem, withLetterHeaders } from '../library/libraryItems';
 import { isServerOrderedAlbumSort } from '../../session/librarySorting';
 import { inlineLibraryError, libraryStateMessage } from '../library/libraryStateMessage';
 import { playCollection } from '../library/collectionPlayback';
 import { isShuffleMode } from '../../session/playbackModes';
 import { useAlbumGrid } from '../library/useAlbumGrid';
 import { useCollectionTrail } from '../library/useCollectionTrail';
-import { useFirstEntryArtwork } from '../library/useFirstEntryArtwork';
 import { useLibraryLevels } from '../library/useLibraryLevels';
 import { useLibraryListScroll } from '../library/useLibraryListScroll';
 import { useStuckHeader } from '../library/useStuckHeader';
@@ -66,12 +65,12 @@ const RAIL_ENTRY_INSET = RAIL_GUTTER - Space.xs;
 const RAIL_TOP = 176;
 const STICKY_CHIPS_OFFSET = 64;
 
-function emptyMessage(category: LibraryCategory, nested: boolean): LibraryPlaceholderProps {
+function emptyMessage(category: LibraryCategory, nested: boolean, supportedFeatures: string[]): LibraryPlaceholderProps {
   if (category === LibraryCategory.Folders) return { title: 'This folder is empty' };
   if (nested) return { title: 'Nothing here yet', body: 'The player has no songs in this collection.' };
   switch (category) {
     case LibraryCategory.Favorites:
-      return { title: 'No favorites yet', body: 'Tap the heart on Now Playing or in a song’s menu.' };
+      return favoritesLabels(supportedFeatures).empty;
     case LibraryCategory.Recent:
       return { title: 'Nothing played yet', body: 'Songs played on the player show up here.' };
     default:
@@ -223,6 +222,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   const step = nested ? trail.current : null;
   const artistDetail = nested && state.libraryNestedTitle === NESTED_ALBUMS_TITLE;
   const albumDetail = nested && !artistDetail && step?.kind === 'album';
+  const albumEntries = albumDetail ? entries : null;
   // Features outlive a dropped link; don't offer playback the player can't receive right now.
   const nativeCollectionSupported =
     state.connectionStatus === ConnectionStatus.Connected && state.supportedFeatures.includes('collection_playback');
@@ -249,10 +249,8 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
     return lettered ? withLetterHeaders(entryRows, letterOfEntry) : entryRows;
   }, [searchActive, showGrid, tiles, entries, category, nested, nestedTitle, albumDetail, lettered]);
   const rowLetters = useMemo(() => (lettered ? railLetters(rows) : []), [lettered, rows]);
-  const playableIds = useMemo(() => (albumDetail ? songIds(entries) : []), [albumDetail, entries]);
-  const albumArtwork = useFirstEntryArtwork(albumDetail ? entries : null, step?.entry);
 
-  const noun = nested ? (artistDetail ? 'albums' : 'items') : categoryNoun(category);
+  const noun = nested ? (artistDetail ? 'albums' : 'items') : categoryNoun(category, state.supportedFeatures);
   const connected = state.connectionStatus === ConnectionStatus.Connected;
   const shuffleActive = isShuffleMode(state.playbackMode);
   const railGutter = lettered && entries.length > 0 ? RAIL_GUTTER : undefined;
@@ -273,21 +271,20 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
         state,
         onAction,
         noun,
-        empty: emptyMessage(category, nested),
+        empty: emptyMessage(category, nested, supportedFeatures),
         onRetry: nested ? undefined : () => onAction({ type: 'RefreshLibrary', category }),
       }),
-    // libraryStateMessage reads only these fields of state.
-    [t, onAction, noun, category, nested, connectionStatus, connectionMessage, hasLoadedEntries, libraryStatus, libraryCountLabel],
+    [t, onAction, noun, category, nested, supportedFeatures, connectionStatus, connectionMessage, hasLoadedEntries, libraryStatus, libraryCountLabel],
   );
 
   const headerItems = useMemo(() => {
     const items: LibraryItem[] = [];
     if (searchActive) return items;
-    const playButtons = (ids: string[], native: boolean) => (
+    const playButtons = (
       <CollectionPlayButtons
         busy={collectionBusy}
-        onPlay={() => playCollection(onAction, ids, false, shuffleActive, native)}
-        onShuffle={() => playCollection(onAction, ids, true, shuffleActive, native)}
+        onPlay={() => playCollection(onAction, [], false, shuffleActive, true)}
+        onShuffle={() => playCollection(onAction, [], true, shuffleActive, true)}
       />
     );
     if (nested) {
@@ -301,7 +298,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
         ),
       );
       if ((artistDetail && nativeCollectionPlayback) || nativeGenrePlayback) {
-        items.push(nodeItem('collection-playback', <View style={styles.collectionActions}>{playButtons([], true)}</View>));
+        items.push(nodeItem('collection-playback', <View style={styles.collectionActions}>{playButtons}</View>));
       }
     } else {
       items.push(
@@ -340,21 +337,22 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
         );
       }
       if (nativeRootSongsPlayback) {
-        items.push(nodeItem('collection-playback', <View style={styles.collectionActions}>{playButtons([], true)}</View>));
+        items.push(nodeItem('collection-playback', <View style={styles.collectionActions}>{playButtons}</View>));
       }
     }
 
-    if (albumDetail && step) {
+    if (albumEntries && step) {
       items.push(
         nodeItem(
           'album',
-          <CollectionHeader
-            eyebrow={t('Album')}
-            title={step.entry.title}
-            subtitle={localizedEntrySubtitle(step.entry, t)}
-            meta={localizedCountLabel(libraryCountLabel, t) || undefined}
-            artworkUri={albumArtwork}
-            actions={playableIds.length || nativeCollectionPlayback ? playButtons(playableIds, nativeCollectionPlayback) : undefined}
+          <AlbumCollectionHeader
+            album={step.entry}
+            entries={albumEntries}
+            countLabel={libraryCountLabel}
+            busy={collectionBusy}
+            shuffleActive={shuffleActive}
+            nativePlayback={nativeCollectionPlayback}
+            onAction={onAction}
           />,
         ),
       );
@@ -390,7 +388,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   }, [
     searchActive, nested, albumDetail, step, nestedTitle, t, onAction, artistDetail, nativeCollectionPlayback,
     nativeGenrePlayback, nativeRootSongsPlayback, collectionBusy, shuffleActive, onLeadingLayout, chipsStuck, insetTop,
-    supportedFeatures, category, connected, catalogSyncMessage, railGutter, albumArtwork, playableIds, libraryCountLabel,
+    supportedFeatures, category, connected, catalogSyncMessage, railGutter, albumEntries, libraryCountLabel,
     inlineError, placeholder, selectionMode, selectedCount, exitSelection, entryCount, noun, ascending, localDirectionSort,
     showGrid, gridCapable, flip,
   ]);

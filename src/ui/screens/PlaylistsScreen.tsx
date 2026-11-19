@@ -10,6 +10,7 @@ import {
   RemoteUiState,
 } from '../../data/types';
 import { useScrollToTopRequest } from '../chrome/useScrollToTopRequest';
+import { AlbumCollectionHeader } from '../components/AlbumCollectionHeader';
 import { Button } from '../components/Button';
 import { CollectionHeader } from '../components/CollectionHeader';
 import { CollectionPlayButtons } from '../components/CollectionPlayButtons';
@@ -18,6 +19,7 @@ import { DragReorderCellContext } from '../components/dragReorderCellContext';
 import { IconButton } from '../components/IconButton';
 import { InlineError } from '../components/InlineError';
 import { LibraryList } from '../components/LibraryList';
+import { LibraryEntryRow } from '../components/LibraryEntryRow';
 import { useSongSwipe } from '../library/useSongSwipe';
 import { LibraryPlaceholder } from '../components/LibraryPlaceholder';
 import { NewPlaylistRow } from '../components/NewPlaylistRow';
@@ -38,6 +40,7 @@ import { LibraryItem, entryItems, nodeItem, playlistTrackItems, songIds } from '
 import { inlineLibraryError, libraryStateMessage } from '../library/libraryStateMessage';
 import { rememberPlaylistArtwork, withRememberedPlaylistArtwork } from '../library/playlistArtworkMemory';
 import { useAlbumGrid } from '../library/useAlbumGrid';
+import { useCollectionTrail } from '../library/useCollectionTrail';
 import { useLibraryLevels } from '../library/useLibraryLevels';
 import { useLibraryListScroll } from '../library/useLibraryListScroll';
 import { useFirstEntryArtwork } from '../library/useFirstEntryArtwork';
@@ -46,6 +49,8 @@ import { useStableTrack } from '../useStableTrack';
 import { PlaylistEditOutcome, usePlaylistTrackEdits } from '../library/usePlaylistTrackEdits';
 import { BulkSelectionBar } from '../components/BulkSelectionBar';
 import { BulkActionsSheet } from '../sheets/BulkActionsSheet';
+import { favoritesLabels } from '../library/libraryCategories';
+import { TOP_RATED_ALBUMS_ROW } from '../../session/libraryCategoryLoader';
 
 export interface PlaylistsScreenProps {
   state: RemoteUiState;
@@ -91,7 +96,13 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
 
   const nested = state.libraryIsNested;
   const playlist = nested ? state.activePlaylist ?? null : null;
-  const playlistName = playlist ? playlistDisplayName(playlist.name) : '';
+  const { label: favoritesLabel } = favoritesLabels(state.supportedFeatures);
+  const playlistName = playlist?.key === '@favorites' ? t(favoritesLabel) : playlist ? playlistDisplayName(playlist.name) : '';
+  const nestedTitle = state.libraryNestedTitle;
+  const ratedAlbums = nested && !playlist && nestedTitle === TOP_RATED_ALBUMS_ROW.title;
+  const { current: collection, rememberOpening } = useCollectionTrail(state.libraryEntries, nested && !playlist);
+  const album = nested && !playlist && nestedTitle === 'Tracks' && collection?.kind === 'album'
+    ? collection.entry : null;
   const canEditPlaylists = state.supportedFeatures.includes('playlist_edit');
   const canImport = state.supportedFeatures.includes('playlist_import');
   const canEditTracks = Boolean(playlist?.writable && canEditPlaylists && state.playlistRevision);
@@ -121,7 +132,7 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
   const tracks = playlist ? edits.entries : NO_ENTRIES;
 
   useEffect(() => setEditing(false), [playlist?.key]);
-  useEffect(() => exitSelection(), [playlist?.key, exitSelection]);
+  useEffect(() => exitSelection(), [playlist?.key, state.libraryNestedTitle, exitSelection]);
   useEffect(() => {
     if (editing && playlist && !edits.busy && tracks.length === 0) setEditing(false);
   }, [editing, edits.busy, playlist, tracks.length]);
@@ -130,18 +141,29 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
     if (playlist && playlistArtwork) rememberPlaylistArtwork(playlist.key, playlistArtwork);
   }, [playlist, playlistArtwork]);
 
-  if (!nested) rootNames.current = state.libraryEntries.map((entry) => playlistDisplayName(entry.title));
+  if (!nested) {
+    rootNames.current = state.libraryEntries
+      .filter((entry) => entry.id !== TOP_RATED_ALBUMS_ROW.id)
+      .map((entry) => playlistDisplayName(entry.title));
+  }
 
-  const rootEntries = useMemo(() => withRememberedPlaylistArtwork(state.libraryEntries), [state.libraryEntries]);
+  const listedEntries = useMemo(() => {
+    if (nested) return state.libraryEntries;
+    return withRememberedPlaylistArtwork(state.libraryEntries).map((entry) =>
+      entry.playlistKey === '@favorites' ? { ...entry, title: t(favoritesLabel) } : entry
+    );
+  }, [nested, state.libraryEntries, t, favoritesLabel]);
   const showingPlaylist = playlist != null;
-  const listedEntries = nested ? state.libraryEntries : rootEntries;
-  const nestedTitle = state.libraryNestedTitle;
   const rowItems = useMemo(
     () =>
       showingPlaylist
         ? playlistTrackItems(tracks)
-        : entryItems(listedEntries, { category: LibraryCategory.Playlists, isNested: nested, nestedTitle }),
-    [showingPlaylist, tracks, listedEntries, nested, nestedTitle],
+        : entryItems(listedEntries, {
+            category: ratedAlbums ? LibraryCategory.Albums : LibraryCategory.Playlists,
+            isNested: nested && !ratedAlbums,
+            nestedTitle,
+          }, Boolean(album)),
+    [showingPlaylist, tracks, listedEntries, nested, nestedTitle, ratedAlbums, album],
   );
 
   const drag = useDragReorder({
@@ -160,15 +182,16 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
 
   const openEntry = useCallback(
     (entry: LibraryEntry, kind: LibraryEntryKind) => {
+      if (kind === 'album') rememberOpening({ entry, kind });
       if (opensCollection(kind)) rememberPush();
       onAction({ type: 'SelectLibraryEntry', id: entry.id });
     },
-    [onAction, rememberPush],
+    [onAction, rememberOpening, rememberPush],
   );
 
   const longPressEntry = useCallback(
     (entry: LibraryEntry, kind: LibraryEntryKind) => {
-      if (kind === 'song' || kind === 'playlist') {
+      if (kind === 'song' || kind === 'playlist' || kind === 'album') {
         setSelectedIds(new Set([entry.id]));
         setSelectionMode(true);
       }
@@ -198,11 +221,11 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
   );
 
   const items: LibraryItem[] = [];
-  const playableIds = songIds(state.libraryEntries);
   const shuffleActive = isShuffleMode(state.playbackMode);
   const nativeCollectionPlayback = state.supportedFeatures.includes('collection_playback');
 
   if (playlist) {
+    const playableIds = songIds(state.libraryEntries);
     // Native playback covers songs past the loaded page, but an empty playlist has nothing to start.
     const playButtons = playableIds.length || (nativeCollectionPlayback && state.playlistTrackCount > 0) ? (
       <CollectionPlayButtons
@@ -252,11 +275,26 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
         />,
       ),
     );
+  } else if (album) {
+    items.push(
+      nodeItem('title', <ScreenTitleBar onBack={() => onAction({ type: 'Back' })} />),
+      nodeItem('album', (
+        <AlbumCollectionHeader
+          album={album}
+          entries={state.libraryEntries}
+          countLabel={state.libraryCountLabel}
+          busy={state.collectionBusy}
+          shuffleActive={shuffleActive}
+          nativePlayback={nativeCollectionPlayback && state.connectionStatus === ConnectionStatus.Connected}
+          onAction={onAction}
+        />
+      )),
+    );
   } else if (nested) {
     items.push(
       nodeItem(
         'title',
-        <ScreenTitleBar title={state.libraryNestedTitle ?? t('Playlists')} onBack={() => onAction({ type: 'Back' })} />,
+        <ScreenTitleBar title={ratedAlbums ? t(TOP_RATED_ALBUMS_ROW.title) : nestedTitle === 'Tracks' ? t('Tracks') : nestedTitle ?? t('Playlists')} onBack={() => onAction({ type: 'Back' })} />,
       ),
     );
   } else {
@@ -288,18 +326,30 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
         translate: t,
         state,
         onAction,
-        noun: playlist ? 'songs' : 'playlists',
+        noun: playlist || album ? 'songs' : ratedAlbums ? 'albums' : 'playlists',
         empty: playlist
           ? { title: 'This playlist is empty', body: 'Add songs from their menu in the Library.' }
-          : { title: 'No playlists yet', body: 'Create one here, or add songs to a playlist from their menu.' },
+          : nested ? { title: 'Nothing here yet', body: album ? 'The player has no songs in this collection.' : undefined }
+            : { title: 'No playlists yet', body: 'Create one here, or add songs to a playlist from their menu.' },
         onRetry: nested ? undefined : () => onAction({ type: 'RefreshLibrary', category: LibraryCategory.Playlists }),
       });
 
   const trackOffset = items.length;
   if (placeholder) {
     items.push(nodeItem('placeholder', <LibraryPlaceholder {...placeholder} />));
-  } else {
+  } else if (nested) {
     items.push(...rowItems);
+  } else {
+    items.push(...rowItems.map((item) => item.type === 'entry' && item.entry.id === TOP_RATED_ALBUMS_ROW.id
+      ? nodeItem(item.key, (
+          <LibraryEntryRow
+            entry={{ ...item.entry, title: t(item.entry.title) }}
+            kind="playlist"
+            onPress={openEntry}
+            disabled={selectionMode}
+          />
+        ))
+      : item));
   }
 
   const { rowStyle, handleProps, draggingIndex } = drag;

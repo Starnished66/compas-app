@@ -63,7 +63,9 @@ import {
   loadCategoryList,
   loadGroupAlbumRows,
   loadSongsAfter,
+  loadTopRatedAlbums,
   songFromCatalog,
+  TOP_RATED_ALBUMS_ROW,
 } from './libraryCategoryLoader';
 import { reconcileEntries } from './reconcileEntries';
 import { selectConnectionTransport } from './connectionTransportSelection';
@@ -2695,6 +2697,20 @@ export function useRemoteSession() {
   };
 
   const selectLibraryEntry = async (id: string) => {
+    if (id === TOP_RATED_ALBUMS_ROW.id) {
+      const api = apiRef.current;
+      if (!api || !featureSetRef.current.has('top_rated_albums') || currentLibraryCategoryRef.current !== LibraryCategory.Playlists || stateRef.current.libraryIsNested) return;
+      pushLibraryState();
+      const generation = libraryLoadGenerationRef.current;
+      setState((prev) => ({ ...prev, libraryNestedTitle: TOP_RATED_ALBUMS_ROW.title, libraryEntries: [], libraryCountLabel: null, libraryHasMore: false, libraryStatus: ContentStatus.Loading, connectionMessage: null }));
+      try {
+        const list = await loadTopRatedAlbums(libraryLoadContext(api));
+        if (api === apiRef.current && generation === libraryLoadGenerationRef.current) showLibraryList(null, list);
+      } catch (err: any) {
+        if (api === apiRef.current && generation === libraryLoadGenerationRef.current) setState((prev) => ({ ...prev, libraryStatus: ContentStatus.Error, libraryCountLabel: err?.message || 'Failed to load albums' }));
+      }
+      return;
+    }
     const target = libraryEntriesRef.current.target(id);
     if (!target) return;
 

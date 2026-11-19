@@ -27,16 +27,21 @@ export interface LibraryEntryRowProps {
   selectionMode?: boolean;
   selected?: boolean;
   onSelect?: (entry: LibraryEntry, kind: LibraryEntryKind) => void;
+  disabled?: boolean;
 }
 
 const CHEVRON_SIZE = 18;
 
-function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress, onLongPress, onMore, selectionMode = false, selected = false, onSelect }: LibraryEntryRowProps) {
+function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress, onLongPress, onMore, selectionMode = false, selected = false, onSelect, disabled = false }: LibraryEntryRowProps) {
   const palette = usePalette();
   const { t } = useI18n();
   const subtitle = localizedEntrySubtitle(entry, t);
   const artworkUri = useEntryArtwork(entry);
-  const press = () => selectionMode ? onSelect?.(entry, kind) : onPress(entry, kind);
+  const press = () => {
+    if (disabled) return;
+    if (selectionMode) onSelect?.(entry, kind);
+    else onPress(entry, kind);
+  };
   const longPress = selectionMode ? () => onSelect?.(entry, kind) : onLongPress ? () => onLongPress(entry, kind) : undefined;
 
   if (kind === 'song') {
@@ -88,6 +93,7 @@ function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress
         trailing={trailing}
         onPress={press}
         onLongPress={longPress}
+        disabled={disabled}
         selected={selectionMode && selected}
         accessibilityLabel={entry.subtitle ? `${entry.title}, ${subtitle}` : entry.title}
       />

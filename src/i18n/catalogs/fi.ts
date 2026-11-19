@@ -2,6 +2,10 @@ import type { TranslationValue } from '../catalogs';
 
 // Machine-assisted translation, reviewed for audio terminology and interpolation.
 export const fi: Record<string, TranslationValue> = {
+  "No songs rated 3 stars or higher yet": "Ei vielä kappaleita, joilla on vähintään 3 tähteä",
+  "Top rated": "Parhaiten arvioidut",
+  "Top rated albums": "Parhaiten arvioidut albumit",
+  "{count} top rated tracks": { one: "{count} parhaiten arvioitu kappale", other: "{count} parhaiten arvioitua kappaletta" },
   "USB DAC": "USB DAC",
   "Bluetooth DAC": "Bluetooth DAC",
   "Waiting for USB audio": "Odotetaan USB-ääntä",

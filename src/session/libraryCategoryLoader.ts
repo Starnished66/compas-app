@@ -6,8 +6,10 @@ import { ExtensionPage, LibraryList } from './LibraryListCache';
 import { sortedByTitle } from './titleOrder';
 import { isServerOrderedAlbumSort } from './librarySorting';
 import { albumGroupFilter, orderedAlbumList, readOrderedAlbumPage } from './orderedAlbumPaging';
+import { favoritesLabels } from '../ui/library/libraryCategories';
 
 export const LIBRARY_PAGE_SIZE = 50;
+export const TOP_RATED_ALBUMS_ROW = { id: 'top-rated-albums', title: 'Top rated albums', subtitle: '' };
 
 export interface CategoryLoadContext {
   api: RemoteApi;
@@ -185,7 +187,8 @@ export async function loadCategoryList(
     case LibraryCategory.Favorites: {
       requireFeature(context, 'favorites_edit', 'Favorites requires a newer player build');
       const page = await api.playlistPage('@favorites');
-      return list(factory.songs(page.songs, { playlist: '@favorites' }), page.total, `${page.total} favorites`, {
+      const { noun } = favoritesLabels(context.features);
+      return list(factory.songs(page.songs, { playlist: '@favorites' }), page.total, `${page.total} ${noun}`, {
         kind: 'playlist',
         key: '@favorites',
         nextOffset: page.nextOffset,
@@ -194,7 +197,12 @@ export async function loadCategoryList(
     }
     case LibraryCategory.Playlists: {
       const playlists = await api.playlists();
-      return list(factory.playlists(playlists), playlists.length, `${playlists.length} playlists`);
+      const entries = factory.playlists(playlists);
+      if (context.features.has('top_rated_albums')) {
+        const favoritesIndex = playlists.findIndex((playlist) => playlist.key === '@favorites');
+        entries.splice(favoritesIndex + 1, 0, TOP_RATED_ALBUMS_ROW);
+      }
+      return list(entries, entries.length, `${playlists.length} playlists`);
     }
     case LibraryCategory.Songs: {
       const page = await songsPage(context, 0, query);
@@ -206,6 +214,11 @@ export async function loadCategoryList(
     }
   }
   return list([], 0, '');
+}
+
+export async function loadTopRatedAlbums({ api, entries }: CategoryLoadContext): Promise<LibraryList> {
+  const groups = await api.topRatedAlbums();
+  return list(entries.albums(groups, null), groups.length, `${groups.length} albums`);
 }
 
 export async function loadSongsAfter(
