@@ -49,7 +49,7 @@ class CompasDiscoveryModule : Module() {
     private var activeResolveListener: NsdManager.ResolveListener? = null
     private val resolveRetryHandler = Handler(Looper.getMainLooper())
     // Guarded by discoveryLifecycleLock: JS asked for discovery, and it is paused while backgrounded.
-    private var discoveryRequested = false
+    private var requestedScanId: Double? = null
     private var pausedForBackground = false
     private val nsdGeneration = AtomicLong(0)
     private val nsdLifecycleLock = Any()
@@ -64,16 +64,12 @@ class CompasDiscoveryModule : Module() {
 
         Events("onDeviceFound", "onDeviceLost", "onDiscoveryStarted", "onDiscoveryStopped", "onDiscoveryError")
 
-        AsyncFunction("startDiscovery") { promise: Promise ->
+        AsyncFunction("startDiscovery") { scanId: Double, promise: Promise ->
             synchronized(discoveryLifecycleLock) {
-                discoveryRequested = true
+                if (requestedScanId != scanId) stopNsdDiscovery()
+                requestedScanId = scanId
                 pausedForBackground = false
-                restartUdpFallback()
-                try {
-                    startNsdDiscovery()
-                } catch (_: Exception) {
-                    sendEvent("onDiscoveryError", mapOf("errorCode" to -1, "phase" to "start"))
-                }
+                startScan(scanId)
             }
             promise.resolve(true)
         }
@@ -103,7 +99,7 @@ class CompasDiscoveryModule : Module() {
 
     private fun stopInternal() {
         synchronized(discoveryLifecycleLock) {
-            discoveryRequested = false
+            requestedScanId = null
             pausedForBackground = false
             stopUdpFallback()
             stopNsdDiscovery()
@@ -112,7 +108,7 @@ class CompasDiscoveryModule : Module() {
 
     private fun pauseForBackground() {
         synchronized(discoveryLifecycleLock) {
-            if (discoveryRequested && !pausedForBackground) {
+            if (requestedScanId != null && !pausedForBackground) {
                 pausedForBackground = true
                 stopUdpFallback()
                 stopNsdDiscovery()
@@ -124,15 +120,17 @@ class CompasDiscoveryModule : Module() {
         synchronized(discoveryLifecycleLock) {
             if (pausedForBackground) {
                 pausedForBackground = false
-                if (discoveryRequested) {
-                    restartUdpFallback()
-                    try {
-                        startNsdDiscovery()
-                    } catch (_: Exception) {
-                        sendEvent("onDiscoveryError", mapOf("errorCode" to -1, "phase" to "start"))
-                    }
-                }
+                requestedScanId?.let { startScan(it) }
             }
+        }
+    }
+
+    private fun startScan(scanId: Double) {
+        restartUdpFallback(scanId)
+        try {
+            startNsdDiscovery(scanId)
+        } catch (_: Exception) {
+            sendEvent("onDiscoveryError", mapOf("errorCode" to -1, "phase" to "start"))
         }
     }
 
@@ -143,7 +141,7 @@ class CompasDiscoveryModule : Module() {
         }
     }
 
-    private fun startNsdDiscovery() {
+    private fun startNsdDiscovery(scanId: Double) {
         synchronized(nsdLifecycleLock) {
             if (discoveryListener != null) return
             val manager = context.getSystemService(NsdManager::class.java)
@@ -160,7 +158,7 @@ class CompasDiscoveryModule : Module() {
                     lock.acquire()
                     multicastLock = lock
                 }
-                val listener = createNsdListener(manager, generation)
+                val listener = createNsdListener(manager, generation, scanId)
                 discoveryListener = listener
                 manager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
             } catch (_: Exception) {
@@ -169,7 +167,7 @@ class CompasDiscoveryModule : Module() {
         }
     }
 
-    private fun createNsdListener(manager: NsdManager, generation: Long) = object : NsdManager.DiscoveryListener {
+    private fun createNsdListener(manager: NsdManager, generation: Long, scanId: Double) = object : NsdManager.DiscoveryListener {
         override fun onDiscoveryStarted(serviceType: String) {
             synchronized(nsdLifecycleLock) {
                 if (generation == nsdGeneration.get()) {
@@ -201,7 +199,7 @@ class CompasDiscoveryModule : Module() {
                 val name = serviceInfo.serviceName ?: return
                 if (!resolvingServices.add(name)) return
                 resolveQueue.addLast(serviceInfo)
-                pumpResolveQueueLocked(manager, generation)
+                pumpResolveQueueLocked(manager, generation, scanId)
             }
         }
 
@@ -214,6 +212,7 @@ class CompasDiscoveryModule : Module() {
                         resolveRetries.remove(name)
                     }
                     sendEvent("onDeviceLost", mapOf(
+                        "scanId" to scanId,
                         "id" to serviceInfo.serviceName,
                         "name" to serviceInfo.serviceName
                     ))
@@ -222,12 +221,12 @@ class CompasDiscoveryModule : Module() {
         }
     }
 
-    private fun pumpResolveQueueLocked(manager: NsdManager, generation: Long) {
+    private fun pumpResolveQueueLocked(manager: NsdManager, generation: Long, scanId: Double) {
         if (generation != nsdGeneration.get()) return
         while (resolveInFlightName == null) {
             val next = resolveQueue.removeFirstOrNull() ?: return
             val name = next.serviceName ?: continue
-            val listener = createResolveListener(manager, generation, name)
+            val listener = createResolveListener(manager, generation, scanId, name)
             resolveInFlightName = name
             activeResolveListener = listener
             try {
@@ -241,7 +240,7 @@ class CompasDiscoveryModule : Module() {
         }
     }
 
-    private fun createResolveListener(manager: NsdManager, generation: Long, serviceName: String) = object : NsdManager.ResolveListener {
+    private fun createResolveListener(manager: NsdManager, generation: Long, scanId: Double, serviceName: String) = object : NsdManager.ResolveListener {
         override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {
             synchronized(nsdLifecycleLock) {
                 if (generation != nsdGeneration.get() || activeResolveListener !== this) return
@@ -257,7 +256,7 @@ class CompasDiscoveryModule : Module() {
                                 serviceName != resolveInFlightName && resolveQueue.none { it.serviceName == serviceName }
                             ) {
                                 resolveQueue.addLast(info)
-                                pumpResolveQueueLocked(manager, generation)
+                                pumpResolveQueueLocked(manager, generation, scanId)
                             }
                         }
                     }, RESOLVE_RETRY_DELAY_MS)
@@ -265,7 +264,7 @@ class CompasDiscoveryModule : Module() {
                     resolvingServices.remove(serviceName)
                     resolveRetries.remove(serviceName)
                 }
-                pumpResolveQueueLocked(manager, generation)
+                pumpResolveQueueLocked(manager, generation, scanId)
             }
         }
 
@@ -288,6 +287,7 @@ class CompasDiscoveryModule : Module() {
                             ?.let { if (it.endsWith(".local", ignoreCase = true)) it else "$it.local" }
                     } else null
                     sendEvent("onDeviceFound", mapOf(
+                        "scanId" to scanId,
                         "id" to info.serviceName,
                         "name" to info.serviceName,
                         "host" to host,
@@ -297,7 +297,7 @@ class CompasDiscoveryModule : Module() {
                         "apiVersion" to (apiAttr ?: "1")
                     ))
                 }
-                pumpResolveQueueLocked(manager, generation)
+                pumpResolveQueueLocked(manager, generation, scanId)
             }
         }
     }
@@ -340,16 +340,11 @@ class CompasDiscoveryModule : Module() {
         multicastLock = null
     }
 
-    private fun restartUdpFallback() {
+    private fun restartUdpFallback(scanId: Double) {
         stopUdpFallback()
-        startUdpFallback()
-    }
-
-    private fun startUdpFallback() {
         synchronized(udpLifecycleLock) {
-            if (udpWorker?.isAlive == true) return
             val generation = udpGeneration.incrementAndGet()
-            val worker = Thread({ runUdpFallback(generation) }, "compas-udp-discovery").apply {
+            val worker = Thread({ runUdpFallback(generation, scanId) }, "compas-udp-discovery").apply {
                 isDaemon = true
             }
             udpWorker = worker
@@ -357,7 +352,7 @@ class CompasDiscoveryModule : Module() {
         }
     }
 
-    private fun runUdpFallback(generation: Long) {
+    private fun runUdpFallback(generation: Long, scanId: Double) {
         val socket = try {
             DatagramSocket().apply {
                 soTimeout = 200
@@ -412,6 +407,7 @@ class CompasDiscoveryModule : Module() {
 
                 val address = "$host:$DEFAULT_PORT"
                 sendEvent("onDeviceFound", mapOf(
+                    "scanId" to scanId,
                     "id" to "udp:$host",
                     "name" to "Compas Remote Control",
                     "host" to host,

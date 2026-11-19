@@ -24,11 +24,14 @@ export function nowPlayingCacheKey(
   return `${scope}now-playing:${encodeURIComponent(trackKey(track)!)}`;
 }
 
-async function syncedAlbumCover(track: TrackIdentity, deps: NowPlayingArtworkDeps): Promise<string | null> {
-  const sources = deps.sources();
+async function syncedAlbumCover(
+  track: TrackIdentity,
+  sources: ArtworkSources,
+  catalogStore: SyncedCatalogStore,
+): Promise<string | null> {
   if (!sources.catalog) return null;
   const { libraryId, revision } = sources.catalog;
-  const albumKey = await deps.catalogStore.findAlbumKey(libraryId, revision, track.title, track.artist, track.album);
+  const albumKey = await catalogStore.findAlbumKey(libraryId, revision, track.title, track.artist, track.album);
   if (sources.isCurrent?.() === false) return null;
   return albumKey ? resolveArtworkUri({ albumKey, songIndex: null }, { ...sources, network: null }) : null;
 }
@@ -43,47 +46,54 @@ async function fetchCurrentArt(
   api: RemoteApi,
   cache: ArtworkDiskCache,
   key: string | null,
-  commandGeneration: number
+  commandGeneration: number,
+  isCurrent: () => boolean,
 ): Promise<string | null> {
-  if (!key) {
-    const art = await api.art(null);
+  const ownsWrite = () => {
+    if (!isCurrent()) return false;
     ensureTrackUnchanged(api, commandGeneration);
-    return art?.base64 ? `data:${art.contentType || 'image/jpeg'};base64,${art.base64}` : null;
-  }
-  if (api.canDownloadArt) {
-    return cache.store(key, async (fileUri) => {
-      const stored = await api.downloadArt(fileUri);
-      ensureTrackUnchanged(api, commandGeneration);
-      return stored;
-    });
+    return true;
+  };
+  if (key && api.canDownloadArt) {
+    return cache.store(key, (fileUri) => api.downloadArt(fileUri), ownsWrite);
   }
   const art = await api.art(null);
-  ensureTrackUnchanged(api, commandGeneration);
-  if (!art?.base64) return null;
-  await cache.put(key, art.base64);
-  return (await cache.getUri(key)) ?? `data:${art.contentType || 'image/jpeg'};base64,${art.base64}`;
+  if (!ownsWrite() || !art?.base64) return null;
+  const fallback = `data:${art.contentType || 'image/jpeg'};base64,${art.base64}`;
+  if (!key) return fallback;
+  await cache.put(key, art.base64, ownsWrite);
+  if (!ownsWrite()) return null;
+  const cached = await cache.getUri(key);
+  return ownsWrite() ? cached ?? fallback : null;
 }
 
 export function createNowPlayingArtworkLookup(deps: NowPlayingArtworkDeps): NowPlayingArtworkLookup {
   return {
     async local(track) {
-      const cover = await syncedAlbumCover(track, deps).catch(() => null);
       const sources = deps.sources();
+      const cover = await syncedAlbumCover(track, sources, deps.catalogStore).catch(() => null);
+      if (sources.isCurrent?.() === false) return null;
       const key = nowPlayingCacheKey(track, sources.catalog, sources.playerScope);
       return cover ?? (key ? sources.artCache.getUri(key) : null);
     },
-    async remote(track, commandGeneration) {
+    async remote(track, commandGeneration, ownsLookup) {
       const api = deps.api();
       if (!api) throw new Error('Player is not connected');
+      const isCurrent = () => ownsLookup() && deps.api() === api;
+      if (!isCurrent()) return null;
       ensureTrackUnchanged(api, commandGeneration);
       deps.onRemoteRequest();
       const sources = deps.sources();
-      return fetchCurrentArt(
+      const artwork = await fetchCurrentArt(
         api,
         sources.artCache,
         nowPlayingCacheKey(track, sources.catalog, sources.playerScope),
         commandGeneration,
+        isCurrent,
       );
+      if (!isCurrent()) return null;
+      ensureTrackUnchanged(api, commandGeneration);
+      return artwork;
     },
   };
 }

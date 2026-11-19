@@ -3,7 +3,7 @@ import { TrackIdentity, trackKey } from '../ui/trackKey';
 
 export interface NowPlayingArtworkLookup {
   local(track: TrackIdentity): Promise<string | null>;
-  remote(track: TrackIdentity, commandGeneration: number): Promise<string | null>;
+  remote(track: TrackIdentity, commandGeneration: number, isCurrent: () => boolean): Promise<string | null>;
 }
 
 export interface RemoteArtworkPermission {
@@ -58,6 +58,14 @@ export class NowPlayingArtwork {
     this.shownKey = null;
   }
 
+  invalidatePending(): void {
+    if (this.stage === 'resolved' || this.stage === 'missing') return;
+    this.requestGeneration++;
+    this.clearHold();
+    this.track = null;
+    this.key = null;
+  }
+
   private begin({ title, artist, album }: TrackIdentity, key: string): void {
     const generation = ++this.requestGeneration;
     const track = { title, artist, album };
@@ -88,14 +96,15 @@ export class NowPlayingArtwork {
     if (!track || !key || !this.permission.allowed || !this.remoteDue()) return;
     this.stage = 'remote';
     const generation = this.requestGeneration;
-    this.lookup.remote(track, this.permission.commandGeneration).then(
+    const isCurrent = () => key === this.key && generation === this.requestGeneration;
+    this.lookup.remote(track, this.permission.commandGeneration, isCurrent).then(
       (artwork) => {
-        if (key !== this.key || generation !== this.requestGeneration) return;
+        if (!isCurrent()) return;
         if (artwork) this.show(key, artwork);
         else this.showMissing(key);
       },
       () => {
-        if (key !== this.key || generation !== this.requestGeneration) return;
+        if (!isCurrent()) return;
         this.stage = 'failed';
         this.failedAtMs = this.now();
       }

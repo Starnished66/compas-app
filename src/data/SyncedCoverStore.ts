@@ -97,46 +97,53 @@ export class SyncedCoverStore {
     }
   }
 
-  /**
-   * Writes the cover to disk. Returns false when it could not be stored durably; the data then stays in a
-   * small memory fallback for display, and the caller should leave the cover retryable.
-   */
-  async put(libraryId: string, coverKey: string, data: Uint8Array | string): Promise<boolean> {
-    if (!libraryId.trim() || !coverKey.trim()) return false;
+  /** Returns false on cancellation or disk failure. An owned disk failure keeps a retryable memory copy. */
+  async put(
+    libraryId: string, coverKey: string, data: Uint8Array | string, ownsWrite: () => boolean = () => true
+  ): Promise<boolean> {
+    if (!ownsWrite() || !libraryId.trim() || !coverKey.trim()) return false;
     const base64 = typeof data === 'string' ? data : bytesToBase64(data);
     if (!base64) return false;
 
-    this.memorySet(this.memoryKey(libraryId, coverKey), base64);
+    const key = this.memoryKey(libraryId, coverKey);
     const target = this.fileFor(libraryId, coverKey);
     const parentDir = target.substring(0, target.lastIndexOf('/'));
     const tempFile = `${parentDir}/.${Date.now()}.${Math.random().toString(36).substring(2)}.tmp`;
-    this.activeTemporaries.add(tempFile);
+    let moved = false;
 
     try {
       const dirInfo = await FileSystem.getInfoAsync(parentDir);
+      if (!ownsWrite()) return false;
       if (!dirInfo.exists) {
         await FileSystem.makeDirectoryAsync(parentDir, { intermediates: true });
+        if (!ownsWrite()) return false;
       }
 
+      this.activeTemporaries.add(tempFile);
       await FileSystem.writeAsStringAsync(tempFile, base64, {
         encoding: FileSystem.EncodingType.Base64,
       });
+      if (!ownsWrite()) return false;
 
       await FileSystem.moveAsync({ from: tempFile, to: target });
+      moved = true;
+      if (!ownsWrite()) return false;
       const readBack = await FileSystem.getInfoAsync(target);
-      const stored = Boolean(readBack.exists && (readBack.size || 0) > 0);
-      if (stored) this.memoryStore.delete(this.memoryKey(libraryId, coverKey));
-      return stored;
-    } catch {
-      try {
-        await FileSystem.deleteAsync(tempFile, { idempotent: true });
-      } catch {
-        // ignore
+      if (!ownsWrite()) return false;
+      if (readBack.exists && (readBack.size || 0) > 0) {
+        this.memoryStore.delete(key);
+        return true;
       }
-      return false;
+    } catch {
+      // Leave disk failures retryable and provide a memory copy while the write is owned.
     } finally {
+      if (!moved && this.activeTemporaries.has(tempFile)) {
+        await FileSystem.deleteAsync(tempFile, { idempotent: true }).catch(() => {});
+      }
       this.activeTemporaries.delete(tempFile);
     }
+    if (ownsWrite()) this.memorySet(key, base64);
+    return false;
   }
 
   async delete(libraryId: string, coverKey: string): Promise<void> {
@@ -154,7 +161,8 @@ export class SyncedCoverStore {
    * Deletes this library's cover files whose key is not in keepCoverKeys, plus stale temporary files.
    * Call it only with a complete cover manifest. Returns the number of files removed.
    */
-  async pruneLibrary(libraryId: string, keepCoverKeys: Iterable<string>): Promise<number> {
+  async pruneLibrary(libraryId: string, keepCoverKeys: Iterable<string>, ownsCleanup: () => boolean): Promise<number> {
+    if (!ownsCleanup()) return 0;
     const libraryHash = libraryId.trim() ? SyncedCoverStore.digest(libraryId) : '';
     if (!libraryHash) return 0;
     const keepKeys = Array.from(keepCoverKeys);
@@ -166,6 +174,29 @@ export class SyncedCoverStore {
     }
 
     const directory = `${this.root}/${libraryHash}`;
+    return this.removeStaleEntries(directory, ownsCleanup, (name, uri) =>
+      name.endsWith('.tmp') ? !this.activeTemporaries.has(uri) : name.endsWith('.cover') && !keep.has(name)
+    );
+  }
+
+  /** Deletes the cover directories of every library not listed. Returns the number of directories removed. */
+  async purgeLibrariesExcept(libraryIds: Iterable<string>, ownsCleanup: () => boolean): Promise<number> {
+    if (!ownsCleanup()) return 0;
+    const keepIds = Array.from(libraryIds);
+    const keep = new Set(keepIds.map((id) => SyncedCoverStore.digest(id)));
+    const keepMemory = new Set(keepIds);
+    for (const key of Array.from(this.memoryStore.keys())) {
+      if (!keepMemory.has(key.substring(0, key.indexOf('\u0000')))) this.memoryStore.delete(key);
+    }
+
+    return this.removeStaleEntries(this.root, ownsCleanup, (name) => !keep.has(name));
+  }
+
+  private async removeStaleEntries(
+    directory: string,
+    ownsCleanup: () => boolean,
+    isStale: (name: string, uri: string) => boolean
+  ): Promise<number> {
     let names: string[];
     try {
       names = await FileSystem.readDirectoryAsync(directory);
@@ -174,42 +205,14 @@ export class SyncedCoverStore {
     }
     let removed = 0;
     for (const name of names) {
+      if (!ownsCleanup()) break;
       const uri = `${directory}/${name}`;
-      const stale = name.endsWith('.tmp') ? !this.activeTemporaries.has(uri) : name.endsWith('.cover') && !keep.has(name);
-      if (!stale) continue;
+      if (!isStale(name, uri)) continue;
       try {
         await FileSystem.deleteAsync(uri, { idempotent: true });
         removed++;
       } catch {
-        // ignore; the next prune retries
-      }
-    }
-    return removed;
-  }
-
-  /** Deletes the cover directories of every library not listed. Returns the number of directories removed. */
-  async purgeLibrariesExcept(libraryIds: Iterable<string>): Promise<number> {
-    const keepIds = Array.from(libraryIds);
-    const keep = new Set(keepIds.map((id) => SyncedCoverStore.digest(id)));
-    const keepMemory = new Set(keepIds);
-    for (const key of Array.from(this.memoryStore.keys())) {
-      if (!keepMemory.has(key.substring(0, key.indexOf('\u0000')))) this.memoryStore.delete(key);
-    }
-
-    let names: string[];
-    try {
-      names = await FileSystem.readDirectoryAsync(this.root);
-    } catch {
-      return 0;
-    }
-    let removed = 0;
-    for (const name of names) {
-      if (keep.has(name)) continue;
-      try {
-        await FileSystem.deleteAsync(`${this.root}/${name}`, { idempotent: true });
-        removed++;
-      } catch {
-        // ignore; the next purge retries
+        // Retry on the next cleanup.
       }
     }
     return removed;

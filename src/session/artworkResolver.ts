@@ -40,13 +40,16 @@ async function songArtUri(songIndex: number, sources: ArtworkSources): Promise<s
     : ''}`;
   const cacheKey = scope ? `${scope}song:${songIndex}` : null;
   const diskUri = cacheKey ? await sources.artCache.getUri(cacheKey) : null;
+  if (sources.isCurrent?.() === false) return null;
   if (diskUri || !sources.network) return diskUri;
   try {
     const art = await sources.network.art(songIndex);
-    if (!art?.base64) return null;
+    if (sources.isCurrent?.() === false || !art?.base64) return null;
     if (cacheKey) {
-      await sources.artCache.put(cacheKey, art.base64);
+      await sources.artCache.put(cacheKey, art.base64, sources.isCurrent);
+      if (sources.isCurrent?.() === false) return null;
       const cached = await sources.artCache.getUri(cacheKey);
+      if (sources.isCurrent?.() === false) return null;
       if (cached) return cached;
     }
     return `data:${art.contentType || 'image/jpeg'};base64,${art.base64}`;
@@ -57,6 +60,7 @@ async function songArtUri(songIndex: number, sources: ArtworkSources): Promise<s
 
 export async function resolveArtworkUri({ albumKey, songIndex }: ArtworkTarget, sources: ArtworkSources): Promise<string | null> {
   const cover = albumKey ? await syncedCoverUri(albumKey, sources) : null;
+  if (sources.isCurrent?.() === false) return null;
   if (cover) return cover;
   return songIndex != null ? await songArtUri(songIndex, sources) : null;
 }

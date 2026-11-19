@@ -10,7 +10,11 @@ import {
 } from '../../../src/data/HttpTransport';
 import { base64ToBytes, bytesToBase64 } from '../../../src/data/cryptoUtils';
 
-export interface BluetoothDeviceFoundEvent {
+interface BluetoothDiscoveryEvent {
+  scanId: number;
+}
+
+export interface BluetoothDeviceFoundEvent extends BluetoothDiscoveryEvent {
   id: string;
   name: string;
   paired: boolean;
@@ -50,10 +54,10 @@ export async function getBondedDevices(): Promise<DiscoveredBluetoothDevice[]> {
   return await mod.getBondedDevices();
 }
 
-export async function startDiscovery(): Promise<boolean> {
+export async function startDiscovery(scanId: number): Promise<boolean> {
   const mod = getNativeModule();
   if (!mod || !mod.startDiscovery) return false;
-  return await mod.startDiscovery();
+  return await mod.startDiscovery(scanId);
 }
 
 export async function stopDiscovery(): Promise<boolean> {
@@ -90,7 +94,7 @@ export function addBondStateListener(listener: (event: BluetoothBondStateChanged
   return mod?.addListener ? mod.addListener('onBondStateChanged', listener) : null;
 }
 
-export function addDiscoveryFinishedListener(listener: () => void): EventSubscription | null {
+export function addDiscoveryFinishedListener(listener: (event: BluetoothDiscoveryEvent) => void): EventSubscription | null {
   const mod = getNativeModule();
   return mod?.addListener ? mod.addListener('onDiscoveryFinished', listener) : null;
 }

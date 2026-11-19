@@ -702,7 +702,7 @@ export class SyncedCatalogStore {
         : 'catalog_rank';
 
     // Paging re-reads the same filter repeatedly; count it once per revision instead of on every page.
-    const countKey = `${libraryId}\u0000${revision}\u0000${JSON.stringify(args.slice(2))}`;
+    const countKey = `${libraryId}\u0000${revision}\u0000${JSON.stringify([where, args.slice(2)])}`;
     const cachedTotal = this.songCounts.get(countKey);
     const generation = this.songCountGeneration;
     const [countRow, rows] = await Promise.all([

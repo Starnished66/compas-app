@@ -17,7 +17,6 @@ import {
   RemoteTrack,
   LibraryEntry,
   WifiPlayer,
-  BluetoothPlayer,
   Song,
   LibraryGroup,
   Playlist,
@@ -72,6 +71,7 @@ import {
   canFinishCatalogSyncFromSnapshot,
 } from './CatalogSyncPolicy';
 import { PlaybackStatusGate, CommandOutcome } from './PlaybackStatusGate';
+import { StatusPollLoop } from './StatusPollLoop';
 import { QUEUE_PROBE_SIZE, insertedOffset, queueEnds } from './queueInsertion';
 import { PlaybackPositionStore } from './PlaybackPositionStore';
 import { BulkWriteCounts, queueInsertWindowMatches, queueInsertionOffsets, queueRemovalAmbiguousAt, queueRemovalMatches, readQueueSnapshot, resolveBulkSongs, runPlaylistCreationJob, runSerialBulkWrites, waitForQueueTransition } from './bulkActions';
@@ -146,6 +146,8 @@ const SWIPE_NEXT_POLL_MS = 200;
 // In the background the poll only keeps the notification current.
 const BACKGROUND_STATUS_POLL_MS = 5000;
 const QUEUE_REFRESHING_MESSAGE = 'The queue changed. It is being refreshed.';
+// Native discovery events can still be queued when the hook remounts.
+let nextDiscoveryGeneration = 0;
 
 // Socket and HTTP errors from the transports are developer text; show the user what to check instead.
 const connectFailureMessage = (err: any, transport: ConnectionTransport): string => {
@@ -244,6 +246,7 @@ export function useRemoteSession() {
   });
 
   const apiRef = useRef<RemoteApi | null>(null);
+  const mountedRef = useRef(true);
   const connectedPlayerKeyRef = useRef<string | null>(null);
   const lastPlayerKeyRef = useRef<string | null>(null);
   // Stable owner token for UI work that spans an identity-verified BT → Wi-Fi upgrade.
@@ -309,11 +312,11 @@ export function useRemoteSession() {
   const collectionPendingRef = useRef<{ id: number; api: RemoteApi; attempt: number; startedAt: number } | null>(null);
   const collectionStartTokenRef = useRef(0);
   const collectionStartingRef = useRef(false);
-  const wifiDiscoveryGenerationRef = useRef(0);
+  const discoveryGenerationRef = useRef(0);
+  const wifiDiscoveryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const wifiDiscoverySourcesRef = useRef(new Map<string, string>());
   const wifiDiscoveryProbesRef = useRef(new Set<string>());
-  const pollingTimerRef = useRef<any>(null);
-  const pollLoopTokenRef = useRef(0);
+  const statusPollLoopRef = useLazyRef(() => new StatusPollLoop());
   const reconcileOnceRef = useRef(false);
   const reconcileTimerRef = useRef<any>(null);
   const queueArtworkPendingRef = useRef(new Map<number, string>());
@@ -374,6 +377,7 @@ export function useRemoteSession() {
 
   // Restore stored preferences
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const [savedTheme, savedWifi, savedBt, savedTransport, savedAuto] = await Promise.all([
@@ -384,6 +388,7 @@ export function useRemoteSession() {
           AsyncStorage.getItem(PREF_AUTO_RECONNECT),
         ]);
 
+        if (cancelled) return;
         const autoReconnect = savedAuto !== 'false';
         autoReconnectEnabledRef.current = autoReconnect;
         lastConnectionTransportRef.current = savedTransport === 'bluetooth'
@@ -404,6 +409,7 @@ export function useRemoteSession() {
         }
       } catch {}
     })();
+    return () => { cancelled = true; };
   }, []);
 
   // Listen to Android MediaSession controls
@@ -454,20 +460,26 @@ export function useRemoteSession() {
 
   useMediaSessionSync(state, positionStoreRef.current);
 
-  // Clean up timers
+  // Invalidate session work before releasing its timers and discovery subscriptions.
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
+      mountedRef.current = false;
+      stopPolling();
+      apiRef.current = null;
+      connectionAttemptRef.current++;
+      autoReconnectGenerationRef.current++;
+      catalogSyncGenerationRef.current++;
+      wifiImportOperationRef.current++;
+      wifiUpgradeScanCleanupRef.current?.();
       if (pinCooldownTimerRef.current) clearInterval(pinCooldownTimerRef.current);
-      if (autoReconnectTimerRef.current) clearTimeout(autoReconnectTimerRef.current);
-      if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current);
+      clearTimeout(autoReconnectTimerRef.current);
+      autoReconnectTimerRef.current = null;
       if (queueArtworkFlushTimerRef.current) clearTimeout(queueArtworkFlushTimerRef.current);
       if (searchDebounceTimerRef.current) clearTimeout(searchDebounceTimerRef.current);
+      nowPlayingArtwork.reset();
       libraryArtwork.dispose();
-      wifiDiscoveryGenerationRef.current++;
-      wifiDiscoverySourcesRef.current.clear();
-      stopWifiDiscoveryModule().catch(() => {});
-      stopBtDiscovery().catch(() => {});
+      stopPickerDiscovery();
     };
   }, []);
 
@@ -506,25 +518,41 @@ export function useRemoteSession() {
     }
   }, [state.connectionStatus, state.connectionTransport]);
 
-  // Manage discovery based on screen
+  const ownsPicker = (transport: ConnectionTransport, generation = discoveryGenerationRef.current) =>
+    mountedRef.current && generation === discoveryGenerationRef.current &&
+    stateRef.current.screen.type === 'Connection' && stateRef.current.selectedConnectionTransport === transport;
+
+  const resetPickerDiscovery = () => {
+    clearTimeout(wifiDiscoveryTimerRef.current);
+    wifiDiscoveryTimerRef.current = undefined;
+    wifiDiscoverySourcesRef.current.clear();
+    wifiDiscoveryProbesRef.current.clear();
+    discoveryGenerationRef.current = ++nextDiscoveryGeneration;
+    return discoveryGenerationRef.current;
+  };
+
+  const stopPickerDiscovery = () => {
+    resetPickerDiscovery();
+    stopWifiDiscoveryModule().catch(() => {});
+    stopBtDiscovery().catch(() => {});
+  };
+
   useEffect(() => {
-    if (state.screen.type === 'Connection') {
-      if (state.selectedConnectionTransport === ConnectionTransport.Wifi) {
-        startWifiDiscovery();
-      } else {
-        loadBondedBluetoothDevices();
-      }
-    } else {
-      wifiDiscoveryGenerationRef.current++;
-      wifiDiscoverySourcesRef.current.clear();
-      stopWifiDiscoveryModule().catch(() => {});
+    if (state.screen.type !== 'Connection') {
+      stopPickerDiscovery();
+    } else if (state.selectedConnectionTransport === ConnectionTransport.Wifi) {
       stopBtDiscovery().catch(() => {});
+      void startWifiDiscovery();
+    } else {
+      stopWifiDiscoveryModule().catch(() => {});
+      void startBluetoothDiscovery(false);
     }
   }, [state.screen.type, state.selectedConnectionTransport]);
 
   // Bluetooth event subscriptions
   useEffect(() => {
     const dSub = addBtDeviceFoundListener((evt) => {
+      if (evt.scanId !== discoveryGenerationRef.current || !ownsPicker(ConnectionTransport.Bluetooth)) return;
       if (evt.verified !== true || !evt.name?.trim() || evt.name.trim().toLowerCase() === evt.id.toLowerCase()) return;
       setState((prev) => {
         const existing = prev.bluetoothPlayers.find((p) => p.id === evt.id);
@@ -547,6 +575,7 @@ export function useRemoteSession() {
     });
 
     const bSub = addBtBondStateListener((evt) => {
+      if (!mountedRef.current) return;
       setState((prev) => ({
         ...prev,
         bluetoothPlayers: prev.bluetoothPlayers.map((p) =>
@@ -555,7 +584,8 @@ export function useRemoteSession() {
       }));
     });
 
-    const fSub = addBtDiscoveryFinishedListener(() => {
+    const fSub = addBtDiscoveryFinishedListener((evt) => {
+      if (evt.scanId !== discoveryGenerationRef.current || !ownsPicker(ConnectionTransport.Bluetooth)) return;
       setState((prev) => ({
         ...prev,
         bluetoothScanStatus: prev.bluetoothPlayers.length > 0 ? ContentStatus.Ready : ContentStatus.Empty,
@@ -573,8 +603,10 @@ export function useRemoteSession() {
   // ownership prevents late NSD/UDP replies from reviving an abandoned scan.
   useEffect(() => {
     const found = addWifiDeviceFoundListener((service: DiscoveredWifiService) => {
+      const generation = service.scanId;
+      if (generation !== discoveryGenerationRef.current || !ownsPicker(ConnectionTransport.Wifi, generation)) return;
       const ipAddress = discoveryEndpoint(service);
-      if (!ipAddress || stateRef.current.screen.type !== 'Connection' || stateRef.current.selectedConnectionTransport !== ConnectionTransport.Wifi) return;
+      if (!ipAddress) return;
       // The player's own name (http://r1.compas.local) survives IP changes; the IP covers players
       // that could not take port 80 and phones that cannot report the name.
       // Only DNS-SD reports the name; a broadcast reply from the same IP reuses it.
@@ -583,12 +615,13 @@ export function useRemoteSession() {
       const candidates = [named ?? wifiHostnameByIpRef.current.get(ipAddress) ?? null, ipAddress]
         .filter((item): item is string => item != null);
       const address = candidates[0];
-      const generation = wifiDiscoveryGenerationRef.current;
       if (wifiDiscoverySourcesRef.current.size >= 64 && !wifiDiscoverySourcesRef.current.has(service.id)) return;
       wifiDiscoverySourcesRef.current.set(service.id, address);
       if (wifiDiscoveryProbesRef.current.has(address)) return;
       if (wifiDiscoveryProbesRef.current.size >= 32) return;
       wifiDiscoveryProbesRef.current.add(address);
+      const ownsProbe = () => ownsPicker(ConnectionTransport.Wifi, generation) &&
+        wifiDiscoverySourcesRef.current.get(service.id) === address;
       void (async () => {
         try {
           let reachable: string | null = null;
@@ -597,17 +630,20 @@ export function useRemoteSession() {
               // Resolving a .local name the first time can take a couple of seconds.
               const timeoutMs = candidate === ipAddress ? 1500 : 5000;
               const capabilities = await new RemoteApi(createWifiTransport(candidate, timeoutMs)).capabilities();
+              if (!ownsProbe()) return;
               if (capabilities.version === 1 && capabilities.features.includes('status')) {
                 reachable = candidate;
                 break;
               }
-            } catch { /* Try the next address. */ }
+            } catch {
+              if (!ownsProbe()) return;
+            }
           }
-          if (!reachable || generation !== wifiDiscoveryGenerationRef.current ||
-              wifiDiscoverySourcesRef.current.get(service.id) !== address) return;
+          if (!reachable || !ownsProbe()) return;
           wifiDiscoverySourcesRef.current.set(service.id, reachable);
           setState((prev) => {
-            if (prev.screen.type !== 'Connection' || prev.selectedConnectionTransport !== ConnectionTransport.Wifi) return prev;
+            if (generation !== discoveryGenerationRef.current || prev.screen.type !== 'Connection' ||
+                prev.selectedConnectionTransport !== ConnectionTransport.Wifi) return prev;
             const player: WifiPlayer = { id: `wifi:${reachable}`, name: service.name || 'Compás Player', address: reachable };
             // Once the name answers, the same player's IP entry is redundant.
             const others = reachable === ipAddress ? prev.wifiPlayers : prev.wifiPlayers.filter((item) => item.address !== ipAddress);
@@ -618,50 +654,61 @@ export function useRemoteSession() {
               wifiAddress: !wifiAddressEditedRef.current && !prev.wifiAddress ? reachable : prev.wifiAddress };
           });
         } catch { /* An advertisement is not proof of a compatible player. */ }
-        finally { if (generation === wifiDiscoveryGenerationRef.current) wifiDiscoveryProbesRef.current.delete(address); }
+        finally { if (generation === discoveryGenerationRef.current) wifiDiscoveryProbesRef.current.delete(address); }
       })();
     });
     const lost = addWifiDeviceLostListener((event) => {
+      if (event.scanId !== discoveryGenerationRef.current || !ownsPicker(ConnectionTransport.Wifi, event.scanId)) return;
       const address = wifiDiscoverySourcesRef.current.get(event.id);
       wifiDiscoverySourcesRef.current.delete(event.id);
       if (address && ![...wifiDiscoverySourcesRef.current.values()].includes(address)) {
-        setState((prev) => ({ ...prev, wifiPlayers: prev.wifiPlayers.filter((item) => item.address !== address) }));
+        setState((prev) => event.scanId === discoveryGenerationRef.current
+          ? { ...prev, wifiPlayers: prev.wifiPlayers.filter((item) => item.address !== address) }
+          : prev);
       }
     });
     return () => { found?.remove(); lost?.remove(); };
   }, []);
 
-  const loadBondedBluetoothDevices = async () => {
+  const startBluetoothDiscovery = async (manual: boolean) => {
+    if (!ownsPicker(ConnectionTransport.Bluetooth)) return;
+    const generation = resetPickerDiscovery();
+    const ownsScan = () => ownsPicker(ConnectionTransport.Bluetooth, generation);
     const btPerms = getRequiredPermissionsForBluetooth();
     const permResult = await requestMissingPermissions(btPerms);
+    if (!ownsScan()) return;
     if (!permResult.granted) {
       setState((prev) => ({
         ...prev,
-        bluetoothPlayers: [],
+        ...(!manual ? { bluetoothPlayers: [] } : {}),
         bluetoothScanStatus: ContentStatus.Error,
-        connectionMessage:
-          'Bluetooth permission was denied. Grant Nearby devices permission to find and connect to players.',
+        connectionMessage: manual
+          ? 'Bluetooth permissions were denied. Grant Nearby devices permission in Settings.'
+          : 'Bluetooth permission was denied. Grant Nearby devices permission to find and connect to players.',
       }));
       return;
     }
 
     setState((prev) => ({ ...prev, bluetoothPlayers: [], bluetoothScanStatus: ContentStatus.Loading }));
     try {
-      if (!await startBtDiscovery()) {
+      const started = await startBtDiscovery(generation);
+      if (!ownsScan()) return;
+      if (!started) {
         setState((prev) => ({ ...prev, bluetoothScanStatus: ContentStatus.Empty }));
       }
     } catch {
-      setState((prev) => ({ ...prev, bluetoothScanStatus: ContentStatus.Error }));
+      if (ownsScan()) setState((prev) => ({ ...prev, bluetoothScanStatus: ContentStatus.Error }));
     }
   };
 
   const startWifiDiscovery = async () => {
-    const generation = ++wifiDiscoveryGenerationRef.current;
-    wifiDiscoverySourcesRef.current.clear();
-    wifiDiscoveryProbesRef.current.clear();
+    if (!ownsPicker(ConnectionTransport.Wifi)) return;
+    const generation = resetPickerDiscovery();
+    const ownsScan = () => ownsPicker(ConnectionTransport.Wifi, generation);
     const wifiPerms = getRequiredPermissionsForWifi();
     if (wifiPerms.length > 0) {
       const permResult = await requestMissingPermissions(wifiPerms);
+      if (!ownsScan()) return;
       if (!permResult.granted) {
         setState((prev) => ({
           ...prev,
@@ -674,16 +721,17 @@ export function useRemoteSession() {
       }
     }
 
-    if (generation !== wifiDiscoveryGenerationRef.current || stateRef.current.screen.type !== 'Connection' || stateRef.current.selectedConnectionTransport !== ConnectionTransport.Wifi) return;
     setState((prev) => ({
       ...prev,
       wifiPlayers: [],
       wifiDiscoveryStatus: ContentStatus.Loading,
     }));
     try {
-      await startWifiDiscoveryModule();
-      setTimeout(() => {
-        if (generation !== wifiDiscoveryGenerationRef.current) return;
+      await startWifiDiscoveryModule(generation);
+      if (!ownsScan()) return;
+      wifiDiscoveryTimerRef.current = setTimeout(() => {
+        wifiDiscoveryTimerRef.current = undefined;
+        if (!ownsScan()) return;
         setState((prev) => {
           if (prev.wifiPlayers.length === 0 && prev.wifiDiscoveryStatus === ContentStatus.Loading) {
             return { ...prev, wifiDiscoveryStatus: ContentStatus.Empty };
@@ -692,7 +740,7 @@ export function useRemoteSession() {
         });
       }, 4000);
     } catch {
-      setState((prev) => ({ ...prev, wifiDiscoveryStatus: ContentStatus.Error }));
+      if (ownsScan()) setState((prev) => ({ ...prev, wifiDiscoveryStatus: ContentStatus.Error }));
     }
   };
 
@@ -815,8 +863,7 @@ export function useRemoteSession() {
   const dropLiveSession = () => {
     if (!apiRef.current) return;
     apiRef.current = null;
-    if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
-    pollLoopTokenRef.current++;
+    stopPolling();
   };
 
   const connectDirect = async (
@@ -901,6 +948,8 @@ export function useRemoteSession() {
     if (cancelled() || (reconnectGeneration !== undefined && apiRef.current)) return false;
     // Validation is done; only now invalidate the current session's in-flight work.
     const attempt = ++connectionAttemptRef.current;
+    stopPolling();
+    nowPlayingArtwork.invalidatePending();
     const isCurrentAttempt = () => attempt === connectionAttemptRef.current && !cancelled();
     activeWifiEndpointRef.current = null;
     wifiImportOperationRef.current++;
@@ -1103,8 +1152,7 @@ export function useRemoteSession() {
     queueRefreshInFlightRef.current = false;
     pendingSeekRef.current = null;
     pendingVolumeRef.current = null;
-    if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
-    pollLoopTokenRef.current++;
+    stopPolling();
     if (autoReconnectTimerRef.current) {
       clearTimeout(autoReconnectTimerRef.current);
       autoReconnectTimerRef.current = null;
@@ -1194,13 +1242,18 @@ export function useRemoteSession() {
   };
 
   // Background Catalog Sync Worker
+  const catalogSyncIsCurrent = (api: RemoteApi, attempt: number, generation: number) =>
+    apiRef.current === api && attempt === connectionAttemptRef.current && generation === catalogSyncGenerationRef.current;
+
   const startCatalogSync = async (
     api: RemoteApi,
     attempt: number,
     features: string[],
     refreshCoversManifest: boolean = false
   ) => {
-    let generation = 0;
+    if (apiRef.current !== api || attempt !== connectionAttemptRef.current) return;
+    const generation = ++catalogSyncGenerationRef.current;
+    const ownsCatalogSync = () => catalogSyncIsCurrent(api, attempt, generation);
     try {
       const supported = features.includes('catalog_sync_v1');
       if (!supported) {
@@ -1213,11 +1266,6 @@ export function useRemoteSession() {
         return;
       }
 
-      generation = ++catalogSyncGenerationRef.current;
-      const ownsCatalogSync = () =>
-        apiRef.current === api &&
-        attempt === connectionAttemptRef.current &&
-        generation === catalogSyncGenerationRef.current;
       syncedCoverUriCacheRef.current = new Map();
       queueArtworkBySongRef.current.clear();
       queueArtworkPendingRef.current.clear();
@@ -1226,12 +1274,11 @@ export function useRemoteSession() {
 
       // 1. Probe
       const probe = await catalogNetwork(api, attempt, generation, false, () => api.catalog(0, 1));
-      if (!probe || apiRef.current !== api || generation !== catalogSyncGenerationRef.current || attempt !== connectionAttemptRef.current) {
-        return;
-      }
+      if (!probe || !ownsCatalogSync()) return;
 
       // 2. Snapshot check
       const storedIdentity = await syncedCatalogStoreRef.current.activeIdentity(probe.libraryId);
+      if (!ownsCatalogSync()) return;
       const storedSongCount = storedIdentity
         ? await syncedCatalogStoreRef.current.activeSongCount(storedIdentity.libraryId, storedIdentity.revision)
         : 0;
@@ -1265,6 +1312,7 @@ export function useRemoteSession() {
           storedIdentity.libraryId,
           storedIdentity.revision
         );
+        if (!ownsCatalogSync()) return;
         const pending = await syncedCatalogStoreRef.current.pendingCovers(
           storedIdentity.libraryId,
           storedIdentity.revision
@@ -1297,7 +1345,7 @@ export function useRemoteSession() {
         }
       }
     } catch {
-      if (apiRef.current === api && generation === catalogSyncGenerationRef.current && attempt === connectionAttemptRef.current) {
+      if (ownsCatalogSync()) {
         setState((prev) => ({ ...prev, catalogSyncMessage: 'Library sync failed' }));
       }
     }
@@ -1335,7 +1383,7 @@ export function useRemoteSession() {
     optionalArtwork: boolean,
     request: () => Promise<T>
   ): Promise<T> => {
-    while (apiRef.current === api && attempt === connectionAttemptRef.current && generation === catalogSyncGenerationRef.current) {
+    while (catalogSyncIsCurrent(api, attempt, generation)) {
       if (catalogTransferAllowed(optionalArtwork)) {
         if (!optionalArtwork || !BluetoothRequestPolicy.requiresBluetoothAudioPriority(
           stateRef.current.connectionTransport,
@@ -1364,17 +1412,16 @@ export function useRemoteSession() {
     generation: number,
     refreshCoversManifest: boolean
   ) => {
-    const ownsCatalogSync = () =>
-      apiRef.current === api &&
-      attempt === connectionAttemptRef.current &&
-      generation === catalogSyncGenerationRef.current;
+    const ownsCatalogSync = () => catalogSyncIsCurrent(api, attempt, generation);
     setState((prev) => ({ ...prev, catalogSyncMessage: 'Syncing songs' }));
     const firstPage = await catalogNetwork(api, attempt, generation, false, () => api.catalog(0));
+    if (!ownsCatalogSync()) return;
     if (!firstPage.libraryId || !firstPage.revision) {
       throw new Error('Player returned no catalog identity');
     }
 
-    let identity = await syncedCatalogStoreRef.current.activeIdentity(firstPage.libraryId);
+    const identity = await syncedCatalogStoreRef.current.activeIdentity(firstPage.libraryId);
+    if (!ownsCatalogSync()) return;
     const activeSongCount = identity
       ? await syncedCatalogStoreRef.current.activeSongCount(firstPage.libraryId, firstPage.revision)
       : 0;
@@ -1386,11 +1433,12 @@ export function useRemoteSession() {
 
     if (!activeIsComplete) {
       const resumeOffset = await syncedCatalogStoreRef.current.beginCatalogStage(firstPage.libraryId, firstPage.revision, firstPage.total);
+      if (!ownsCatalogSync()) return;
       await syncedCatalogStoreRef.current.writeCatalogPage(firstPage);
 
       let offset = Math.max(firstPage.nextOffset, resumeOffset);
       while (offset < firstPage.total) {
-        if (generation !== catalogSyncGenerationRef.current || attempt !== connectionAttemptRef.current) return;
+        if (!ownsCatalogSync()) return;
         setState((prev) => ({
           ...prev,
           catalogSyncMessage: `Syncing songs ${Math.min(offset, firstPage.total)}/${firstPage.total}`,
@@ -1398,12 +1446,13 @@ export function useRemoteSession() {
         const page = await catalogNetwork(api, attempt, generation, false, () =>
           api.catalog(offset, undefined, firstPage.revision)
         );
+        if (!ownsCatalogSync()) return;
         await syncedCatalogStoreRef.current.writeCatalogPage(page);
         offset = page.nextOffset;
       }
 
+      if (!ownsCatalogSync()) return;
       await syncedCatalogStoreRef.current.publishCatalog(firstPage.libraryId, firstPage.revision, firstPage.total);
-      identity = { libraryId: firstPage.libraryId, revision: firstPage.revision, total: firstPage.total };
     }
 
     const activeIdentity = { libraryId: firstPage.libraryId, revision: firstPage.revision, total: firstPage.total };
@@ -1415,22 +1464,25 @@ export function useRemoteSession() {
       activeIdentity.libraryId,
       activeIdentity.revision
     );
+    if (!ownsCatalogSync()) return;
     if (!coverProg?.manifestComplete || refreshCoversManifest) {
       setState((prev) => ({ ...prev, catalogSyncMessage: 'Syncing album covers' }));
       const firstCovers = await catalogNetwork(api, attempt, generation, false, () =>
         api.catalogCovers(0, undefined, activeIdentity.revision)
       );
+      if (!ownsCatalogSync()) return;
       const coverStage = await syncedCatalogStoreRef.current.beginCovers(
         activeIdentity.libraryId,
         activeIdentity.revision,
         firstCovers.total,
         refreshCoversManifest
       );
+      if (!ownsCatalogSync()) return;
       await syncedCatalogStoreRef.current.writeCoverPage(firstCovers);
 
       let offset = Math.max(firstCovers.nextOffset, coverStage.nextOffset);
       while (offset < firstCovers.total) {
-        if (generation !== catalogSyncGenerationRef.current || attempt !== connectionAttemptRef.current) return;
+        if (!ownsCatalogSync()) return;
         setState((prev) => ({
           ...prev,
           catalogSyncMessage: `Syncing album covers ${Math.min(offset, firstCovers.total)}/${firstCovers.total}`,
@@ -1438,10 +1490,12 @@ export function useRemoteSession() {
         const page = await catalogNetwork(api, attempt, generation, false, () =>
           api.catalogCovers(offset, undefined, activeIdentity.revision)
         );
+        if (!ownsCatalogSync()) return;
         await syncedCatalogStoreRef.current.writeCoverPage(page);
         offset = page.nextOffset;
       }
 
+      if (!ownsCatalogSync()) return;
       await syncedCatalogStoreRef.current.publishCovers(
         activeIdentity.libraryId,
         activeIdentity.revision,
@@ -1449,6 +1503,7 @@ export function useRemoteSession() {
       );
     }
 
+    if (!ownsCatalogSync()) return;
     // Populate covers map
     const allCovers = await syncedCatalogStoreRef.current.catalogCovers(
       activeIdentity.libraryId,
@@ -1463,8 +1518,10 @@ export function useRemoteSession() {
     });
     // The manifest is complete here, so files for covers it no longer lists are orphans.
     const coverStore = syncedCoverStoreRef.current;
-    void coverStore.pruneLibrary(activeIdentity.libraryId, allCovers.map((c) => c.coverKey)).catch(() => {});
-    void syncedCatalogStoreRef.current.retainedLibraryIds().then((ids) => coverStore.purgeLibrariesExcept(ids)).catch(() => {});
+    void coverStore.pruneLibrary(activeIdentity.libraryId, allCovers.map((c) => c.coverKey), ownsCatalogSync).catch(() => {});
+    void syncedCatalogStoreRef.current.retainedLibraryIds().then((ids) => {
+      if (ownsCatalogSync()) return coverStore.purgeLibrariesExcept(ids, ownsCatalogSync);
+    }).catch(() => {});
 
     // Download pending covers
     const pending = await syncedCatalogStoreRef.current.pendingCovers(
@@ -1472,13 +1529,15 @@ export function useRemoteSession() {
       activeIdentity.revision
     );
     if (!ownsCatalogSync() || catalogCoversByAlbumRef.current !== coverMap || syncedCoverUriCacheRef.current !== coverUriMap) return;
+    const ownsCoverDownloads = () => ownsCatalogSync() &&
+      catalogCoversByAlbumRef.current === coverMap && syncedCoverUriCacheRef.current === coverUriMap;
     const downloadableTotal = allCovers.filter((c) => c.available !== false).length;
     let done = downloadableTotal - pending.length;
     // A cover cut off by a timeout or a server error gets one more try at the end of this pass.
     const requeued = new Set<string>();
 
     for (const cover of pending) {
-      if (!ownsCatalogSync() || catalogCoversByAlbumRef.current !== coverMap || syncedCoverUriCacheRef.current !== coverUriMap) return;
+      if (!ownsCoverDownloads()) return;
       if (cover.available === false) {
         await syncedCatalogStoreRef.current.markCoverState(
           activeIdentity.libraryId,
@@ -1500,18 +1559,20 @@ export function useRemoteSession() {
       }
 
       // Only a cover on disk counts as stored; the memory fallback is just for display.
-      const existing = (await syncedCoverStoreRef.current.contains(activeIdentity.libraryId, cover.coverKey))
+      const onDisk = await syncedCoverStoreRef.current.contains(activeIdentity.libraryId, cover.coverKey);
+      if (!ownsCoverDownloads()) return;
+      const existing = onDisk
         ? await syncedCoverStoreRef.current.getUri(activeIdentity.libraryId, cover.coverKey)
         : null;
+      if (!ownsCoverDownloads()) return;
       if (existing) {
-        if (!ownsCatalogSync() || syncedCoverUriCacheRef.current !== coverUriMap) return;
         await syncedCatalogStoreRef.current.markCoverState(
           activeIdentity.libraryId,
           activeIdentity.revision,
           cover.albumKey,
           SyncedCatalogStore.COVER_STORED
         );
-        if (!ownsCatalogSync() || syncedCoverUriCacheRef.current !== coverUriMap) return;
+        if (!ownsCoverDownloads()) return;
         coverUriMap.set(cover.albumKey, existing);
         done++;
         continue;
@@ -1521,11 +1582,14 @@ export function useRemoteSession() {
         const art = await catalogNetwork(api, attempt, generation, true, () =>
           api.catalogArt(activeIdentity.revision, cover.representativeId, cover.coverKey)
         );
-        if (!ownsCatalogSync() || syncedCoverUriCacheRef.current !== coverUriMap) return;
+        if (!ownsCoverDownloads()) return;
         if (art && art.base64) {
-          const stored = await syncedCoverStoreRef.current.put(activeIdentity.libraryId, cover.coverKey, art.base64);
+          const stored = await syncedCoverStoreRef.current.put(
+            activeIdentity.libraryId, cover.coverKey, art.base64, ownsCoverDownloads
+          );
+          if (!ownsCoverDownloads()) return;
           const uri = await syncedCoverStoreRef.current.getUri(activeIdentity.libraryId, cover.coverKey, art.contentType || 'image/jpeg');
-          if (!ownsCatalogSync() || syncedCoverUriCacheRef.current !== coverUriMap) return;
+          if (!ownsCoverDownloads()) return;
           if (!stored) {
             // Disk write failed: show it from memory, but leave it pending for the next sync.
             if (uri) coverUriMap.set(cover.albumKey, uri);
@@ -1538,6 +1602,7 @@ export function useRemoteSession() {
             cover.albumKey,
             uri ? SyncedCatalogStore.COVER_STORED : SyncedCatalogStore.COVER_MISSING
           );
+          if (!ownsCoverDownloads()) return;
           if (uri) coverUriMap.set(cover.albumKey, uri);
         } else {
           await syncedCatalogStoreRef.current.markCoverState(
@@ -1548,6 +1613,7 @@ export function useRemoteSession() {
           );
         }
       } catch (err: any) {
+        if (!ownsCoverDownloads()) return;
         if (err?.statusCode === 404) {
           await syncedCatalogStoreRef.current.markCoverState(
             activeIdentity.libraryId,
@@ -1562,7 +1628,7 @@ export function useRemoteSession() {
             cover.albumKey,
             SyncedCatalogStore.COVER_PERMANENT_FAILURE
           );
-        } else if (!requeued.has(cover.albumKey) && ownsCatalogSync()) {
+        } else if (!requeued.has(cover.albumKey)) {
           requeued.add(cover.albumKey);
           pending.push(cover);
           continue;
@@ -1571,7 +1637,7 @@ export function useRemoteSession() {
       done++;
     }
 
-    if (ownsCatalogSync()) setState((prev) => ({ ...prev, catalogSyncMessage: null }));
+    if (ownsCoverDownloads()) setState((prev) => ({ ...prev, catalogSyncMessage: null }));
   };
 
   // Background Bluetooth audio suspends polling; a lock-screen action gets one status read
@@ -1591,19 +1657,20 @@ export function useRemoteSession() {
     }, MEDIA_ACTION_RECONCILE_DELAY_MS);
   };
 
-  // Status Polling Loop
-  const startPollingLoop = (immediate = false) => {
-    if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
-    // A poll still awaiting status() when the loop restarts must not schedule a second loop.
-    const loopToken = ++pollLoopTokenRef.current;
-    const schedule = (delayMs: number) => {
-      if (loopToken === pollLoopTokenRef.current) pollingTimerRef.current = setTimeout(poll, delayMs);
-    };
+  const stopPolling = () => {
+    statusPollLoopRef.current.stop();
+    clearTimeout(reconcileTimerRef.current);
+    reconcileTimerRef.current = null;
+    reconcileOnceRef.current = false;
+  };
 
-    const poll = async () => {
+  const startPollingLoop = (immediate = false) => {
+    const poll = async (ownsLoop: () => boolean): Promise<number | undefined> => {
       const api = apiRef.current;
       if (!api || stateRef.current.connectionStatus !== ConnectionStatus.Connected) return;
 
+      const attempt = connectionAttemptRef.current;
+      const ownsSession = () => ownsLoop() && attempt === connectionAttemptRef.current && apiRef.current === api;
       const transport = stateRef.current.connectionTransport;
       const reconcile = reconcileOnceRef.current;
       reconcileOnceRef.current = false;
@@ -1612,37 +1679,31 @@ export function useRemoteSession() {
         appForegroundRef.current,
         bluetoothAudioOutputRef.current
       )) {
-        schedule(1000);
-        return;
+        return 1000;
       }
 
       try {
-        if (
-          transport === ConnectionTransport.Bluetooth &&
-          Date.now() - lastWifiProbeAtRef.current >= 30_000 &&
-          await tryUpgradeToWifi(api)
-        ) {
-          startPollingLoop();
-          return;
+        if (transport === ConnectionTransport.Bluetooth && Date.now() - lastWifiProbeAtRef.current >= 30_000) {
+          const upgraded = await tryUpgradeToWifi(api, undefined, false, ownsSession);
+          if (!ownsSession() || upgraded) return;
         }
         const snap = gateRef.current.snapshot();
         const requestStartedAtMs = Date.now();
         const commandGeneration = api.commandGeneration;
         const status = await api.status();
-        if (api !== apiRef.current) return;
+        if (!ownsSession()) return;
         const collection = collectionPendingRef.current;
         if (collection && collection.api === api && collection.attempt === connectionAttemptRef.current && collectionJobSettled(collection.id, collection.startedAt, status.collectionJob, Date.now())) {
           collectionPendingRef.current = null;
           setState((prev) => ({ ...prev, collectionBusy: false,
             connectionMessage: status.collectionJob?.id === collection.id && status.collectionJob.state === 'error' ? status.collectionJob.error || 'Could not play collection' : Date.now() - collection.startedAt > 120000 ? 'The player has not confirmed collection playback.' : prev.connectionMessage }));
-          refreshQueue(api).catch(() => {});
+          refreshQueue(api, ownsSession).catch(() => {});
         }
         if (featureSetRef.current.has('library_sorting') && !sortingWriteRef.current && Date.now() - sortingRefreshAtRef.current > 10000) {
           sortingRefreshAtRef.current = Date.now();
           void refreshLibrarySorting(api);
         }
 
-        if (apiRef.current !== api) return;
         const now = Date.now();
         bluetoothAudioOutputRef.current = status.bluetoothAudioOutput ?? null;
 
@@ -1772,10 +1833,10 @@ export function useRemoteSession() {
         ) : null;
         if (queueInterval != null && now - lastQueueRefreshAtRef.current >= queueInterval) {
           lastQueueRefreshAtRef.current = now;
-          refreshQueueIfChanged(api).catch(() => {});
+          refreshQueueIfChanged(api, ownsSession).catch(() => {});
         }
         if (trackChanged && transport === ConnectionTransport.Bluetooth && !queueInterval) {
-          refreshQueueIfChanged(api).catch(() => {});
+          refreshQueueIfChanged(api, ownsSession).catch(() => {});
           lastQueueRefreshAtRef.current = now;
         }
         const bluetoothArtCanResume = BluetoothRequestPolicy.allowsArtworkRequest(
@@ -1786,12 +1847,15 @@ export function useRemoteSession() {
           (confirmed && !playbackActive && appForegroundRef.current));
         if (bluetoothArtCanResume && deferredBluetoothArtworkEntryIdsRef.current.length > 0) {
           const entryId = deferredBluetoothArtworkEntryIdsRef.current.shift();
-          if (entryId) setTimeout(() => { void loadLibraryArtwork(entryId); }, 0);
+          if (entryId) setTimeout(() => {
+            if (ownsSession()) void loadLibraryArtwork(entryId);
+          }, 0);
         }
-        schedule(nextInterval);
+        return nextInterval;
       } catch (err: any) {
-        if (apiRef.current !== api) return;
+        if (!ownsSession()) return;
         const playerKey = connectedPlayerKeyRef.current;
+        nowPlayingArtwork.invalidatePending();
         apiRef.current = null;
         connectedPlayerKeyRef.current = null;
         bluetoothAudioOutputRef.current = null;
@@ -1803,7 +1867,10 @@ export function useRemoteSession() {
           return;
         }
         if (err?.statusCode === 401 && err?.pinRequired) {
-          if (playerKey) await pinStoreRef.current.remove(playerKey);
+          if (playerKey) {
+            await pinStoreRef.current.remove(playerKey);
+            if (!ownsLoop() || attempt !== connectionAttemptRef.current) return;
+          }
           stopPlaybackService().catch(() => {});
           positionStoreRef.current.reset();
           setState((prev) => ({
@@ -1833,13 +1900,11 @@ export function useRemoteSession() {
             connectionStatus: ConnectionStatus.Error,
             connectionMessage: err?.message || 'Connection to Compás player was lost.',
           }));
-          schedule(3000);
         }
       }
     };
 
-    if (immediate) void poll();
-    else schedule(300);
+    statusPollLoopRef.current.request(poll, immediate ? 0 : 300);
   };
 
   // Queue Operations
@@ -1858,17 +1923,18 @@ export function useRemoteSession() {
     };
   };
 
-  const refreshQueue = async (activeApi?: RemoteApi) => {
+  const refreshQueue = async (activeApi?: RemoteApi, ownsRequest: () => boolean = () => true) => {
     const api = activeApi || apiRef.current;
-    if (!api || api !== apiRef.current) return;
+    if (!api || api !== apiRef.current || !ownsRequest()) return;
     const generation = ++queueRefreshGenerationRef.current;
+    const ownsRefresh = () => ownsRequest() && api === apiRef.current && generation === queueRefreshGenerationRef.current;
     queuePageGenerationRef.current++;
     queueRefreshInFlightRef.current = true;
 
     setState((prev) => ({ ...prev, queueStatus: ContentStatus.Loading, queueLoadingMore: false }));
     try {
       const qPage = await api.queue(0, 25);
-      if (api !== apiRef.current || generation !== queueRefreshGenerationRef.current) return;
+      if (!ownsRefresh()) return;
       queueRevisionRef.current = qPage.revision;
       queueTargetsRef.current.clear();
 
@@ -1885,7 +1951,7 @@ export function useRemoteSession() {
       }));
       void loadQueueArtwork(qPage.songs.map((song) => song.index), api);
     } catch {
-      if (api !== apiRef.current || generation !== queueRefreshGenerationRef.current) return;
+      if (!ownsRefresh()) return;
       setState((prev) => ({ ...prev, queueStatus: ContentStatus.Error }));
     } finally {
       if (api === apiRef.current && generation === queueRefreshGenerationRef.current) {
@@ -1894,12 +1960,12 @@ export function useRemoteSession() {
     }
   };
 
-  const refreshQueueIfChanged = async (api: RemoteApi) => {
+  const refreshQueueIfChanged = async (api: RemoteApi, ownsPoll: () => boolean) => {
     const page = await api.queue(0, 25);
-    if (api !== apiRef.current) return;
+    if (!ownsPoll()) return;
     lastQueueRefreshAtRef.current = Date.now();
     if (page.revision !== queueRevisionRef.current || page.total !== stateRef.current.queueTotal) {
-      await refreshQueue(api);
+      await refreshQueue(api, ownsPoll);
     }
   };
 
@@ -1962,6 +2028,7 @@ export function useRemoteSession() {
       if (!publicLibraryIdentityMatches(expectedLibraryId, caps.libraryId)) return false;
       if (savedPin) candidate.setPin(savedPin);
       let identityMatches = await verifyWifiUpgradeIdentity(currentApi, candidate, ownsSession);
+      if (!ownsSession()) return false;
       let sourcePin: string | null = null;
       if (!identityMatches && explicit) {
         sourcePin = currentPlayerKey ? await pinStoreRef.current.get(currentPlayerKey) : null;
@@ -1971,7 +2038,7 @@ export function useRemoteSession() {
           identityMatches = await verifyWifiUpgradeIdentity(currentApi, candidate, ownsSession);
         }
       }
-      if (!identityMatches) return false;
+      if (!identityMatches || !ownsSession()) return false;
       const status = await candidate.status();
       if (!ownsSession()) return false;
       if (collectionStartingRef.current || collectionPendingRef.current || sortingWriteRef.current || bulkActionBusyRef.current) return false;
@@ -1989,6 +2056,7 @@ export function useRemoteSession() {
         shownLibraryListRef.current = null;
         setState((prev) => ({ ...prev, libraryEntries: [], queue: [], libraryIsNested: false }));
       }
+      stopPolling();
       apiRef.current = candidate;
       pendingSeekRef.current = null;
       pendingVolumeRef.current = null;
@@ -3257,6 +3325,7 @@ export function useRemoteSession() {
     if (savedAddress?.trim() && await tryUpgradeToWifi(currentApi, savedAddress, true, isCurrent, expectedPublicLibraryId)) return;
     if (!isCurrent()) throw new Error('Wi-Fi player search was cancelled.');
 
+    const scanId = ++nextDiscoveryGeneration;
     await new Promise<void>((resolve, reject) => {
       let done = false;
       let scanActive = true;
@@ -3279,6 +3348,7 @@ export function useRemoteSession() {
       };
       cancelScan = () => finish(new Error('Wi-Fi player search was cancelled.'));
       const subscription = addWifiDeviceFoundListener((service: DiscoveredWifiService) => {
+        if (service.scanId !== scanId) return;
         const endpoint = discoveryEndpoint(service);
         if (!endpoint || attempted.has(endpoint) || attempted.size >= 64 || !isCurrent()) return;
         attempted.add(endpoint);
@@ -3289,7 +3359,7 @@ export function useRemoteSession() {
       });
       timer = setTimeout(() => finish(new Error('Could not find the matching player. Turn on Wi-Fi on the player and phone, then try again.')), 15000);
       wifiUpgradeScanCleanupRef.current = cancelScan;
-      void startWifiDiscoveryModule().then((started) => {
+      void startWifiDiscoveryModule(scanId).then((started) => {
         if (!started && !done) finish(new Error('Wi-Fi discovery is unavailable. Check Wi-Fi and local network permission, then try again.'));
       }).catch(() => finish(new Error('Could not search for the player on Wi-Fi.')));
     });
@@ -3346,6 +3416,7 @@ export function useRemoteSession() {
         if (status.state === 'stopped') {
           const api = session.api;
           await loadLibraryCategory(currentLibraryCategoryRef.current, api);
+          if (!isCurrent()) return;
           refreshQueue(api);
           if (featureSetRef.current.has(RemoteApi.CATALOG_SYNC_FEATURE)) {
             startCatalogSync(api, connectionAttemptRef.current, [...featureSetRef.current]);
@@ -3609,13 +3680,18 @@ export function useRemoteSession() {
   };
 
   const onAction = useCallback(async (action: RemoteAction) => {
+    if (!mountedRef.current) return;
     // Check runtime permissions matching Android MainActivity
     const requiredPerms = getRequiredPermissionsForAction(
       action,
       stateRef.current.selectedConnectionTransport
     );
     if (requiredPerms.length > 0) {
+      const discoveryGeneration = discoveryGenerationRef.current;
       const permResult = await requestMissingPermissions(requiredPerms);
+      if (!mountedRef.current) return;
+      if (action.type === 'ScanBluetoothPlayers' && !ownsPicker(ConnectionTransport.Bluetooth, discoveryGeneration)) return;
+      if (action.type === 'RetryWifiDiscovery' && !ownsPicker(ConnectionTransport.Wifi, discoveryGeneration)) return;
       if (!permResult.granted) {
         const isBt = requiredPerms.some((p) => p.includes('BLUETOOTH') || p.includes('LOCATION'));
         const isWifi = requiredPerms.some((p) => p.includes('LOCAL_NETWORK'));
@@ -3747,26 +3823,9 @@ export function useRemoteSession() {
         setState((prev) => selectConnectionTransport(prev, action.transport));
         break;
 
-      case 'ScanBluetoothPlayers': {
-        const btPerms = getRequiredPermissionsForBluetooth();
-        const permResult = await requestMissingPermissions(btPerms);
-        if (!permResult.granted) {
-          setState((prev) => ({
-            ...prev,
-            bluetoothScanStatus: ContentStatus.Error,
-            connectionMessage:
-              'Bluetooth permissions were denied. Grant Nearby devices permission in Settings.',
-          }));
-          break;
-        }
-        setState((prev) => ({ ...prev, bluetoothPlayers: [], bluetoothScanStatus: ContentStatus.Loading }));
-        startBtDiscovery().then((started) => {
-          if (!started) setState((prev) => ({ ...prev, bluetoothScanStatus: ContentStatus.Empty }));
-        }).catch(() => {
-          setState((prev) => ({ ...prev, bluetoothScanStatus: ContentStatus.Error }));
-        });
+      case 'ScanBluetoothPlayers':
+        void startBluetoothDiscovery(true);
         break;
-      }
 
       case 'SelectBluetoothPlayer':
         AsyncStorage.setItem(PREF_BLUETOOTH_ID, action.id).catch(() => {});

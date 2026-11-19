@@ -130,6 +130,8 @@ function harness(transport = T.Wifi) {
         put: async () => { requests.push('save'); return boundary === 'save' ? wait.promise : true; },
       }),
       connectionAttemptRef: ref(0), activeWifiEndpointRef: ref(null), wifiImportOperationRef: ref(0),
+      stopPolling: () => {},
+      nowPlayingArtwork: { invalidatePending() {} },
       setWifiImportStatus: () => {}, pendingSeekRef: ref(null), pendingVolumeRef: ref(null),
     });
     direct.load('connectDirect');

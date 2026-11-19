@@ -1,6 +1,7 @@
 import { requireNativeModule, type EventSubscription } from 'expo-modules-core';
 
 export interface DiscoveredWifiService {
+  scanId: number;
   id: string;
   name: string;
   host: string;
@@ -12,6 +13,7 @@ export interface DiscoveredWifiService {
 }
 
 export interface WifiServiceLostEvent {
+  scanId: number;
   id: string;
   name: string;
 }
@@ -33,10 +35,10 @@ function getNativeModule() {
   return nativeModule;
 }
 
-export async function startDiscovery(): Promise<boolean> {
+export async function startDiscovery(scanId: number): Promise<boolean> {
   const mod = getNativeModule();
   if (!mod || !mod.startDiscovery) return false;
-  return await mod.startDiscovery();
+  return await mod.startDiscovery(scanId);
 }
 
 export async function stopDiscovery(): Promise<boolean> {
