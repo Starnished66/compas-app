@@ -931,3 +931,9 @@ export const uk: Record<string, TranslationValue> = {
   "Show hidden files": "Показати приховані файли",
   "Hide hidden files": "Приховати приховані файли"
 };
+
+Object.assign(uk, {
+  "Rating": "Оцінка",
+  "Album Artist, then Year": "Виконавець альбому, потім рік",
+  "Reversed order": "Зворотний порядок",
+});

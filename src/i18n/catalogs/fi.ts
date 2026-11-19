@@ -891,3 +891,9 @@ export const fi: Record<string, TranslationValue> = {
   "Show hidden files": "Näytä piilotetut tiedostot",
   "Hide hidden files": "Piilota piilotetut tiedostot"
 };
+
+Object.assign(fi, {
+  "Rating": "Arvosana",
+  "Album Artist, then Year": "Albumin esittäjä, sitten vuosi",
+  "Reversed order": "Käänteinen järjestys",
+});

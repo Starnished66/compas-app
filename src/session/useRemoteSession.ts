@@ -75,6 +75,7 @@ import { syncCatalog } from './catalogSync';
 import { PlaybackStatusGate, CommandOutcome } from './PlaybackStatusGate';
 import { StatusPollLoop } from './StatusPollLoop';
 import { QUEUE_PROBE_SIZE, insertedOffset, queueEnds } from './queueInsertion';
+import { CatalogSyncProgressStore } from './CatalogSyncProgressStore';
 import { PlaybackPositionStore } from './PlaybackPositionStore';
 import { BulkWriteCounts, queueInsertWindowMatches, queueInsertionOffsets, queueRemovalAmbiguousAt, queueRemovalMatches, readQueueSnapshot, resolveBulkSongs, runPlaylistCreationJob, runSerialBulkWrites, waitForQueueTransition } from './bulkActions';
 import { collectionJobSettled } from './collectionJobState';
@@ -229,7 +230,6 @@ export function useRemoteSession() {
     queueHasMore: false,
     queueLoadingMore: false,
     libraryEntries: [],
-    catalogSyncMessage: null,
     libraryStatus: ContentStatus.Ready,
     queueStatus: ContentStatus.Ready,
     libraryQuery: '',
@@ -267,6 +267,7 @@ export function useRemoteSession() {
   const wifiUpgradeScanCleanupRef = useRef<(() => void) | null>(null);
   useEffect(() => () => { bulkActionCancelledRef.current = true; }, []);
   const gateRef = useLazyRef(() => new PlaybackStatusGate());
+  const catalogSyncProgress = useLazyRef(() => new CatalogSyncProgressStore()).current;
   const positionStoreRef = useLazyRef(() => new PlaybackPositionStore());
   const pinStoreRef = useLazyRef(() => new SecurePinStore());
   const artCacheRef = useLazyRef(() => new ArtworkDiskCache());
@@ -390,18 +391,18 @@ export function useRemoteSession() {
 
   const nextEntryId = (prefix: string): string => `${prefix}-${++entryIdCounterRef.current}`;
 
+  useEffect(() => {
+    if (state.connectionStatus === ConnectionStatus.Disconnected) catalogSyncProgress.set(null);
+  }, [catalogSyncProgress, state.connectionStatus]);
+
   // Restore stored preferences
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [savedTheme, savedWifi, savedBt, savedTransport, savedAuto] = await Promise.all([
-          AsyncStorage.getItem(PREF_THEME),
-          AsyncStorage.getItem(PREF_WIFI_ADDRESS),
-          AsyncStorage.getItem(PREF_BLUETOOTH_ID),
-          AsyncStorage.getItem(PREF_LAST_TRANSPORT),
-          AsyncStorage.getItem(PREF_AUTO_RECONNECT),
-        ]);
+        const keys = [PREF_THEME, PREF_WIFI_ADDRESS, PREF_BLUETOOTH_ID, PREF_LAST_TRANSPORT, PREF_AUTO_RECONNECT];
+        const saved = new Map(await AsyncStorage.multiGet(keys));
+        const [savedTheme, savedWifi, savedBt, savedTransport, savedAuto] = keys.map((key) => saved.get(key) ?? null);
 
         if (cancelled) return;
         const autoReconnect = savedAuto !== 'false';
@@ -1208,13 +1209,11 @@ export function useRemoteSession() {
 
     clearMediaState().catch(() => {});
     stopPlaybackService().catch(() => {});
-
     setState((prev) => ({
       ...prev,
       connectionStatus: ConnectionStatus.Disconnected,
       connectionAttemptTransport: null,
       connectionMessage: null,
-      catalogSyncMessage: null,
       currentTrack: null,
       isPlaying: false,
       supportedFeatures: [],
@@ -1268,7 +1267,7 @@ export function useRemoteSession() {
   const markCatalogUnavailable = () => {
     ++catalogSyncGenerationRef.current;
     adoptCatalog(null);
-    setCatalogSyncMessage('Local catalog unavailable');
+    catalogSyncProgress.set('Local catalog unavailable');
   };
 
   const restartCatalogBrowse = (api: RemoteApi, isNested: boolean, query: string) => {
@@ -1312,7 +1311,7 @@ export function useRemoteSession() {
         syncedCoverUriCacheRef.current = new Map();
         queueArtworkBySongRef.current.clear();
         queueArtworkPendingRef.current.clear();
-        setState((prev) => ({ ...prev, catalogSyncMessage: null }));
+        catalogSyncProgress.set(null);
         return;
       }
 
@@ -1320,14 +1319,14 @@ export function useRemoteSession() {
       queueArtworkBySongRef.current.clear();
       queueArtworkPendingRef.current.clear();
       lastCatalogCoverProgressAtRef.current = 0;
-      setState((prev) => ({ ...prev, catalogSyncMessage: 'Checking player library' }));
+      catalogSyncProgress.set('Checking player library');
 
       await syncCatalog({
         api,
         store: syncedCatalogStoreRef.current,
         isCurrent: ownsCatalogSync,
         request: (request) => catalogNetwork(api, attempt, generation, false, request),
-        setMessage: setCatalogSyncMessage,
+        setMessage: catalogSyncProgress.set,
         adopt: adoptCatalog,
         setCovers: (covers) => {
           const coverMap = catalogCoversByAlbumRef.current;
@@ -1346,7 +1345,7 @@ export function useRemoteSession() {
           restartCatalogBrowse(api, libraryIsNested, libraryQuery);
         }
       } else {
-        setCatalogSyncMessage('Library sync failed');
+        catalogSyncProgress.set('Library sync failed');
       }
     }
   };
@@ -1372,10 +1371,6 @@ export function useRemoteSession() {
       };
     });
 
-  // Skips the render when the message is unchanged; the wait loop above sets it every second.
-  const setCatalogSyncMessage = (message: string | null) =>
-    setState((prev) => (prev.catalogSyncMessage === message ? prev : { ...prev, catalogSyncMessage: message }));
-
   const catalogNetwork = async <T,>(
     api: RemoteApi,
     attempt: number,
@@ -1397,7 +1392,7 @@ export function useRemoteSession() {
           return await request();
         }
       }
-      setCatalogSyncMessage(BluetoothRequestPolicy.requiresBluetoothAudioPriority(
+      catalogSyncProgress.set(BluetoothRequestPolicy.requiresBluetoothAudioPriority(
         stateRef.current.connectionTransport,
         bluetoothAudioOutputRef.current
       ) ? 'Waiting for WiFi or paused Bluetooth audio' : 'Waiting to resume library sync');
@@ -1445,10 +1440,7 @@ export function useRemoteSession() {
       const progressTime = Date.now();
       if (progressTime - lastCatalogCoverProgressAtRef.current >= 2000) {
         lastCatalogCoverProgressAtRef.current = progressTime;
-        setState((prev) => ({
-          ...prev,
-          catalogSyncMessage: `Downloading covers ${Math.min(done, downloadableTotal)}/${downloadableTotal}`,
-        }));
+        catalogSyncProgress.set(`Downloading covers ${Math.min(done, downloadableTotal)}/${downloadableTotal}`);
       }
 
       try {
@@ -1480,7 +1472,7 @@ export function useRemoteSession() {
       done++;
     }
 
-    if (ownsCoverDownloads()) setState((prev) => ({ ...prev, catalogSyncMessage: null }));
+    if (ownsCoverDownloads()) catalogSyncProgress.set(null);
   };
 
   // Background Bluetooth audio suspends polling; a lock-screen action gets one status read
@@ -4279,6 +4271,7 @@ export function useRemoteSession() {
     deleteWifiImportFile,
     createWifiImportDirectory,
     playbackPosition: positionStoreRef.current,
+    catalogSyncProgress,
     currentLibraryCategory: currentLibraryCategoryRef.current,
     libraryArtwork,
     playerSettingsApi: () => apiRef.current?.settings() ?? null,

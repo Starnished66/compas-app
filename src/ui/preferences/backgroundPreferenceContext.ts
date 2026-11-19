@@ -3,10 +3,12 @@ import { BackgroundStyle, DEFAULT_BACKGROUND_STYLE } from '../backgroundStyle';
 
 export interface BackgroundPreferenceValue {
   preference: BackgroundStyle;
+  restored: boolean;
   setPreference(preference: BackgroundStyle): void;
 }
 
 export const BackgroundPreferenceContext = createContext<BackgroundPreferenceValue>({
   preference: DEFAULT_BACKGROUND_STYLE,
+  restored: true,
   setPreference: () => undefined,
 });

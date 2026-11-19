@@ -871,3 +871,9 @@ export const vi: Record<string, TranslationValue> = {
   "Show hidden files": "Hiện tệp ẩn",
   "Hide hidden files": "Ẩn tệp ẩn"
 };
+
+Object.assign(vi, {
+  "Rating": "Xếp hạng",
+  "Album Artist, then Year": "Nghệ sĩ album, rồi năm",
+  "Reversed order": "Thứ tự đảo ngược",
+});

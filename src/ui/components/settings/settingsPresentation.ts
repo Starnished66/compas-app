@@ -1,4 +1,5 @@
-import { catalogs, Language } from '../../../i18n/catalogs';
+import { loadCatalog } from '../../../i18n/catalogs';
+import type { Language } from '../../../i18n/languages';
 import {
   SettingApply,
   SettingDescriptor,
@@ -54,7 +55,7 @@ export function formatNumber(value: number, unit: string | null): string {
 /** The player sends labels in its own language and the English text as labelId; prefer the phone's language when the app knows it. */
 export function localizedLabel(language: Language, labelId: string, playerLabel: string): string {
   if (language === 'en') return labelId;
-  const known = catalogs[language][labelId];
+  const known = loadCatalog(language)[labelId];
   return typeof known === 'string' ? known : playerLabel;
 }
 

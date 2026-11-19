@@ -15,9 +15,8 @@ export type SessionSnapshot = Pick<
   | 'playerName'
   | 'pinDialogVisible'
   | 'currentTrack'
-  | 'catalogSyncMessage'
   | 'songActionsVisible'
->;
+> & { catalogSyncMessage?: string | null };
 
 export interface SessionMemory {
   status: ConnectionStatus;

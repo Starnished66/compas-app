@@ -27,11 +27,15 @@ export interface PlayerCommands {
   setRating(rating: number): void;
 }
 
+export type PlayerCommandState = Pick<RemoteUiState,
+  'connectionMessage' | 'connectionTransport' | 'currentTrack' | 'dacMode' | 'currentRating' |
+  'pendingCurrentRating' | 'isPlaying' | 'playbackMode' | 'supportedFeatures'>;
+
 interface PendingCommand {
   id: number;
   label: string;
   skipping: boolean;
-  settled?: (state: RemoteUiState, position: PlaybackPosition) => boolean;
+  settled?: (state: PlayerCommandState, position: PlaybackPosition) => boolean;
 }
 
 const WIFI_FEEDBACK_MS = 800;
@@ -45,12 +49,12 @@ function repeatLabel(mode: PlaybackMode): string {
   return 'Repeat off…';
 }
 
-function displayedRating(state: RemoteUiState): number {
+function displayedRating(state: PlayerCommandState): number {
   const edit = state.pendingCurrentRating;
   return edit && sameSong(edit.track, state.currentTrack) ? edit.rating : state.currentRating;
 }
 
-export function usePlayerCommands(state: RemoteUiState, onAction: (action: RemoteAction) => void): PlayerCommands {
+export function usePlayerCommands(state: PlayerCommandState, onAction: (action: RemoteAction) => void): PlayerCommands {
   const { t } = useI18n();
   const positionStore = usePlaybackPositionStore();
   const snackbar = useSnackbar();

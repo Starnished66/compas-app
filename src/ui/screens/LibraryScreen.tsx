@@ -256,7 +256,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   const railGutter = lettered && entries.length > 0 ? RAIL_GUTTER : undefined;
   const inlineError = inlineLibraryError(state);
   const hasLoadedEntries = state.libraryEntries.length > 0;
-  const { connectionStatus, connectionMessage, libraryStatus, libraryCountLabel, collectionBusy, catalogSyncMessage, supportedFeatures } = state;
+  const { connectionStatus, connectionMessage, libraryStatus, libraryCountLabel, collectionBusy, supportedFeatures } = state;
   const { onLeadingLayout, stuck: chipsStuck } = chipsHeader;
   const insetTop = insets.top;
   const selectedCount = selectedIds.size;
@@ -325,7 +325,6 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
           nodeItem(
             'sync',
             <LibrarySyncCard
-              message={catalogSyncMessage}
               insetRight={railGutter}
               // Also checks the player's catalog: a failed sync retries, and changes made on the player come in.
               onRefresh={() => {
@@ -388,7 +387,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   }, [
     searchActive, nested, albumDetail, step, nestedTitle, t, onAction, artistDetail, nativeCollectionPlayback,
     nativeGenrePlayback, nativeRootSongsPlayback, collectionBusy, shuffleActive, onLeadingLayout, chipsStuck, insetTop,
-    supportedFeatures, category, connected, catalogSyncMessage, railGutter, albumEntries, libraryCountLabel,
+    supportedFeatures, category, connected, railGutter, albumEntries, libraryCountLabel,
     inlineError, placeholder, selectionMode, selectedCount, exitSelection, entryCount, noun, ascending, localDirectionSort,
     showGrid, gridCapable, flip,
   ]);

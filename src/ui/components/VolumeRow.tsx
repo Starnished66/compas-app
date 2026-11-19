@@ -33,7 +33,7 @@ export function VolumeRow({ volume, onChange, disabled = false, style }: VolumeR
     <View style={[styles.row, style]}>
       <Icon name="volume" color={palette.inkMuted} />
       <Slider
-        value={shown}
+        value={volume}
         label={t('Player volume')}
         disabled={disabled}
         formatValue={percent}

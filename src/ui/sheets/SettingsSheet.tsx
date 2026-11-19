@@ -21,13 +21,14 @@ import { PreferenceSetting } from '../components/PreferenceSetting';
 import { SegmentedOption } from '../components/SegmentedControl';
 import { connectionStatusView } from '../connectionSummary';
 import { Space } from '../tokens';
-import { useConnectedPlayer } from '../useConnectedPlayer';
+import type { ConnectedPlayer } from '../useConnectedPlayer';
 import { useUpdates } from '../../updates/UpdatesProvider';
 import { LANGUAGE_OPTIONS, useI18n } from '../../i18n';
 import { Button } from '../components/Button';
 
 export interface SettingsSheetProps {
   state: RemoteUiState;
+  player: ConnectedPlayer;
   onAction: (action: RemoteAction) => void;
   visible: boolean;
   onClose: () => void;
@@ -46,13 +47,12 @@ const THEME_OPTIONS: ReadonlyArray<SegmentedOption<RemoteTheme>> = [
 
 const CHEVRON_SIZE = 18;
 
-export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnection, onOpenUpdates, onOpenTransfer, onOpenPlayerSettings, onOpenPlugins }: SettingsSheetProps) {
+export function SettingsSheet({ state, player, onAction, visible, onClose, onOpenConnection, onOpenUpdates, onOpenTransfer, onOpenPlayerSettings, onOpenPlugins }: SettingsSheetProps) {
   const updates = useUpdates();
   const { t, languagePreference, setLanguage } = useI18n();
   const [languageOpen, setLanguageOpen] = useState(false);
   const [sortingOpen, setSortingOpen] = useState(false);
   const librarySorting = state.librarySorting;
-  const player = useConnectedPlayer(state);
   const connected = state.connectionStatus === ConnectionStatus.Connected;
   const disconnected = state.connectionStatus === ConnectionStatus.Disconnected;
   const afterClose = useRef<RemoteAction | null>(null);
@@ -253,7 +253,7 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
           {connected ? (
             <>
               <Divider />
-              <LibrarySyncRow syncMessage={state.catalogSyncMessage} onSync={() => onAction({ type: 'SyncLibrary' })} />
+              <LibrarySyncRow onSync={() => onAction({ type: 'SyncLibrary' })} />
               <Divider />
               <PlayerFeatureList supportedFeatures={state.supportedFeatures} />
             </>

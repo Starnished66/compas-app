@@ -891,3 +891,9 @@ export const nl: Record<string, TranslationValue> = {
   "Show hidden files": "Verborgen bestanden weergeven",
   "Hide hidden files": "Verborgen bestanden verbergen"
 };
+
+Object.assign(nl, {
+  "Rating": "Beoordeling",
+  "Album Artist, then Year": "Albumartiest, daarna jaar",
+  "Reversed order": "Omgekeerde volgorde",
+});

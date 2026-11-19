@@ -1,4 +1,5 @@
 import React from 'react';
+import { useCatalogSyncProgress } from '../library/catalogSyncProgressContext';
 import { useLibrarySyncRequest } from '../library/useLibrarySyncRequest';
 import { useSyncedSongCount } from '../library/useSyncedSongCount';
 import { upToDateLabel } from '../library/librarySync';
@@ -8,14 +9,14 @@ import { StatusIndicator } from './StatusIndicator';
 import { useI18n } from '../../i18n';
 
 export interface LibrarySyncRowProps {
-  syncMessage?: string | null;
   onSync: () => void;
 }
 
-export function LibrarySyncRow({ syncMessage, onSync }: LibrarySyncRowProps) {
+export function LibrarySyncRow({ onSync }: LibrarySyncRowProps) {
   const { t } = useI18n();
+  const syncMessage = useCatalogSyncProgress();
   const { phase, sync } = useLibrarySyncRequest(syncMessage, onSync);
-  const songCount = useSyncedSongCount(syncMessage ?? null);
+  const songCount = useSyncedSongCount(syncMessage);
   const unavailable = syncMessage === 'Local catalog unavailable';
   const error = unavailable ? (
     <StatusIndicator status="error" dotSize="sm" variant="caption" tone="inkMuted" label={t('Local catalog unavailable')} numberOfLines={2} />

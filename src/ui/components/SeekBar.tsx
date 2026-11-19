@@ -31,7 +31,7 @@ export function SeekBar({ playing, onSeek, disabled = false, collapse, pendingLa
   const livePositionMs = useInterpolatedPosition(positionMs, durationMs, playing && dragFraction === null);
   const hasDuration = durationMs > 0;
   const shownMs = dragFraction !== null ? dragFraction * durationMs : livePositionMs;
-  const fraction = hasDuration ? shownMs / durationMs : 0;
+  const fraction = hasDuration ? livePositionMs / durationMs : 0;
 
   const commit = (value: number) => {
     setDragFraction(null);

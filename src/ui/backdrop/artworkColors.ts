@@ -28,7 +28,7 @@ function loadPixelReader(): typeof artworkThumbnailPixels | null {
   }
 }
 
-const readPixels = loadPixelReader();
+let readPixels: typeof artworkThumbnailPixels | null | undefined;
 const analyses = createLruCache<string, Analysis>(CAPACITY);
 
 function analyze(artwork: string, pixels: Uint8Array): ArtworkColors {
@@ -46,6 +46,7 @@ export function artworkColors(artwork: string): Promise<ArtworkColors | null> {
   const key = identitySample(artwork);
   const cached = analyses.get(key);
   if (cached) return cached.colors;
+  if (readPixels === undefined) readPixels = loadPixelReader();
   if (!readPixels) return Promise.resolve(null);
   const analysis: Analysis = {
     colors: readPixels(artwork, THUMBNAIL_SIZE).then((pixels) => (pixels ? analyze(artwork, pixels) : null)),

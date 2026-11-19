@@ -1,5 +1,6 @@
 // Shared between Compás App and Compás Tools; keep translation rules in sync.
-import { catalogs, Language, TranslationValue } from './catalogs';
+import { loadCatalog, TranslationCatalog, TranslationValue } from './catalogs';
+import type { Language } from './languages';
 
 export type TranslationVariables = Record<string, string | number> & { count?: number };
 
@@ -69,8 +70,22 @@ export function translate(
   language: Language = 'en',
   variables: TranslationVariables = {},
 ): string {
-  const template =
-    selectPlural(catalogs[language][source] ?? source, language, variables.count) ?? source;
+  return translateFromCatalog(loadCatalog(language), language, source, variables);
+}
+
+export function translatorFor(language: Language) {
+  const catalog = loadCatalog(language);
+  return (source: string, variables: TranslationVariables = {}) =>
+    translateFromCatalog(catalog, language, source, variables);
+}
+
+function translateFromCatalog(
+  catalog: TranslationCatalog,
+  language: Language,
+  source: string,
+  variables: TranslationVariables,
+): string {
+  const template = selectPlural(catalog[source] ?? source, language, variables.count) ?? source;
   return template.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (match, name: string) => {
     const replacement = variables[name];
     return replacement == null ? match : String(replacement);

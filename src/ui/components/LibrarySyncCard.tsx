@@ -9,10 +9,10 @@ import { Card } from './Card';
 import { EnterView } from './EnterView';
 import { IconButton } from './IconButton';
 import { ProgressBar } from './ProgressBar';
+import { useCatalogSyncProgress } from '../library/catalogSyncProgressContext';
 import { useI18n } from '../../i18n';
 
 export interface LibrarySyncCardProps {
-  message?: string | null;
   onRefresh: () => void;
   insetRight?: number;
 }
@@ -20,9 +20,10 @@ export interface LibrarySyncCardProps {
 const STATUS_DOT_SIZE = 8;
 const REFRESH_ICON_SIZE = 18;
 
-export function LibrarySyncCard({ message, onRefresh, insetRight }: LibrarySyncCardProps) {
+export function LibrarySyncCard({ onRefresh, insetRight }: LibrarySyncCardProps) {
   const palette = usePalette();
   const { t } = useI18n();
+  const message = useCatalogSyncProgress();
   const songCount = useSyncedSongCount(message);
 
   if (!message) {

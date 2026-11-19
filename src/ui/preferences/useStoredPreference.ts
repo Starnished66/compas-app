@@ -5,16 +5,20 @@ export function useStoredPreference<T extends string>(
   storageKey: string,
   fallback: T,
   isValid: (value: unknown) => value is T,
-): [T, (next: T) => void] {
-  const [preference, setPreferenceState] = useState<T>(fallback);
+): [preference: T, setPreference: (next: T) => void, restored: boolean] {
+  const [state, setState] = useState({ preference: fallback, restored: false });
 
   useEffect(() => {
     let current = true;
     AsyncStorage.getItem(storageKey)
+      .catch(() => null)
       .then((stored) => {
-        if (current && isValid(stored)) setPreferenceState(stored);
-      })
-      .catch(() => {});
+        if (!current) return;
+        setState((previous) => ({
+          preference: !previous.restored && isValid(stored) ? stored : previous.preference,
+          restored: true,
+        }));
+      });
     return () => {
       current = false;
     };
@@ -22,11 +26,11 @@ export function useStoredPreference<T extends string>(
 
   const setPreference = useCallback(
     (next: T) => {
-      setPreferenceState(next);
+      setState({ preference: next, restored: true });
       AsyncStorage.setItem(storageKey, next).catch(() => {});
     },
     [storageKey],
   );
 
-  return [preference, setPreference];
+  return [state.preference, setPreference, state.restored];
 }

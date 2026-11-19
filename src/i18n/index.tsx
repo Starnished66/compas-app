@@ -1,23 +1,26 @@
 import React, { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, I18nManager } from 'react-native';
+import { AppState, TurboModule, TurboModuleRegistry } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { catalogs, LANGUAGE_OPTIONS, Language } from './catalogs';
-import { resolveLanguage, translate, TranslationVariables } from './translate';
+import { LANGUAGE_OPTIONS, Language, LanguagePreference } from './languages';
+import { resolveLanguage, translate, translatorFor, TranslationVariables } from './translate';
 
 export { LANGUAGE_OPTIONS };
-export type { Language } from './catalogs';
+export type { Language, LanguagePreference } from './languages';
 export { normalizeLanguageTag, resolveLanguage, translate } from './translate';
 export type { TranslationVariables } from './translate';
-export type LanguagePreference = Language | 'system';
 
 const STORAGE_KEY = 'compas_remote.language';
-const LANGUAGE_VALUES = new Set<string>(Object.keys(catalogs));
+const LANGUAGE_VALUES = new Set<string>(LANGUAGE_OPTIONS.map(({ value }) => value));
+
+interface NativeLocale extends TurboModule {
+  getConstants(): { localeIdentifier?: string };
+}
 
 function systemLanguage(): Language {
   try {
-    const localeIdentifier = (I18nManager.getConstants() as unknown as { localeIdentifier?: string }).localeIdentifier;
-    const intlLocale = Intl.DateTimeFormat().resolvedOptions().locale;
-    return resolveLanguage('system', localeIdentifier || intlLocale);
+    // React Native's public I18nManager caches its constants at import time.
+    const nativeLocale = TurboModuleRegistry.get<NativeLocale>('I18nManager')?.getConstants().localeIdentifier;
+    return resolveLanguage('system', nativeLocale || Intl.DateTimeFormat().resolvedOptions().locale);
   } catch {
     return 'en';
   }
@@ -30,63 +33,62 @@ type I18nValue = {
   setLanguage: (preference: LanguagePreference) => Promise<void>;
 };
 
-const fallbackValue: I18nValue = {
+const I18nContext = createContext<I18nValue>({
   t: (source, variables) => translate(source, 'en', variables),
   language: 'en',
   languagePreference: 'system',
   setLanguage: async () => undefined,
-};
+});
 
-const I18nContext = createContext<I18nValue>(fallbackValue);
+function readPreference(value: string | null): LanguagePreference {
+  return value && LANGUAGE_VALUES.has(value) ? value as LanguagePreference : 'system';
+}
 
-function readPreference(value: string | null): LanguagePreference | null {
-  if (value === 'system') return 'system';
-  return value && LANGUAGE_VALUES.has(value) ? value as Language : null;
+function selectLanguage(languagePreference: LanguagePreference) {
+  return {
+    languagePreference,
+    language: languagePreference === 'system' ? systemLanguage() : languagePreference,
+  };
 }
 
 export function I18nProvider({ children }: PropsWithChildren) {
-  const [languagePreference, setLanguagePreference] = useState<LanguagePreference>('system');
-  const [deviceLanguage, setDeviceLanguage] = useState(systemLanguage);
-  const revision = useRef(0);
+  const [selection, setSelection] = useState<ReturnType<typeof selectLanguage> | null>(null);
+  const changedByUser = useRef(false);
   const writeQueue = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let active = true;
-    void AsyncStorage.getItem(STORAGE_KEY).then((stored) => {
-      const preference = readPreference(stored);
-      if (active && revision.current === 0 && preference) setLanguagePreference(preference);
-    }).catch(() => undefined);
+    void AsyncStorage.getItem(STORAGE_KEY).catch(() => null).then((stored) => {
+      if (active && !changedByUser.current) setSelection(selectLanguage(readPreference(stored)));
+    });
     return () => { active = false; };
   }, []);
 
   useEffect(() => {
-    const refreshSystemLanguage = () => {
-      const next = systemLanguage();
-      setDeviceLanguage((current) => current === next ? current : next);
-    };
-    refreshSystemLanguage();
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') refreshSystemLanguage();
+      if (state !== 'active') return;
+      setSelection((current) => {
+        if (current?.languagePreference !== 'system') return current;
+        const next = selectLanguage('system');
+        return next.language === current.language ? current : next;
+      });
     });
     return () => subscription.remove();
   }, []);
 
-  const language = languagePreference === 'system' ? deviceLanguage : languagePreference;
-  const t = useCallback((source: string, variables?: TranslationVariables) => translate(source, language, variables), [language]);
   const setLanguage = useCallback(async (preference: LanguagePreference) => {
-    revision.current += 1;
-    setLanguagePreference(preference);
+    changedByUser.current = true;
+    setSelection(selectLanguage(preference));
     writeQueue.current = writeQueue.current
-      .catch(() => undefined)
-      .then(async () => {
-        await AsyncStorage.setItem(STORAGE_KEY, preference);
-      })
+      .then(() => AsyncStorage.setItem(STORAGE_KEY, preference))
       .catch(() => undefined);
     await writeQueue.current;
   }, []);
 
-  const value = useMemo(() => ({ t, language, languagePreference, setLanguage }), [t, language, languagePreference, setLanguage]);
-  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+  const language = selection?.language;
+  const t = useMemo(() => language ? translatorFor(language) : null, [language]);
+  const value = useMemo(() => selection && t ? { ...selection, t, setLanguage } : null, [selection, t, setLanguage]);
+  return value ? <I18nContext.Provider value={value}>{children}</I18nContext.Provider> : null;
 }
 
 export function useI18n(): I18nValue {

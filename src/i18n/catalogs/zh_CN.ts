@@ -871,3 +871,9 @@ export const zh_CN: Record<string, TranslationValue> = {
   "Show hidden files": "显示隐藏文件",
   "Hide hidden files": "隐藏隐藏文件"
 };
+
+Object.assign(zh_CN, {
+  "Rating": "评分",
+  "Album Artist, then Year": "专辑艺术家，然后按年份",
+  "Reversed order": "反向顺序",
+});

@@ -1,7 +1,7 @@
 import React, { Ref, memo, useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { FlashList, ListRenderItem } from '@shopify/flash-list';
-import { ContentStatus, PlaybackMode, RemoteAction, RemoteTrack, RemoteUiState } from '../../data/types';
+import { BulkActionProgress, ContentStatus, PlaybackMode, RemoteAction, RemoteTrack, RemoteUiState } from '../../data/types';
 import { AppText } from '../components/AppText';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
@@ -28,8 +28,15 @@ import { useOptimisticErrorSnackbar } from './useOptimisticErrorSnackbar';
 import { useI18n } from '../../i18n';
 import { isShuffleMode } from '../../session/playbackModes';
 
+export interface QueuePlaybackState extends Pick<RemoteUiState,
+  'currentTrack' | 'dacMode' | 'isPlaying' | 'supportedFeatures' | 'playbackMode' | 'connectionMessage' |
+  'queue' | 'queueTotal' | 'queueStatus' | 'queueHasMore' | 'queueLoadingMore'> {
+  queueRemovalProgress?: BulkActionProgress;
+  queueBusy: boolean;
+}
+
 export interface QueueSheetProps {
-  state: RemoteUiState;
+  state: QueuePlaybackState;
   onAction: (action: RemoteAction) => void;
   visible: boolean;
   onClose: () => void;
@@ -142,9 +149,9 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
   const firstRow = useRef<RemovableRowHandle | null>(null);
   const nowPlaying = useDisplayTrack(state.currentTrack, state.dacMode, state.isPlaying);
   const canEditQueue = state.supportedFeatures.includes('queue_edit');
-  const queueRemovalRunning = state.bulkActionProgress?.action === 'queueRemove' && state.bulkActionProgress.phase === 'writing';
-  const bulkJobRunning = state.bulkActionProgress?.phase === 'resolving' || state.bulkActionProgress?.phase === 'writing';
-  const queueRemovalFinished = state.bulkActionProgress?.action === 'queueRemove' && !queueRemovalRunning && !dismissedBulkStatus;
+  const { queueRemovalProgress, queueBusy } = state;
+  const queueRemovalRunning = queueRemovalProgress?.phase === 'writing';
+  const queueRemovalFinished = queueRemovalProgress && !queueRemovalRunning && !dismissedBulkStatus;
   useEffect(() => { if (queueRemovalRunning) setDismissedBulkStatus(false); }, [queueRemovalRunning]);
   const reorder = useQueueReorder(state.queue, onAction, ({ track, from, to }) =>
     snackbar.show({ text: t('Moved “{title}”', { title: track.title }), actionLabel: t('Undo'), onAction: () => reorder.move(to, from) }),
@@ -153,7 +160,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
   const drag = useDragReorder({
     itemCount: rows.length,
     rowHeight: QUEUE_ROW_HEIGHT,
-    enabled: visible && canEditQueue && !reorder.moving && !selecting && !bulkJobRunning,
+    enabled: visible && canEditQueue && !reorder.moving && !selecting && !queueBusy,
     onMove: reorder.move,
   });
   const hasRows = rows.length > 0;
@@ -185,7 +192,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
 
   const confirmClear = () => {
     setConfirmingClear(false);
-    if (bulkJobRunning) return;
+    if (queueBusy) return;
     onAction({ type: 'ClearQueue' });
     onClose();
   };
@@ -195,12 +202,12 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
   };
 
   const watchResult = useOptimisticErrorSnackbar(state.connectionMessage, state.queueStatus);
-  const latest = useRef({ onAction, snackbar, t, canEditQueue, bulkJobRunning, watchResult });
-  latest.current = { onAction, snackbar, t, canEditQueue, bulkJobRunning, watchResult };
+  const latest = useRef({ onAction, snackbar, t, canEditQueue, queueBusy, watchResult });
+  latest.current = { onAction, snackbar, t, canEditQueue, queueBusy, watchResult };
 
   const removeTrack = useCallback((track: RemoteTrack) => {
     const current = latest.current;
-    if (current.bulkJobRunning) return;
+    if (current.queueBusy) return;
     // Same as Home's Up next: confirm once the queue refresh after the removal settles.
     let refreshing = false;
     current.watchResult({
@@ -216,7 +223,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
   // Same feedback as Home's Up next when the player can't jump within its queue.
   const playTrack = useCallback((track: RemoteTrack) => {
     const current = latest.current;
-    if (current.bulkJobRunning) return;
+    if (current.queueBusy) return;
     if (!current.canEditQueue) {
       current.snackbar.show({ text: current.t('This player can’t jump to a song in the queue.') });
       return;
@@ -234,7 +241,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
   }, []);
   const beginSelecting = useCallback((track: RemoteTrack) => setSelectedIds((previous) => new Set(previous).add(track.id)), []);
   const removeSelected = () => {
-    if (!selectedIds.size || bulkJobRunning) return;
+    if (!selectedIds.size || queueBusy) return;
     onAction({ type: 'RemoveQueueTracks', ids: [...selectedIds] });
     setSelectedIds(new Set());
   };
@@ -246,7 +253,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
       selecting={selecting}
       selected={selecting && selectedIds.has(item.id)}
       lifted={draggingIndex === index}
-      removable={canEditQueue && !bulkJobRunning}
+      removable={canEditQueue && !queueBusy}
       dragHandle={canEditQueue ? handleProps(index) : undefined}
       rowRef={index === 0 ? firstRow : undefined}
       onPlay={playTrack}
@@ -254,7 +261,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
       onBeginSelecting={beginSelecting}
       onRemove={removeTrack}
     />
-  ), [bulkJobRunning, canEditQueue, draggingIndex, handleProps, playTrack, removeTrack, selecting, selectedIds, toggleSelected, beginSelecting]);
+  ), [queueBusy, canEditQueue, draggingIndex, handleProps, playTrack, removeTrack, selecting, selectedIds, toggleSelected, beginSelecting]);
 
   const emptyState =
     state.queueStatus === ContentStatus.Loading ? (
@@ -314,7 +321,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
           iconSize={MODE_ICON_SIZE}
           active={shuffleOn}
           onPress={() => onAction({ type: 'ToggleShuffle' })}
-          disabled={bulkJobRunning}
+          disabled={queueBusy}
         />
         <IconButton
           icon={state.playbackMode === PlaybackMode.RepeatOne ? 'repeatOne' : 'repeat'}
@@ -323,12 +330,12 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
           iconSize={MODE_ICON_SIZE}
           active={repeatOn}
           onPress={() => onAction({ type: 'CycleRepeatMode' })}
-          disabled={bulkJobRunning}
+          disabled={queueBusy}
         />
         {selecting ? (
           <>
             <AppText variant="caption" tone="inkMuted">{t('{count} selected', { count: selectedIds.size })}</AppText>
-            <Button label={t('Remove')} variant="destructive" disabled={!canEditQueue || bulkJobRunning} onPress={removeSelected} />
+            <Button label={t('Remove')} variant="destructive" disabled={!canEditQueue || queueBusy} onPress={removeSelected} />
             <Button label={t('Cancel')} variant="plain" onPress={() => setSelectedIds(new Set())} />
           </>
         ) : (
@@ -336,13 +343,13 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
             label={t('Clear')}
             variant="plain"
             accessibilityLabel={t('Clear queue')}
-            disabled={queueCount === 0 || bulkJobRunning}
+            disabled={queueCount === 0 || queueBusy}
             onPress={() => setConfirmingClear(true)}
           />
         )}
       </View>
-      {queueRemovalRunning ? <View style={styles.progress}><AppText>{t('{completed} of {total} processed', { completed: state.bulkActionProgress?.completed ?? 0, total: state.bulkActionProgress?.total ?? 0 })}</AppText><Button label={t('Stop')} variant="plain" onPress={() => onAction({ type: 'CancelBulkAction' })} /></View> : null}
-      {queueRemovalFinished ? <View style={styles.progress}><AppText>{state.bulkActionProgress?.message ? t(state.bulkActionProgress.message, state.bulkActionProgress.messageValues) : null}</AppText><Button label={t('Done')} variant="plain" onPress={() => setDismissedBulkStatus(true)} /></View> : null}
+      {queueRemovalRunning ? <View style={styles.progress}><AppText>{t('{completed} of {total} processed', { completed: queueRemovalProgress?.completed ?? 0, total: queueRemovalProgress?.total ?? 0 })}</AppText><Button label={t('Stop')} variant="plain" onPress={() => onAction({ type: 'CancelBulkAction' })} /></View> : null}
+      {queueRemovalFinished ? <View style={styles.progress}><AppText>{queueRemovalProgress?.message ? t(queueRemovalProgress.message, queueRemovalProgress.messageValues) : null}</AppText><Button label={t('Done')} variant="plain" onPress={() => setDismissedBulkStatus(true)} /></View> : null}
       {nowPlaying ? (
         <QueueNowPlayingCard
           track={nowPlaying}

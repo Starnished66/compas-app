@@ -32,11 +32,11 @@ import { VolumeRow } from '../components/VolumeRow';
 import { Distances, Durations, Easings, motionDuration } from '../motion';
 import { isReconnecting } from '../reconnecting';
 import { AudioFormatSheet } from '../sheets/AudioFormatSheet';
-import { QueueSheet } from '../sheets/QueueSheet';
+import { QueuePlaybackState, QueueSheet } from '../sheets/QueueSheet';
 import { SnackbarHost } from '../snackbar/SnackbarHost';
 import { Space } from '../tokens';
 import { useOpacityTransition } from '../useOpacityTransition';
-import { usePlayerCommands } from '../usePlayerCommands';
+import { PlayerCommandState, usePlayerCommands } from '../usePlayerCommands';
 import { useReducedMotion } from '../useReducedMotion';
 import { useTrackChangeMotion } from '../useTrackChangeMotion';
 import { useScreenInsets } from '../useScreenInsets';
@@ -50,8 +50,9 @@ import {
   shouldRequestNowPlayingGestureClose,
 } from '../nowPlayingGesture';
 
-export interface NowPlayingScreenProps {
-  state: RemoteUiState;
+export interface NowPlayingScreenProps extends PlayerCommandState, QueuePlaybackState,
+  Pick<RemoteUiState, 'connectionStatus' | 'playerName' | 'volume'> {
+  queueOpen: boolean;
   onAction: (action: RemoteAction) => void;
   visible: boolean;
   onClose: () => void;
@@ -65,7 +66,7 @@ const FAVORITE_EDGE_PULL = 10;
 const FAVORITE_PULL = { marginTop: -Space.sm, marginRight: -FAVORITE_EDGE_PULL };
 const ART_TOP_PADDING = Space.sm;
 
-export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayingScreenProps) {
+export function NowPlayingScreen({ queueOpen, onAction, visible, onClose, ...state }: NowPlayingScreenProps) {
   const { t } = useI18n();
   const reducedMotion = useReducedMotion();
   const insets = useScreenInsets();
@@ -298,7 +299,7 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
         {/* The queue sheet covers this screen; animating underneath it only costs frames while the queue scrolls. */}
         <AppBackdrop
           artworkUri={visible ? track?.artwork : lastVisibleArtwork.current}
-          paused={!visible || state.screen.type === 'Queue'}
+          paused={!visible || queueOpen}
         />
         <View collapsable={false} style={[styles.page, { paddingTop: insets.top, paddingBottom: Space.xl + insetBeyond(insets.bottom, Space.xl) }]}>
           <GestureDetector gesture={panGesture}>
@@ -395,7 +396,7 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
         <QueueSheet
           state={state}
           onAction={onAction}
-          visible={state.screen.type === 'Queue'}
+          visible={queueOpen}
           onClose={() => onAction({ type: 'Back' })}
         />
       </Animated.View>

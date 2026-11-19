@@ -25,7 +25,10 @@ function loadTs(file, cache = new Map()) {
   return mod.exports;
 }
 function walk(dir) { return fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => d.isDirectory() ? walk(path.join(dir, d.name)) : /\.(tsx?|jsx?)$/.test(d.name) ? [path.join(dir, d.name)] : []); }
-const { catalogs } = loadTs(path.join(src, 'i18n/catalogs.ts'), moduleCache);
+const { LANGUAGE_OPTIONS } = loadTs(path.join(src, 'i18n/languages.ts'), moduleCache);
+const { loadCatalog } = loadTs(path.join(src, 'i18n/catalogs.ts'), moduleCache);
+const locales = LANGUAGE_OPTIONS.map(({ value }) => value).filter((value) => value !== 'system');
+const catalogs = Object.fromEntries(locales.map((locale) => [locale, loadCatalog(locale)]));
 const { translate, normalizeLanguageTag } = loadTs(path.join(src, 'i18n/translate.ts'), moduleCache);
 if (Object.keys(catalogs).sort().join() !== expected.slice().sort().join()) errors.push(`Locale set mismatch: ${Object.keys(catalogs).join(', ')}`);
 const placeholders = (s) => [...String(s).matchAll(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g)].map((m) => m[1]).sort().join('|');

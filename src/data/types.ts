@@ -351,7 +351,6 @@ export interface RemoteUiState {
   queueHasMore: boolean;
   queueLoadingMore: boolean;
   libraryEntries: LibraryEntry[];
-  catalogSyncMessage?: string | null;
   libraryStatus: ContentStatus;
   queueStatus: ContentStatus;
   libraryQuery: string;

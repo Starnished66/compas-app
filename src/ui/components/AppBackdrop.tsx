@@ -23,14 +23,19 @@ function loadShaderBackdrop(): typeof ShaderBackdropComponent | null {
   }
 }
 
-const ShaderBackdrop = loadShaderBackdrop();
+let shaderBackdrop: typeof ShaderBackdropComponent | null | undefined;
 
 export function AppBackdrop({ artworkUri = null, prominent = false, paused = false }: AppBackdropProps) {
-  const { preference } = useBackgroundPreference();
+  const { preference, restored } = useBackgroundPreference();
   const { preference: accentStyle } = useAccentPreference();
-  if (!ShaderBackdrop || !isShaderBackgroundStyle(preference)) {
-    return <ArtworkBackdrop artworkUri={artworkUri} prominent={prominent} paused={paused} />;
+  if (!restored) return null;
+  if (isShaderBackgroundStyle(preference)) {
+    if (shaderBackdrop === undefined) shaderBackdrop = loadShaderBackdrop();
+    const ShaderBackdrop = shaderBackdrop;
+    if (ShaderBackdrop) {
+      const colorArtworkUri = accentFollowsArtwork(accentStyle) ? artworkUri : null;
+      return <ShaderBackdrop style={preference} artworkUri={colorArtworkUri} prominent={prominent} paused={paused} />;
+    }
   }
-  const colorArtworkUri = accentFollowsArtwork(accentStyle) ? artworkUri : null;
-  return <ShaderBackdrop style={preference} artworkUri={colorArtworkUri} prominent={prominent} paused={paused} />;
+  return <ArtworkBackdrop artworkUri={artworkUri} prominent={prominent} paused={paused} />;
 }

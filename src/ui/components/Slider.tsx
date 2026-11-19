@@ -1,19 +1,19 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
 import {
   AccessibilityActionEvent,
-  Animated,
-  LayoutChangeEvent,
-  PanResponder,
+  I18nManager,
   StyleProp,
   StyleSheet,
   View,
   ViewStyle,
 } from 'react-native';
 import { usePalette } from '../PaletteProvider';
-import { Durations, Easings, motionDuration } from '../motion';
+import { GestureDetector } from 'react-native-gesture-handler';
+import Animated, { interpolate, useAnimatedStyle, useDerivedValue } from 'react-native-reanimated';
 import { Radius, Space, Type } from '../tokens';
 import { useReducedMotion } from '../useReducedMotion';
 import { AppText } from './AppText';
+import { clampUnit, useSliderDrag } from './useSliderDrag';
 
 export interface SliderProps {
   value: number;
@@ -37,11 +37,6 @@ const BUBBLE_OFFSET = 20;
 const BUBBLE_ANCHOR_WIDTH = 120;
 const ACCESSIBILITY_STEP = 0.05;
 
-function clampUnit(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(1, value));
-}
-
 export function Slider({
   value,
   label,
@@ -54,116 +49,61 @@ export function Slider({
 }: SliderProps) {
   const palette = usePalette();
   const reducedMotion = useReducedMotion();
-  const [dragValue, setDragValue] = useState<number | null>(null);
-  const grow = useRef(new Animated.Value(0)).current;
-  const widthRef = useRef(0);
-  const startXRef = useRef(0);
-  const dragValueRef = useRef(0);
-  const callbacksRef = useRef({ onChange, onCommit, disabled });
-  callbacksRef.current = { onChange, onCommit, disabled };
-
-  const updateDrag = (x: number) => {
-    const width = widthRef.current;
-    if (width <= 0) return;
-    const next = clampUnit(x / width);
-    dragValueRef.current = next;
-    setDragValue(next);
-    callbacksRef.current.onChange?.(next);
-  };
-
-  const endDrag = (commit: boolean) => {
-    setDragValue(null);
-    if (commit) callbacksRef.current.onCommit(dragValueRef.current);
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => !callbacksRef.current.disabled,
-      onMoveShouldSetPanResponder: () => !callbacksRef.current.disabled,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: (event) => {
-        startXRef.current = event.nativeEvent.locationX;
-        updateDrag(startXRef.current);
-      },
-      onPanResponderMove: (_, gesture) => updateDrag(startXRef.current + gesture.dx),
-      onPanResponderRelease: () => endDrag(true),
-      onPanResponderTerminate: () => endDrag(true),
-    }),
-  ).current;
-
-  const onLayout = (event: LayoutChangeEvent) => {
-    widthRef.current = event.nativeEvent.layout.width;
-  };
-
+  const mirrored = I18nManager.isRTL && I18nManager.doLeftAndRightSwapInRTL;
+  const { commit, dragValue, fraction, gesture, grow, width } = useSliderDrag(
+    value, disabled, reducedMotion, mirrored, onChange, onCommit,
+  );
+  const shown = dragValue ?? clampUnit(value);
+  const trackStyle = useAnimatedStyle(() => ({
+    height: interpolate(grow.value, [0, 1], [TRACK_HEIGHT, TRACK_HEIGHT_DRAGGING]),
+  }));
+  const fillStyle = useAnimatedStyle(() => ({ width: fraction.value * width.value }));
+  const offset = useDerivedValue(() => (mirrored ? -1 : 1) * fraction.value * width.value);
+  const thumbStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: offset.value },
+      { scale: interpolate(grow.value, [0, 1], [1, THUMB_SIZE_DRAGGING / THUMB_SIZE]) },
+    ],
+  }));
+  const bubbleStyle = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
   const onAccessibilityAction = (event: AccessibilityActionEvent) => {
     const delta = event.nativeEvent.actionName === 'increment' ? ACCESSIBILITY_STEP : -ACCESSIBILITY_STEP;
-    onCommit(clampUnit(value + delta));
+    commit(clampUnit(value + delta));
   };
 
-  const dragging = dragValue !== null;
-  const shown = clampUnit(dragging ? dragValue : value);
-  const percent = `${shown * 100}%` as const;
-
-  useEffect(() => {
-    Animated.timing(grow, {
-      toValue: dragging ? 1 : 0,
-      duration: motionDuration(reducedMotion, Durations.sliderGrow),
-      easing: Easings.standard,
-      useNativeDriver: false,
-    }).start();
-  }, [dragging, grow, reducedMotion]);
-
-  const trackHeight = grow.interpolate({ inputRange: [0, 1], outputRange: [TRACK_HEIGHT, TRACK_HEIGHT_DRAGGING] });
-  const thumbSize = grow.interpolate({ inputRange: [0, 1], outputRange: [THUMB_SIZE, THUMB_SIZE_DRAGGING] });
-  const thumbOffset = grow.interpolate({ inputRange: [0, 1], outputRange: [-THUMB_SIZE / 2, -THUMB_SIZE_DRAGGING / 2] });
-
   return (
-    <View
-      accessible
-      accessibilityRole="adjustable"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled }}
-      accessibilityValue={{
-        min: 0,
-        max: 100,
-        now: Math.round(shown * 100),
-        text: formatValue ? formatValue(shown) : undefined,
-      }}
-      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
-      onAccessibilityAction={onAccessibilityAction}
-      onLayout={onLayout}
-      style={[styles.touchArea, disabled && styles.disabled, style]}
-      {...panResponder.panHandlers}
-    >
-      <Animated.View
-        pointerEvents="none"
-        style={[styles.track, { height: trackHeight, backgroundColor: palette.surfaceRaised }]}
+    <GestureDetector gesture={gesture}>
+      <View
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={label}
+        accessibilityState={{ disabled }}
+        accessibilityValue={{
+          min: 0,
+          max: 100,
+          now: Math.round(shown * 100),
+          text: formatValue?.(shown),
+        }}
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+        onAccessibilityAction={onAccessibilityAction}
+        onLayout={(event) => { width.value = event.nativeEvent.layout.width; }}
+        style={[styles.touchArea, disabled && styles.disabled, style]}
       >
-        <View style={[styles.fill, { width: percent, backgroundColor: palette.accent }]} />
-        <Animated.View
-          style={[
-            styles.thumb,
-            {
-              left: percent,
-              width: thumbSize,
-              height: thumbSize,
-              marginLeft: thumbOffset,
-              marginTop: thumbOffset,
-              backgroundColor: palette.accent,
-            },
-          ]}
-        />
-        {dragging && formatValue && showValueBubble ? (
-          <View style={[styles.bubbleAnchor, { left: percent }]}>
-            <View style={[styles.bubble, { backgroundColor: palette.accent }]}>
-              <AppText variant="caption" tone="onAccent" tabular style={styles.bubbleText} numberOfLines={1}>
-                {formatValue(shown)}
-              </AppText>
-            </View>
-          </View>
-        ) : null}
-      </Animated.View>
-    </View>
+        <Animated.View pointerEvents="none" style={[styles.track, { backgroundColor: palette.surfaceRaised }, trackStyle]}>
+          <Animated.View style={[styles.fill, { backgroundColor: palette.accent }, fillStyle]} />
+          <Animated.View style={[styles.thumb, { backgroundColor: palette.accent }, thumbStyle]} />
+          {dragValue !== null && formatValue && showValueBubble ? (
+            <Animated.View style={[styles.bubbleAnchor, bubbleStyle]}>
+              <View style={[styles.bubble, { backgroundColor: palette.accent }]}>
+                <AppText variant="caption" tone="onAccent" tabular style={styles.bubbleText} numberOfLines={1}>
+                  {formatValue(shown)}
+                </AppText>
+              </View>
+            </Animated.View>
+          ) : null}
+        </Animated.View>
+      </View>
+    </GestureDetector>
   );
 }
 
@@ -173,6 +113,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   track: {
+    height: TRACK_HEIGHT,
     borderRadius: Radius.full,
   },
   fill: {
@@ -184,11 +125,17 @@ const styles = StyleSheet.create({
   },
   thumb: {
     position: 'absolute',
+    left: 0,
     top: '50%',
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    marginLeft: -THUMB_SIZE / 2,
+    marginTop: -THUMB_SIZE / 2,
     borderRadius: Radius.full,
   },
   bubbleAnchor: {
     position: 'absolute',
+    left: 0,
     bottom: BUBBLE_OFFSET,
     width: BUBBLE_ANCHOR_WIDTH,
     marginLeft: -BUBBLE_ANCHOR_WIDTH / 2,

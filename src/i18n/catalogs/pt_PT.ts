@@ -911,3 +911,9 @@ export const pt_PT: Record<string, TranslationValue> = {
   "Show hidden files": "Mostrar ficheiros ocultos",
   "Hide hidden files": "Ocultar ficheiros ocultos"
 };
+
+Object.assign(pt_PT, {
+  "Rating": "Avaliação",
+  "Album Artist, then Year": "Artista do álbum e depois ano",
+  "Reversed order": "Ordem inversa",
+});

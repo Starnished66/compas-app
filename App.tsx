@@ -5,6 +5,7 @@ import { ConnectionStatus, LibraryCategory, RemoteScreen, RemoteTheme, RemoteUiS
 import { useRemoteSession } from './src/session/useRemoteSession';
 import { PaletteProvider } from './src/ui/PaletteProvider';
 import { PlaybackPositionContext } from './src/ui/playbackPositionContext';
+import { CatalogSyncProgressContext } from './src/ui/library/catalogSyncProgressContext';
 import { LibraryArtworkContext } from './src/ui/library/libraryArtworkContext';
 import { ChromeProvider } from './src/ui/chrome/ChromeProvider';
 import { AccentSource, useArtworkPalette } from './src/ui/useArtworkPalette';
@@ -27,20 +28,48 @@ import { chromeContentInset } from './src/ui/components/bottomChromeLayout';
 import { PinDialog } from './src/ui/components/PinDialog';
 import { SessionSnackbars } from './src/ui/components/SessionSnackbars';
 import { HomeScreen } from './src/ui/screens/HomeScreen';
-import { LibraryScreen } from './src/ui/screens/LibraryScreen';
-import { PlaylistsScreen } from './src/ui/screens/PlaylistsScreen';
-import { TransferApi, TransferScreen } from './src/ui/screens/TransferScreen';
-import { ConnectionScreen } from './src/ui/screens/ConnectionScreen';
-import { NowPlayingScreen } from './src/ui/screens/NowPlayingScreen';
-import { SettingsSheet } from './src/ui/sheets/SettingsSheet';
-import { PlayerSettingsScreen } from './src/ui/screens/PlayerSettingsScreen';
-import { PlayerPluginsScreen } from './src/ui/screens/PlayerPluginsScreen';
-import { SongActionsSheet } from './src/ui/sheets/SongActionsSheet';
+import type { TransferApi } from './src/ui/screens/TransferScreen';
 import { UpdatesProvider } from './src/updates/UpdatesProvider';
 import { UpdateAnnouncements } from './src/ui/components/UpdateAnnouncements';
-import { UpdatesSheet } from './src/ui/sheets/UpdatesSheet';
 import { useScreenInsets } from './src/ui/useScreenInsets';
+import { useConnectedPlayer } from './src/ui/useConnectedPlayer';
 import CrashReportRecovery from './src/diagnostics/CrashReportRecovery';
+import { deferScreen } from './src/ui/screens/deferScreen';
+
+const LibraryScreen = deferScreen(() =>
+  (require('./src/ui/screens/LibraryScreen') as typeof import('./src/ui/screens/LibraryScreen')).LibraryScreen,
+);
+const PlaylistsScreen = deferScreen(() =>
+  (require('./src/ui/screens/PlaylistsScreen') as typeof import('./src/ui/screens/PlaylistsScreen')).PlaylistsScreen,
+);
+const TransferScreen = deferScreen(() =>
+  (require('./src/ui/screens/TransferScreen') as typeof import('./src/ui/screens/TransferScreen')).TransferScreen,
+);
+const ConnectionScreen = deferScreen(() =>
+  (require('./src/ui/screens/ConnectionScreen') as typeof import('./src/ui/screens/ConnectionScreen')).ConnectionScreen,
+);
+const NowPlayingScreen = deferScreen(
+  () => (require('./src/ui/screens/NowPlayingScreen') as typeof import('./src/ui/screens/NowPlayingScreen')).NowPlayingScreen,
+  ({ visible }) => visible,
+);
+const SettingsSheet = deferScreen(
+  () => (require('./src/ui/sheets/SettingsSheet') as typeof import('./src/ui/sheets/SettingsSheet')).SettingsSheet,
+  ({ visible }) => visible,
+);
+const PlayerSettingsScreen = deferScreen(() =>
+  (require('./src/ui/screens/PlayerSettingsScreen') as typeof import('./src/ui/screens/PlayerSettingsScreen')).PlayerSettingsScreen,
+);
+const PlayerPluginsScreen = deferScreen(() =>
+  (require('./src/ui/screens/PlayerPluginsScreen') as typeof import('./src/ui/screens/PlayerPluginsScreen')).PlayerPluginsScreen,
+);
+const SongActionsSheet = deferScreen(
+  () => (require('./src/ui/sheets/SongActionsSheet') as typeof import('./src/ui/sheets/SongActionsSheet')).SongActionsSheet,
+  ({ state }) => state.songActionsVisible,
+);
+const UpdatesSheet = deferScreen(
+  () => (require('./src/ui/sheets/UpdatesSheet') as typeof import('./src/ui/sheets/UpdatesSheet')).UpdatesSheet,
+  ({ visible }) => visible,
+);
 
 const TAB_ORDER: TabKey[] = ['home', 'library', 'playlists', 'transfer'];
 
@@ -69,7 +98,8 @@ function accentSourceFor(state: RemoteUiState, accentStyle: AccentStyle): Accent
 }
 
 export default function App() {
-  const { state, onAction, playbackPosition, libraryArtwork, wifiImportStatus, refreshWifiImport, startWifiImport, stopWifiImport, listWifiImportFiles, uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile, createWifiImportDirectory, playerSettingsApi, playerPluginsApi } = useRemoteSession();
+  const { state, onAction, playbackPosition, catalogSyncProgress, libraryArtwork, wifiImportStatus, refreshWifiImport, startWifiImport, stopWifiImport, listWifiImportFiles, uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile, createWifiImportDirectory, playerSettingsApi, playerPluginsApi } = useRemoteSession();
+  const connectedPlayer = useConnectedPlayer(state);
   const transfer: TransferApi = {
     status: wifiImportStatus,
     start: startWifiImport,
@@ -114,6 +144,7 @@ export default function App() {
     if (!state.currentTrack || !isConnected) setNowPlayingVisible(false);
   }, [state.currentTrack, isConnected]);
 
+  const bulkProgress = state.bulkActionProgress;
   const queueOpen = state.screen.type === 'Queue';
   useEffect(() => {
     if (queueOpen && !nowPlayingVisible) onAction({ type: 'Back' });
@@ -148,6 +179,7 @@ export default function App() {
   const openNowPlaying = useCallback(() => {
     if (nowPlayingAllowed) setNowPlayingVisible(true);
   }, [nowPlayingAllowed]);
+  const closeNowPlaying = useCallback(() => setNowPlayingVisible(false), []);
   const openSettings = useCallback(() => setSettingsVisible(true), []);
   const openUpdates = useCallback(() => setUpdatesVisible(true), []);
 
@@ -169,6 +201,7 @@ export default function App() {
 
   return (
     <UpdatesProvider playerVersion={state.supportedFeatures.includes('device_info') ? state.playerVersion : null}>
+    <CatalogSyncProgressContext.Provider value={catalogSyncProgress}>
     <PlaybackPositionContext.Provider value={playbackPosition}>
       <LibraryArtworkContext.Provider value={libraryArtwork}>
         <PaletteProvider palette={palette}>
@@ -217,13 +250,33 @@ export default function App() {
                       <ConnectionScreen state={state} onAction={onAction} />
                     </SlideUpScreen>
                     <NowPlayingScreen
-                      state={state}
+                      connectionStatus={state.connectionStatus}
+                      connectionTransport={state.connectionTransport}
+                      connectionMessage={state.connectionMessage}
+                      currentTrack={state.currentTrack}
+                      dacMode={state.dacMode}
+                      currentRating={state.currentRating}
+                      pendingCurrentRating={state.pendingCurrentRating}
+                      isPlaying={state.isPlaying}
+                      playbackMode={state.playbackMode}
+                      volume={state.volume}
+                      supportedFeatures={state.supportedFeatures}
+                      playerName={state.playerName}
+                      queue={state.queue}
+                      queueTotal={state.queueTotal}
+                      queueStatus={state.queueStatus}
+                      queueHasMore={state.queueHasMore}
+                      queueLoadingMore={state.queueLoadingMore}
+                      queueRemovalProgress={bulkProgress?.action === 'queueRemove' ? bulkProgress : undefined}
+                      queueBusy={bulkProgress?.phase === 'resolving' || bulkProgress?.phase === 'writing'}
+                      queueOpen={queueOpen}
                       onAction={onAction}
                       visible={nowPlayingVisible}
-                      onClose={() => setNowPlayingVisible(false)}
+                      onClose={closeNowPlaying}
                     />
                     <SettingsSheet
                       state={state}
+                      player={connectedPlayer}
                       onAction={onAction}
                       visible={settingsVisible}
                       onClose={() => setSettingsVisible(false)}
@@ -251,6 +304,7 @@ export default function App() {
         </PaletteProvider>
       </LibraryArtworkContext.Provider>
     </PlaybackPositionContext.Provider>
+    </CatalogSyncProgressContext.Provider>
     </UpdatesProvider>
   );
 }

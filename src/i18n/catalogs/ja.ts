@@ -871,3 +871,9 @@ export const ja: Record<string, TranslationValue> = {
   "Show hidden files": "隠しファイルを表示",
   "Hide hidden files": "隠しファイルを非表示"
 };
+
+Object.assign(ja, {
+  "Rating": "評価",
+  "Album Artist, then Year": "アルバムアーティスト、次に年",
+  "Reversed order": "逆順",
+});
