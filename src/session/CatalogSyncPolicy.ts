@@ -41,11 +41,3 @@ export function matchesStoredCatalogSnapshot(
     storedSongCount === storedTotal
   );
 }
-
-export function canFinishCatalogSyncFromSnapshot(
-  forceManifestRefresh: boolean,
-  manifestComplete: boolean,
-  pendingCoverCount: number
-): boolean {
-  return !forceManifestRefresh && manifestComplete && pendingCoverCount === 0;
-}

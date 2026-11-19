@@ -1,9 +1,10 @@
-import {
-  CatalogCover,
-  CatalogCoversPage,
-  CatalogPage,
-  CatalogSong,
-} from './types';
+import { LocalCatalogOpenError, openCatalogDatabase } from './catalogDatabase';
+import type { SqlConnection, SqlDatabase } from './catalogDatabase';
+import { migrateCatalog } from './catalogMigrations';
+import { writeCoverRows, writeSongRows } from './catalogPageWriter';
+import type { CatalogCoversPage, CatalogPage, CatalogSong } from './types';
+
+export type { SqlDatabase } from './catalogDatabase';
 
 export interface CatalogIdentity {
   libraryId: string;
@@ -45,160 +46,10 @@ export enum CatalogGroupKind {
   Genre = 'Genre',
 }
 
-export interface SqlDatabase {
-  exec(sql: string): Promise<void> | void;
-  run(sql: string, params?: any[]): Promise<{ changes?: number }> | { changes?: number };
-  get<T = any>(sql: string, params?: any[]): Promise<T | null> | (T | null);
-  all<T = any>(sql: string, params?: any[]): Promise<T[]> | T[];
-  query<T = any>(sql: string, params?: any[]): Promise<T[]>;
-  queryFirst<T = any>(sql: string, params?: any[]): Promise<T | null>;
-  transaction<T>(action: (tx: SqlDatabase) => Promise<T>): Promise<T>;
-}
-
-// Memory database implementation for testing without native sqlite binaries
-export class MemorySqlDatabase implements SqlDatabase {
-  private tables = new Map<string, any[]>();
-
-  async exec(sql: string): Promise<void> {
-    const stmts = sql.split(';').map((s) => s.trim()).filter(Boolean);
-    for (const stmt of stmts) {
-      if (stmt.startsWith('CREATE TABLE')) {
-        const match = stmt.match(/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?([a-zA-Z0-9_]+)/i);
-        if (match && !this.tables.has(match[1])) {
-          this.tables.set(match[1], []);
-        }
-      }
-    }
-  }
-
-  async run(sql: string, params: any[] = []): Promise<{ changes: number }> {
-    const trimmed = sql.trim();
-    if (trimmed.startsWith('INSERT')) {
-      const match = trimmed.match(/INSERT\s+(?:OR REPLACE\s+|OR IGNORE\s+)?INTO\s+([a-zA-Z0-9_]+)/i);
-      if (match) {
-        const tbl = this.tables.get(match[1]) || [];
-        const colsMatch = trimmed.match(/\(([^)]+)\)\s+VALUES/i);
-        if (colsMatch) {
-          const cols = colsMatch[1].split(',').map((c) => c.trim());
-          const row: any = {};
-          cols.forEach((col, idx) => {
-            row[col] = params[idx];
-          });
-          tbl.push(row);
-          this.tables.set(match[1], tbl);
-          return { changes: 1 };
-        }
-      }
-    } else if (trimmed.startsWith('DELETE')) {
-      const match = trimmed.match(/DELETE FROM\s+([a-zA-Z0-9_]+)/i);
-      if (match) {
-        const tbl = this.tables.get(match[1]) || [];
-        // Basic clear or condition
-        if (!trimmed.includes('WHERE')) {
-          this.tables.set(match[1], []);
-          return { changes: tbl.length };
-        }
-      }
-    }
-    return { changes: 0 };
-  }
-
-  async get<T = any>(sql: string, params: any[] = []): Promise<T | null> {
-    const rows = await this.all<T>(sql, params);
-    return rows.length > 0 ? rows[0] : null;
-  }
-
-  async all<T = any>(_sql: string, _params: any[] = []): Promise<T[]> {
-    return [];
-  }
-
-  query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-    return this.all<T>(sql, params);
-  }
-
-  queryFirst<T = any>(sql: string, params: any[] = []): Promise<T | null> {
-    return this.get<T>(sql, params);
-  }
-
-  async transaction<T>(action: (tx: SqlDatabase) => Promise<T>): Promise<T> {
-    return action(this);
-  }
-}
-
-// Ordered schema steps; index i upgrades user_version i to i + 1. Never edit a shipped step, append a new one.
-const SCHEMA_MIGRATIONS: string[] = [
-  // v1: original schema. Installs from before versioning already have it, so every statement is IF NOT EXISTS.
-  `
-    CREATE TABLE IF NOT EXISTS catalog_state (
-      library_id TEXT PRIMARY KEY NOT NULL,
-      active_revision TEXT,
-      active_total INTEGER NOT NULL DEFAULT 0,
-      stage_revision TEXT,
-      stage_total INTEGER NOT NULL DEFAULT 0,
-      stage_next_offset INTEGER NOT NULL DEFAULT 0,
-      covers_revision TEXT,
-      covers_total INTEGER NOT NULL DEFAULT 0,
-      covers_next_offset INTEGER NOT NULL DEFAULT 0,
-      covers_complete INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS catalog_songs (
-      library_id TEXT NOT NULL,
-      revision TEXT NOT NULL,
-      id INTEGER NOT NULL,
-      title TEXT NOT NULL,
-      artist TEXT NOT NULL,
-      album TEXT NOT NULL,
-      album_artist TEXT NOT NULL,
-      genre TEXT NOT NULL,
-      track_number INTEGER,
-      disc_number INTEGER,
-      catalog_rank INTEGER NOT NULL DEFAULT 0,
-      album_key TEXT,
-      PRIMARY KEY (library_id, revision, id)
-    );
-    CREATE INDEX IF NOT EXISTS catalog_songs_album ON catalog_songs(library_id, revision, album_key);
-    CREATE INDEX IF NOT EXISTS catalog_songs_artist ON catalog_songs(library_id, revision, artist);
-    CREATE INDEX IF NOT EXISTS catalog_songs_album_artist ON catalog_songs(library_id, revision, album_artist);
-    CREATE INDEX IF NOT EXISTS catalog_songs_genre ON catalog_songs(library_id, revision, genre);
-    CREATE INDEX IF NOT EXISTS catalog_songs_title ON catalog_songs(library_id, revision, title COLLATE NOCASE);
-    CREATE INDEX IF NOT EXISTS catalog_songs_rank ON catalog_songs(library_id, revision, catalog_rank);
-    CREATE TABLE IF NOT EXISTS catalog_song_artists (
-      library_id TEXT NOT NULL,
-      revision TEXT NOT NULL,
-      song_id INTEGER NOT NULL,
-      artist TEXT NOT NULL,
-      PRIMARY KEY (library_id, revision, song_id, artist)
-    );
-    CREATE INDEX IF NOT EXISTS catalog_song_artists_name ON catalog_song_artists(library_id, revision, artist);
-    CREATE TABLE IF NOT EXISTS catalog_covers (
-      library_id TEXT NOT NULL,
-      revision TEXT NOT NULL,
-      album_key TEXT NOT NULL,
-      representative_id INTEGER NOT NULL,
-      cover_key TEXT NOT NULL,
-      available INTEGER,
-      manifest_seen INTEGER NOT NULL DEFAULT 1,
-      download_state INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (library_id, revision, album_key)
-    );
-  `,
-  // v2: filters compare with COLLATE NOCASE, which binary-collated indexes cannot serve.
-  `
-    DROP INDEX IF EXISTS catalog_songs_artist;
-    DROP INDEX IF EXISTS catalog_songs_album_artist;
-    DROP INDEX IF EXISTS catalog_songs_genre;
-    DROP INDEX IF EXISTS catalog_song_artists_name;
-    CREATE INDEX IF NOT EXISTS catalog_songs_album_artist_nocase ON catalog_songs(library_id, revision, album_artist COLLATE NOCASE);
-    CREATE INDEX IF NOT EXISTS catalog_songs_genre_nocase ON catalog_songs(library_id, revision, genre COLLATE NOCASE);
-    CREATE INDEX IF NOT EXISTS catalog_songs_album_name_nocase ON catalog_songs(library_id, revision, album COLLATE NOCASE);
-    CREATE INDEX IF NOT EXISTS catalog_song_artists_name_nocase ON catalog_song_artists(library_id, revision, artist COLLATE NOCASE);
-    ALTER TABLE catalog_state ADD COLUMN published_at INTEGER NOT NULL DEFAULT 0;
-  `,
-];
-
 /** Libraries (players) whose catalogs stay on device, including the active one. */
 const RETAINED_LIBRARIES = 3;
 const SONG_COUNT_CACHE_LIMIT = 64;
+const PENDING_COVERS_WHERE = 'library_id = ? AND revision = ? AND (available IS NULL OR available != 0) AND download_state = ?';
 
 export class SyncedCatalogStore {
   static readonly COVER_PENDING = 0;
@@ -206,82 +57,41 @@ export class SyncedCatalogStore {
   static readonly COVER_MISSING = 2;
   static readonly COVER_PERMANENT_FAILURE = 3;
 
-  private db: SqlDatabase;
-  private initialized = false;
-  private initializing: Promise<void> | null = null;
+  private opening: Promise<SqlDatabase> | null = null;
   // Filtered song totals per library/revision/filter; a published revision's rows never change.
   private songCounts = new Map<string, number>();
   private songCountGeneration = 0;
 
-  constructor(db?: SqlDatabase) {
-    if (db) {
-      this.db = db;
-    } else {
-      try {
-        // Try expo-sqlite if available
-        const SQLite = require('expo-sqlite');
-        const expoDb = SQLite.openDatabaseSync('synced-catalog.db');
-        // withTransactionSync can't wrap async bodies, so transactions are explicit
-        // BEGIN/COMMIT on this connection, one at a time.
-        let transactionTail: Promise<unknown> = Promise.resolve();
-        this.db = {
-          exec: async (sql) => expoDb.execSync(sql),
-          run: async (sql, params = []) => expoDb.runSync(sql, params),
-          get: async (sql, params = []) => expoDb.getFirstSync(sql, params),
-          all: async (sql, params = []) => expoDb.getAllSync(sql, params),
-          query: (sql, params = []) => expoDb.getAllAsync(sql, params),
-          queryFirst: (sql, params = []) => expoDb.getFirstAsync(sql, params),
-          transaction: (action) => {
-            const run = transactionTail.then(async () => {
-              expoDb.execSync('BEGIN IMMEDIATE');
-              try {
-                const result = await action(this.db);
-                expoDb.execSync('COMMIT');
-                return result;
-              } catch (error) {
-                try { expoDb.execSync('ROLLBACK'); } catch {}
-                throw error;
-              }
-            });
-            transactionTail = run.catch(() => {});
-            return run;
-          },
-        };
-      } catch {
-        this.db = new MemorySqlDatabase();
-      }
-    }
-  }
+  constructor(private readonly injectedDb?: SqlDatabase) {}
 
   async init(): Promise<void> {
-    if (this.initialized) return;
-    if (!this.initializing) {
-      const run = this.migrate().then(() => {
-        this.initialized = true;
-      });
-      this.initializing = run;
-      run.catch(() => {
-        if (this.initializing === run) this.initializing = null;
-      });
-    }
-    await this.initializing;
+    await this.database();
   }
 
-  /** Applies each pending schema step in its own transaction, bumping PRAGMA user_version with it. */
-  private async migrate(): Promise<void> {
-    const row = await this.db.get<{ user_version?: number }>('PRAGMA user_version');
-    const current = Number(row?.user_version || 0);
-    for (let version = current; version < SCHEMA_MIGRATIONS.length; version++) {
-      await this.db.transaction(async (tx) => {
-        await tx.exec(SCHEMA_MIGRATIONS[version]);
-        await tx.exec(`PRAGMA user_version = ${version + 1}`);
-      });
+  private database(): Promise<SqlDatabase> {
+    if (!this.opening) {
+      this.opening = Promise.resolve()
+        .then(() => this.injectedDb ?? openCatalogDatabase())
+        .then(async (db) => {
+          try {
+            await migrateCatalog(db);
+            return db;
+          } catch (error) {
+            await db.close?.().catch(() => {});
+            throw error;
+          }
+        })
+        .catch((error) => {
+          this.opening = null;
+          throw new LocalCatalogOpenError(error);
+        });
     }
+    return this.opening;
   }
 
   async activeIdentity(libraryId: string): Promise<CatalogIdentity | null> {
-    await this.init();
-    const row = await this.db.get(
+    const db = await this.database();
+    const row = await db.queryFirst(
       'SELECT active_revision, active_total FROM catalog_state WHERE library_id = ?',
       [libraryId]
     );
@@ -294,8 +104,8 @@ export class SyncedCatalogStore {
   }
 
   async activeSongCount(libraryId: string, revision: string): Promise<number> {
-    await this.init();
-    const row = await this.db.queryFirst(
+    const db = await this.database();
+    const row = await db.queryFirst(
       'SELECT COUNT(*) as count FROM catalog_songs WHERE library_id = ? AND revision = ?',
       [libraryId, revision]
     );
@@ -303,13 +113,13 @@ export class SyncedCatalogStore {
   }
 
   async beginCatalogStage(libraryId: string, revision: string, total: number): Promise<number> {
-    await this.init();
+    const db = await this.database();
     if (!libraryId.trim() || !revision.trim() || total < 0) {
       throw new Error('Invalid arguments to beginCatalogStage');
     }
 
     // Counts are dropped after commit so a concurrent page read cannot re-cache pre-commit rows.
-    const restarted = await this.db.transaction(async (tx) => {
+    const restarted = await db.transaction(async (tx) => {
       await this.ensureState(tx, libraryId);
       const current = await this.stateRow(tx, libraryId);
 
@@ -339,8 +149,8 @@ export class SyncedCatalogStore {
   }
 
   async writeCatalogPage(page: CatalogPage): Promise<void> {
-    await this.init();
-    await this.db.transaction(async (tx) => {
+    const db = await this.database();
+    await db.transaction(async (tx) => {
       await this.ensureState(tx, page.libraryId);
       const state = await this.stateRow(tx, page.libraryId);
       if (state.stageRevision !== page.revision || state.stageTotal !== page.total) {
@@ -350,42 +160,7 @@ export class SyncedCatalogStore {
         throw new Error('Catalog page skipped a checkpoint');
       }
 
-      for (let i = 0; i < page.songs.length; i++) {
-        const song = page.songs[i];
-        const rank = page.offset + i;
-        await tx.run(
-          `INSERT OR REPLACE INTO catalog_songs (
-            library_id, revision, id, title, artist, album, album_artist, genre, track_number, disc_number, catalog_rank, album_key
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            page.libraryId,
-            page.revision,
-            song.id,
-            song.title,
-            song.artist,
-            song.album,
-            song.albumArtist,
-            song.genre,
-            song.trackNumber,
-            song.discNumber,
-            rank,
-            song.albumKey,
-          ]
-        );
-
-        await tx.run(
-          'DELETE FROM catalog_song_artists WHERE library_id = ? AND revision = ? AND song_id = ?',
-          [page.libraryId, page.revision, song.id]
-        );
-
-        const artists = Array.from(new Set(song.artists.map((a) => a.trim()).filter(Boolean)));
-        for (const artist of artists) {
-          await tx.run(
-            'INSERT OR IGNORE INTO catalog_song_artists (library_id, revision, song_id, artist) VALUES (?, ?, ?, ?)',
-            [page.libraryId, page.revision, song.id, artist]
-          );
-        }
-      }
+      await writeSongRows(tx, page);
 
       const next = Math.max(state.stageNextOffset, page.nextOffset);
       await tx.run('UPDATE catalog_state SET stage_next_offset = ? WHERE library_id = ?', [next, page.libraryId]);
@@ -394,13 +169,13 @@ export class SyncedCatalogStore {
   }
 
   async publishCatalog(libraryId: string, revision: string, total: number): Promise<void> {
-    await this.init();
-    const evicted = await this.db.transaction(async (tx) => {
+    const db = await this.database();
+    const evicted = await db.transaction(async (tx) => {
       const state = await this.stateRow(tx, libraryId);
       if (state.stageRevision !== revision || state.stageTotal !== total || state.stageNextOffset < total) {
         throw new Error('Catalog pages are incomplete');
       }
-      const countRow = await tx.get(
+      const countRow = await tx.queryFirst(
         'SELECT COUNT(*) as count FROM catalog_songs WHERE library_id = ? AND revision = ?',
         [libraryId, revision]
       );
@@ -430,7 +205,7 @@ export class SyncedCatalogStore {
       await tx.run('DELETE FROM catalog_covers WHERE library_id = ?', [libraryId]);
 
       // Keep only the few most recently published players; older ones would otherwise stay forever.
-      const others = await tx.all<{ library_id: string }>(
+      const others = await tx.query<{ library_id: string }>(
         'SELECT library_id FROM catalog_state WHERE library_id != ? ORDER BY published_at DESC, library_id',
         [libraryId]
       );
@@ -447,8 +222,8 @@ export class SyncedCatalogStore {
 
   /** Library ids that still have catalog state; synced cover directories for any other library can be purged. */
   async retainedLibraryIds(): Promise<string[]> {
-    await this.init();
-    const rows = await this.db.query<{ library_id: string }>('SELECT library_id FROM catalog_state');
+    const db = await this.database();
+    const rows = await db.query<{ library_id: string }>('SELECT library_id FROM catalog_state');
     return rows.map((r) => String(r.library_id));
   }
 
@@ -458,10 +233,10 @@ export class SyncedCatalogStore {
     total: number,
     refreshManifest: boolean = false
   ): Promise<CatalogCoverProgress> {
-    await this.init();
+    const db = await this.database();
     if (total < 0) throw new Error('Total must be non-negative');
 
-    return await this.db.transaction(async (tx) => {
+    return await db.transaction(async (tx) => {
       await this.ensureState(tx, libraryId);
       const state = await this.stateRow(tx, libraryId);
       if (state.activeRevision !== revision) {
@@ -503,8 +278,8 @@ export class SyncedCatalogStore {
   }
 
   async writeCoverPage(page: CatalogCoversPage): Promise<void> {
-    await this.init();
-    await this.db.transaction(async (tx) => {
+    const db = await this.database();
+    await db.transaction(async (tx) => {
       const state = await this.stateRow(tx, page.libraryId);
       if (
         state.activeRevision !== page.revision ||
@@ -517,37 +292,7 @@ export class SyncedCatalogStore {
         throw new Error('Catalog cover page skipped a checkpoint');
       }
 
-      for (const cover of page.covers) {
-        const keyArgs = [page.libraryId, page.revision, cover.albumKey];
-        const previous = await tx.get(
-          'SELECT cover_key, available, download_state FROM catalog_covers WHERE library_id = ? AND revision = ? AND album_key = ?',
-          keyArgs
-        );
-
-        let downloadState = SyncedCatalogStore.COVER_PENDING;
-        if (cover.available === false) {
-          downloadState = SyncedCatalogStore.COVER_MISSING;
-        } else if (previous != null) {
-          const prevAvail = previous.available != null ? previous.available !== 0 : null;
-          const sourceChanged = previous.cover_key !== cover.coverKey || prevAvail !== cover.available;
-          downloadState = sourceChanged ? SyncedCatalogStore.COVER_PENDING : Number(previous.download_state);
-        }
-
-        await tx.run(
-          `INSERT OR REPLACE INTO catalog_covers (
-            library_id, revision, album_key, representative_id, cover_key, available, manifest_seen, download_state
-          ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
-          [
-            page.libraryId,
-            page.revision,
-            cover.albumKey,
-            cover.representativeId,
-            cover.coverKey,
-            cover.available != null ? (cover.available ? 1 : 0) : null,
-            downloadState,
-          ]
-        );
-      }
+      await writeCoverRows(tx, page, SyncedCatalogStore.COVER_PENDING, SyncedCatalogStore.COVER_MISSING);
 
       const next = Math.max(state.coversNextOffset, page.nextOffset);
       await tx.run('UPDATE catalog_state SET covers_next_offset = ? WHERE library_id = ?', [next, page.libraryId]);
@@ -555,8 +300,8 @@ export class SyncedCatalogStore {
   }
 
   async publishCovers(libraryId: string, revision: string, total: number): Promise<void> {
-    await this.init();
-    await this.db.transaction(async (tx) => {
+    const db = await this.database();
+    await db.transaction(async (tx) => {
       const state = await this.stateRow(tx, libraryId);
       if (
         state.activeRevision !== revision ||
@@ -566,7 +311,7 @@ export class SyncedCatalogStore {
       ) {
         throw new Error('Catalog cover pages are incomplete');
       }
-      const countRow = await tx.get(
+      const countRow = await tx.queryFirst(
         'SELECT COUNT(*) as count FROM catalog_covers WHERE library_id = ? AND revision = ? AND manifest_seen = 1',
         [libraryId, revision]
       );
@@ -588,8 +333,8 @@ export class SyncedCatalogStore {
   }
 
   async coverProgress(libraryId: string, revision: string): Promise<CatalogCoverProgress | null> {
-    await this.init();
-    const row = await this.db.get(
+    const db = await this.database();
+    const row = await db.queryFirst(
       `SELECT covers_total, covers_next_offset, covers_complete
        FROM catalog_state WHERE library_id = ? AND active_revision = ? AND covers_revision = ?`,
       [libraryId, revision, revision]
@@ -603,8 +348,8 @@ export class SyncedCatalogStore {
   }
 
   async catalogCovers(libraryId: string, revision: string): Promise<StoredCatalogCover[]> {
-    await this.init();
-    const rows = await this.db.query(
+    const db = await this.database();
+    const rows = await db.query(
       `SELECT album_key, representative_id, cover_key, available, download_state
        FROM catalog_covers WHERE library_id = ? AND revision = ? ORDER BY album_key`,
       [libraryId, revision]
@@ -619,8 +364,8 @@ export class SyncedCatalogStore {
   }
 
   async coverForAlbum(libraryId: string, revision: string, albumKey: string): Promise<StoredCatalogCover | null> {
-    await this.init();
-    const r = await this.db.get(
+    const db = await this.database();
+    const r = await db.queryFirst(
       `SELECT album_key, representative_id, cover_key, available, download_state
        FROM catalog_covers WHERE library_id = ? AND revision = ? AND album_key = ?`,
       [libraryId, revision, albumKey]
@@ -636,28 +381,45 @@ export class SyncedCatalogStore {
   }
 
   async albumKeyForSong(libraryId: string, revision: string, songId: number): Promise<string | null> {
-    await this.init();
-    const r = await this.db.queryFirst(
-      'SELECT album_key FROM catalog_songs WHERE library_id = ? AND revision = ? AND id = ?',
-      [libraryId, revision, songId]
+    const keys = await this.albumKeysForSongs(libraryId, revision, [songId]);
+    return keys.get(songId) ?? null;
+  }
+
+  async albumKeysForSongs(libraryId: string, revision: string, songIds: number[]): Promise<Map<number, string>> {
+    if (!songIds.length) return new Map();
+    const db = await this.database();
+    const rows = await db.query<{ song_id: number; album_key: string }>(
+      `SELECT id AS song_id, album_key FROM catalog_songs
+       WHERE library_id = ? AND revision = ? AND id IN (${songIds.map(() => '?').join(', ')})
+       AND album_key IS NOT NULL`,
+      [libraryId, revision, ...songIds]
     );
-    return r?.album_key != null ? String(r.album_key) : null;
+    return new Map(rows.map((row) => [row.song_id, row.album_key]));
   }
 
   async markCoverState(libraryId: string, revision: string, albumKey: string, state: number): Promise<void> {
-    await this.init();
-    await this.db.run(
+    const db = await this.database();
+    await db.run(
       'UPDATE catalog_covers SET download_state = ? WHERE library_id = ? AND revision = ? AND album_key = ?',
       [state, libraryId, revision, albumKey]
     );
   }
 
+  async hasPendingCovers(libraryId: string, revision: string): Promise<boolean> {
+    const db = await this.database();
+    const row = await db.queryFirst(
+      `SELECT 1 FROM catalog_covers WHERE ${PENDING_COVERS_WHERE} LIMIT 1`,
+      [libraryId, revision, SyncedCatalogStore.COVER_PENDING]
+    );
+    return row != null;
+  }
+
   async pendingCovers(libraryId: string, revision: string): Promise<StoredCatalogCover[]> {
-    await this.init();
-    const rows = await this.db.query(
+    const db = await this.database();
+    const rows = await db.query(
       `SELECT album_key, representative_id, cover_key, available, download_state
        FROM catalog_covers
-       WHERE library_id = ? AND revision = ? AND (available IS NULL OR available != 0) AND download_state = ?
+       WHERE ${PENDING_COVERS_WHERE}
        ORDER BY album_key`,
       [libraryId, revision, SyncedCatalogStore.COVER_PENDING]
     );
@@ -671,8 +433,8 @@ export class SyncedCatalogStore {
   }
 
   async completedCoverCount(libraryId: string, revision: string): Promise<number> {
-    await this.init();
-    const row = await this.db.get(
+    const db = await this.database();
+    const row = await db.queryFirst(
       `SELECT COUNT(*) as count FROM catalog_covers
        WHERE library_id = ? AND revision = ? AND download_state != ?`,
       [libraryId, revision, SyncedCatalogStore.COVER_PENDING]
@@ -692,7 +454,7 @@ export class SyncedCatalogStore {
     genre?: string | null,
     albumKey?: string | null
   ): Promise<CatalogPageSlice> {
-    await this.init();
+    const db = await this.database();
     const [where, args] = this.songWhere(libraryId, revision, query, artist, albumArtist, album, genre, albumKey);
 
     const order =
@@ -708,8 +470,8 @@ export class SyncedCatalogStore {
     const [countRow, rows] = await Promise.all([
       cachedTotal != null
         ? null
-        : this.db.queryFirst(`SELECT COUNT(*) as count FROM catalog_songs WHERE ${where}`, args),
-      this.db.query(
+        : db.queryFirst(`SELECT COUNT(*) as count FROM catalog_songs WHERE ${where}`, args),
+      db.query(
         `SELECT id, title, artist, album, album_artist, genre, track_number, disc_number, album_key
          FROM catalog_songs WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
         [...args, limit, offset]
@@ -750,7 +512,7 @@ export class SyncedCatalogStore {
     artist?: string | null,
     albumArtist?: string | null
   ): Promise<CatalogGroup[]> {
-    await this.init();
+    const db = await this.database();
 
     if (kind === CatalogGroupKind.Artist) {
       const filter = [
@@ -785,7 +547,7 @@ export class SyncedCatalogStore {
         ORDER BY MIN(catalog_song_artists.artist) COLLATE NOCASE
       `;
 
-      const rows = await this.db.query(sql, args);
+      const rows = await db.query(sql, args);
       return rows.map((r: any) => ({
         name: String(r.name || ''),
         count: Number(r.count || 0),
@@ -849,7 +611,7 @@ export class SyncedCatalogStore {
            GROUP BY ${groupCol} COLLATE NOCASE
            ORDER BY MIN(${nameCol}) COLLATE NOCASE`;
 
-    const rows = await this.db.query(sql, args);
+    const rows = await db.query(sql, args);
     return rows.map((r: any) => ({
       name: String(r.name || ''),
       count: Number(r.count || 0),
@@ -866,8 +628,8 @@ export class SyncedCatalogStore {
     artist: string,
     album: string
   ): Promise<string | null> {
-    await this.init();
-    const row = await this.db.queryFirst(
+    const db = await this.database();
+    const row = await db.queryFirst(
       `SELECT album_key FROM catalog_songs
        WHERE library_id = ? AND revision = ? AND
              title = ? COLLATE NOCASE AND artist = ? COLLATE NOCASE AND album = ? COLLATE NOCASE AND
@@ -935,11 +697,11 @@ export class SyncedCatalogStore {
     }
   }
 
-  private async ensureState(tx: SqlDatabase, libraryId: string): Promise<void> {
+  private async ensureState(tx: SqlConnection, libraryId: string): Promise<void> {
     await tx.run('INSERT OR IGNORE INTO catalog_state (library_id) VALUES (?)', [libraryId]);
   }
 
-  private async stateRow(tx: SqlDatabase, libraryId: string): Promise<{
+  private async stateRow(tx: SqlConnection, libraryId: string): Promise<{
     activeRevision: string | null;
     activeTotal: number;
     stageRevision: string | null;
@@ -950,7 +712,7 @@ export class SyncedCatalogStore {
     coversNextOffset: number;
     coversComplete: boolean;
   }> {
-    const row = await tx.get(
+    const row = await tx.queryFirst(
       `SELECT active_revision, active_total, stage_revision, stage_total, stage_next_offset,
               covers_revision, covers_total, covers_next_offset, covers_complete
        FROM catalog_state WHERE library_id = ?`,
@@ -972,3 +734,6 @@ export class SyncedCatalogStore {
     };
   }
 }
+
+// The live store keeps its connections and count cache for the app runtime.
+export const liveCatalogStore = new SyncedCatalogStore();

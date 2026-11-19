@@ -838,6 +838,7 @@ export const uk: Record<string, TranslationValue> = {
   "Waiting to resume library sync": "Очікування відновлення синхронізації бібліотеки",
   "Waiting to retry library sync": "Очікування повторної спроби синхронізації бібліотеки",
   "Library sync failed": "Помилка синхронізації бібліотеки",
+  "Local catalog unavailable": "Локальний каталог недоступний",
   "Tap reload to try again": "Натисніть перезавантажити, щоб повторити спробу",
   "To queue": "До черги",
   "Nothing": "нічого",

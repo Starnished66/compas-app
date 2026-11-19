@@ -778,6 +778,7 @@ export const vi: Record<string, TranslationValue> = {
   "Waiting to resume library sync": "Đang chờ tiếp tục đồng bộ hóa thư viện",
   "Waiting to retry library sync": "Đang chờ thử lại đồng bộ hóa thư viện",
   "Library sync failed": "Đồng bộ hóa thư viện không thành công",
+  "Local catalog unavailable": "Danh mục cục bộ không khả dụng",
   "Tap reload to try again": "Nhấn vào tải lại để thử lại",
   "To queue": "Để xếp hàng",
   "Nothing": "không có gì",

@@ -778,6 +778,7 @@ export const zh_CN: Record<string, TranslationValue> = {
   "Waiting to resume library sync": "等待恢复库同步",
   "Waiting to retry library sync": "等待重试库同步",
   "Library sync failed": "库同步失败",
+  "Local catalog unavailable": "本地目录不可用",
   "Tap reload to try again": "点击重新加载重试",
   "To queue": "排队",
   "Nothing": "什么都没有",

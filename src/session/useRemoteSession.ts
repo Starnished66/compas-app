@@ -37,10 +37,12 @@ import { createWifiTransport } from '../data/wifiTransport';
 import { PIN_NOT_SAVED_MESSAGE, SecurePinStore } from '../data/SecurePinStore';
 import { ArtworkDiskCache } from '../data/ArtworkDiskCache';
 import {
+  liveCatalogStore,
   SyncedCatalogStore,
   CatalogIdentity,
   StoredCatalogCover,
 } from '../data/SyncedCatalogStore';
+import { LocalCatalogReadError, LocalCatalogUnavailableError } from '../data/catalogDatabase';
 import { SyncedCoverStore } from '../data/SyncedCoverStore';
 import { ArtworkSources, resolveArtworkUri } from './artworkResolver';
 import { useNowPlayingArtwork } from './useNowPlayingArtwork';
@@ -65,10 +67,7 @@ import {
 } from './libraryCategoryLoader';
 import { reconcileEntries } from './reconcileEntries';
 import { selectConnectionTransport } from './connectionTransportSelection';
-import {
-  matchesStoredCatalogSnapshot,
-  canFinishCatalogSyncFromSnapshot,
-} from './CatalogSyncPolicy';
+import { syncCatalog } from './catalogSync';
 import { PlaybackStatusGate, CommandOutcome } from './PlaybackStatusGate';
 import { StatusPollLoop } from './StatusPollLoop';
 import { QUEUE_PROBE_SIZE, insertedOffset, queueEnds } from './queueInsertion';
@@ -139,8 +138,6 @@ const PREF_WIFI_ADDRESS = 'compas_pref_wifi_address';
 const PREF_BLUETOOTH_ID = 'compas_pref_bt_id';
 const PREF_LAST_TRANSPORT = 'compas_pref_last_transport';
 const PREF_AUTO_RECONNECT = 'compas_pref_auto_reconnect';
-// Backoff before re-running a failed catalog sync; after the last one the failure is shown.
-const CATALOG_SYNC_RETRY_DELAYS_MS = [2000, 5000, 15000];
 const MEDIA_ACTION_RECONCILE_DELAY_MS = 1200;
 const QUEUE_ARTWORK_FLUSH_MS = 120;
 const SWIPE_NEXT_ATTEMPTS = 8;
@@ -168,8 +165,13 @@ interface QueueTarget {
   songIndex: number;
 }
 
+function sameCatalogRevision(a: CatalogIdentity | null, b: CatalogIdentity | null): boolean {
+  return a?.libraryId === b?.libraryId && a?.revision === b?.revision;
+}
+
 interface LibrarySnapshot {
   sortEpoch: number;
+  catalog: CatalogIdentity | null;
   category: LibraryCategory;
   entries: LibraryEntry[];
   query: string;
@@ -262,7 +264,7 @@ export function useRemoteSession() {
   const positionStoreRef = useLazyRef(() => new PlaybackPositionStore());
   const pinStoreRef = useLazyRef(() => new SecurePinStore());
   const artCacheRef = useLazyRef(() => new ArtworkDiskCache());
-  const syncedCatalogStoreRef = useLazyRef(() => new SyncedCatalogStore());
+  const syncedCatalogStoreRef = useRef(liveCatalogStore);
   const syncedCoverStoreRef = useLazyRef(() => new SyncedCoverStore());
 
   const activeCatalogRef = useRef<CatalogIdentity | null>(null);
@@ -278,6 +280,7 @@ export function useRemoteSession() {
   );
   const libraryListCacheRef = useLazyRef(() => new LibraryListCache());
   const shownLibraryListRef = useRef<string | null>(null);
+  const libraryBrowseCatalogRef = useRef<CatalogIdentity | null>(null);
   const queueTargetsRef = useRef<Map<string, QueueTarget>>(new Map());
   const queueArtworkBySongRef = useRef<Map<number, string>>(new Map());
   const entryIdCounterRef = useRef<number>(0);
@@ -1236,10 +1239,36 @@ export function useRemoteSession() {
   const adoptCatalog = (identity: CatalogIdentity | null) => {
     const previous = activeCatalogRef.current;
     activeCatalogRef.current = identity;
-    if (previous?.libraryId !== identity?.libraryId || previous?.revision !== identity?.revision) {
+    if (!sameCatalogRevision(previous, identity)) {
       libraryListCacheRef.current.clear();
       clearArtworkState();
     }
+  };
+
+  const markCatalogUnavailable = () => {
+    ++catalogSyncGenerationRef.current;
+    adoptCatalog(null);
+    setCatalogSyncMessage('Local catalog unavailable');
+  };
+
+  const restartCatalogBrowse = (api: RemoteApi, isNested: boolean, query: string) => {
+    const page = isNested ? libraryPageRef.current : null;
+    const context = isNested ? libraryContextRef.current : null;
+    shownLibraryListRef.current = null;
+    const loading = page ? startSongPage(page.filter, page.playContext, page.albumKey, false, page.albumIdentity)
+      : context ? loadGroupAlbums(context)
+      : loadLibraryCategory(currentLibraryCategoryRef.current, api, query || null, true);
+    const generation = libraryLoadGenerationRef.current;
+    libraryPageLoadingRef.current = generation;
+    void loading.finally(() => {
+      if (libraryPageLoadingRef.current === generation) libraryPageLoadingRef.current = null;
+    });
+  };
+
+  const recoverCatalogBrowse = (error: unknown, catalog: CatalogIdentity | null) => {
+    if (!(error instanceof LocalCatalogReadError) || !catalog || !sameCatalogRevision(catalog, activeCatalogRef.current)) return false;
+    markCatalogUnavailable();
+    return true;
   };
 
   // Background Catalog Sync Worker
@@ -1273,81 +1302,31 @@ export function useRemoteSession() {
       lastCatalogCoverProgressAtRef.current = 0;
       setState((prev) => ({ ...prev, catalogSyncMessage: 'Checking player library' }));
 
-      // 1. Probe
-      const probe = await catalogNetwork(api, attempt, generation, false, () => api.catalog(0, 1));
-      if (!probe || !ownsCatalogSync()) return;
-
-      // 2. Snapshot check
-      const storedIdentity = await syncedCatalogStoreRef.current.activeIdentity(probe.libraryId);
+      await syncCatalog({
+        api,
+        store: syncedCatalogStoreRef.current,
+        isCurrent: ownsCatalogSync,
+        request: (request) => catalogNetwork(api, attempt, generation, false, request),
+        setMessage: setCatalogSyncMessage,
+        adopt: adoptCatalog,
+        setCovers: (covers) => {
+          const coverMap = catalogCoversByAlbumRef.current;
+          coverMap.clear();
+          covers.forEach((cover) => coverMap.set(cover.albumKey, cover));
+        },
+        finishCovers: (identity, covers) => downloadCatalogCovers(api, attempt, generation, identity, covers),
+      }, refreshCoversManifest);
+    } catch (error) {
       if (!ownsCatalogSync()) return;
-      const storedSongCount = storedIdentity
-        ? await syncedCatalogStoreRef.current.activeSongCount(storedIdentity.libraryId, storedIdentity.revision)
-        : 0;
-      if (!ownsCatalogSync()) return;
-
-      const matches = matchesStoredCatalogSnapshot(
-        probe.libraryId,
-        probe.revision,
-        probe.total,
-        storedIdentity?.libraryId,
-        storedIdentity?.revision,
-        storedIdentity?.total,
-        storedSongCount
-      );
-
-      if (matches && storedIdentity) {
-        adoptCatalog(storedIdentity);
-        const coverMap = catalogCoversByAlbumRef.current;
-        const coverUriMap = syncedCoverUriCacheRef.current;
-        const covers = await syncedCatalogStoreRef.current.catalogCovers(
-          storedIdentity.libraryId,
-          storedIdentity.revision
-        );
-        if (!ownsCatalogSync() || activeCatalogRef.current?.libraryId !== storedIdentity.libraryId || activeCatalogRef.current.revision !== storedIdentity.revision || catalogCoversByAlbumRef.current !== coverMap) return;
-        coverMap.clear();
-        covers.forEach((c) => {
-          coverMap.set(c.albumKey, c);
-        });
-
-        const coverProgress = await syncedCatalogStoreRef.current.coverProgress(
-          storedIdentity.libraryId,
-          storedIdentity.revision
-        );
-        if (!ownsCatalogSync()) return;
-        const pending = await syncedCatalogStoreRef.current.pendingCovers(
-          storedIdentity.libraryId,
-          storedIdentity.revision
-        );
-        if (!ownsCatalogSync() || activeCatalogRef.current?.libraryId !== storedIdentity.libraryId || activeCatalogRef.current.revision !== storedIdentity.revision || syncedCoverUriCacheRef.current !== coverUriMap) return;
-
-        if (
-          canFinishCatalogSyncFromSnapshot(
-            refreshCoversManifest,
-            coverProgress?.manifestComplete ?? false,
-            pending.length
-          )
-        ) {
-          setState((prev) => ({ ...prev, catalogSyncMessage: null }));
-          return;
+      if (error instanceof LocalCatalogUnavailableError) {
+        const restartBrowse = libraryBrowseCatalogRef.current;
+        markCatalogUnavailable();
+        if (restartBrowse) {
+          const { libraryIsNested, libraryQuery } = stateRef.current;
+          restartCatalogBrowse(api, libraryIsNested, libraryQuery);
         }
-      }
-
-      // 3. Sync songs & covers. Pages are checkpointed, so a retry resumes where the failure left off;
-      // a revision change mid-sync makes the retry restage from the player's new first page.
-      for (let retry = 0; ; retry++) {
-        try {
-          await syncCatalogOnce(api, attempt, generation, refreshCoversManifest);
-          break;
-        } catch (err) {
-          if (!ownsCatalogSync() || retry >= CATALOG_SYNC_RETRY_DELAYS_MS.length) throw err;
-          setCatalogSyncMessage('Waiting to retry library sync');
-          await new Promise<void>((resolve) => setTimeout(resolve, CATALOG_SYNC_RETRY_DELAYS_MS[retry]));
-          if (!ownsCatalogSync()) return;
-        }
-      }
-    } catch {
-      if (ownsCatalogSync()) {
-        setState((prev) => ({ ...prev, catalogSyncMessage: 'Library sync failed' }));
+      } else {
+        setCatalogSyncMessage('Library sync failed');
       }
     }
   };
@@ -1407,116 +1386,16 @@ export function useRemoteSession() {
     throw new Error('Catalog sync no longer owns the active player session');
   };
 
-  const syncCatalogOnce = async (
+  const downloadCatalogCovers = async (
     api: RemoteApi,
     attempt: number,
     generation: number,
-    refreshCoversManifest: boolean
+    activeIdentity: CatalogIdentity,
+    allCovers: StoredCatalogCover[]
   ) => {
     const ownsCatalogSync = () => catalogSyncIsCurrent(api, attempt, generation);
-    setState((prev) => ({ ...prev, catalogSyncMessage: 'Syncing songs' }));
-    const firstPage = await catalogNetwork(api, attempt, generation, false, () => api.catalog(0));
-    if (!ownsCatalogSync()) return;
-    if (!firstPage.libraryId || !firstPage.revision) {
-      throw new Error('Player returned no catalog identity');
-    }
-
-    const identity = await syncedCatalogStoreRef.current.activeIdentity(firstPage.libraryId);
-    if (!ownsCatalogSync()) return;
-    const activeSongCount = identity
-      ? await syncedCatalogStoreRef.current.activeSongCount(firstPage.libraryId, firstPage.revision)
-      : 0;
-    if (!ownsCatalogSync()) return;
-    const activeIsComplete =
-      identity?.revision === firstPage.revision &&
-      identity.total === firstPage.total &&
-      activeSongCount === firstPage.total;
-
-    if (!activeIsComplete) {
-      const resumeOffset = await syncedCatalogStoreRef.current.beginCatalogStage(firstPage.libraryId, firstPage.revision, firstPage.total);
-      if (!ownsCatalogSync()) return;
-      await syncedCatalogStoreRef.current.writeCatalogPage(firstPage);
-
-      let offset = Math.max(firstPage.nextOffset, resumeOffset);
-      while (offset < firstPage.total) {
-        if (!ownsCatalogSync()) return;
-        setState((prev) => ({
-          ...prev,
-          catalogSyncMessage: `Syncing songs ${Math.min(offset, firstPage.total)}/${firstPage.total}`,
-        }));
-        const page = await catalogNetwork(api, attempt, generation, false, () =>
-          api.catalog(offset, undefined, firstPage.revision)
-        );
-        if (!ownsCatalogSync()) return;
-        await syncedCatalogStoreRef.current.writeCatalogPage(page);
-        offset = page.nextOffset;
-      }
-
-      if (!ownsCatalogSync()) return;
-      await syncedCatalogStoreRef.current.publishCatalog(firstPage.libraryId, firstPage.revision, firstPage.total);
-    }
-
-    const activeIdentity = { libraryId: firstPage.libraryId, revision: firstPage.revision, total: firstPage.total };
-    if (!ownsCatalogSync()) return;
-    adoptCatalog(activeIdentity);
-
-    // Sync covers manifest
-    const coverProg = await syncedCatalogStoreRef.current.coverProgress(
-      activeIdentity.libraryId,
-      activeIdentity.revision
-    );
-    if (!ownsCatalogSync()) return;
-    if (!coverProg?.manifestComplete || refreshCoversManifest) {
-      setState((prev) => ({ ...prev, catalogSyncMessage: 'Syncing album covers' }));
-      const firstCovers = await catalogNetwork(api, attempt, generation, false, () =>
-        api.catalogCovers(0, undefined, activeIdentity.revision)
-      );
-      if (!ownsCatalogSync()) return;
-      const coverStage = await syncedCatalogStoreRef.current.beginCovers(
-        activeIdentity.libraryId,
-        activeIdentity.revision,
-        firstCovers.total,
-        refreshCoversManifest
-      );
-      if (!ownsCatalogSync()) return;
-      await syncedCatalogStoreRef.current.writeCoverPage(firstCovers);
-
-      let offset = Math.max(firstCovers.nextOffset, coverStage.nextOffset);
-      while (offset < firstCovers.total) {
-        if (!ownsCatalogSync()) return;
-        setState((prev) => ({
-          ...prev,
-          catalogSyncMessage: `Syncing album covers ${Math.min(offset, firstCovers.total)}/${firstCovers.total}`,
-        }));
-        const page = await catalogNetwork(api, attempt, generation, false, () =>
-          api.catalogCovers(offset, undefined, activeIdentity.revision)
-        );
-        if (!ownsCatalogSync()) return;
-        await syncedCatalogStoreRef.current.writeCoverPage(page);
-        offset = page.nextOffset;
-      }
-
-      if (!ownsCatalogSync()) return;
-      await syncedCatalogStoreRef.current.publishCovers(
-        activeIdentity.libraryId,
-        activeIdentity.revision,
-        firstCovers.total
-      );
-    }
-
-    if (!ownsCatalogSync()) return;
-    // Populate covers map
-    const allCovers = await syncedCatalogStoreRef.current.catalogCovers(
-      activeIdentity.libraryId,
-      activeIdentity.revision
-    );
-    if (!ownsCatalogSync() || activeCatalogRef.current?.libraryId !== activeIdentity.libraryId || activeCatalogRef.current.revision !== activeIdentity.revision) return;
     const coverMap = catalogCoversByAlbumRef.current;
     const coverUriMap = syncedCoverUriCacheRef.current;
-    coverMap.clear();
-    allCovers.forEach((c) => {
-      coverMap.set(c.albumKey, c);
-    });
     // The manifest is complete here, so files for covers it no longer lists are orphans.
     const coverStore = syncedCoverStoreRef.current;
     void coverStore.pruneLibrary(activeIdentity.libraryId, allCovers.map((c) => c.coverKey), ownsCatalogSync).catch(() => {});
@@ -1615,6 +1494,7 @@ export function useRemoteSession() {
         }
       } catch (err: any) {
         if (!ownsCoverDownloads()) return;
+        if (err instanceof LocalCatalogUnavailableError) throw err;
         if (err?.statusCode === 404) {
           await syncedCatalogStoreRef.current.markCoverState(
             activeIdentity.libraryId,
@@ -2353,14 +2233,13 @@ export function useRemoteSession() {
     } finally { if (startToken === collectionStartTokenRef.current) collectionStartingRef.current = false; }
   };
 
-  const librarySource = (): string => {
-    const catalog = activeCatalogRef.current;
+  const librarySource = (catalog = activeCatalogRef.current): string => {
     return catalog ? `catalog:${catalog.libraryId}:${catalog.revision}` : `player:${connectionAttemptRef.current}`;
   };
 
-  const libraryLoadContext = (api: RemoteApi): CategoryLoadContext => ({
+  const libraryLoadContext = (api: RemoteApi, catalog = activeCatalogRef.current): CategoryLoadContext => ({
     api,
-    catalog: activeCatalogRef.current,
+    catalog,
     store: syncedCatalogStoreRef.current,
     entries: libraryEntriesRef.current,
     features: featureSetRef.current,
@@ -2369,6 +2248,7 @@ export function useRemoteSession() {
 
   const showLibraryList = (key: string | null, list: LibraryList) => {
     extensionPageRef.current = list.extensionPage;
+    if (list.extensionPage) libraryBrowseCatalogRef.current = null;
     if (list.extensionPage?.kind === 'orderedAlbums') libraryContextRef.current = list.extensionPage.context;
     shownLibraryListRef.current = key;
     setState((prev) => ({
@@ -2437,6 +2317,7 @@ export function useRemoteSession() {
     const source = librarySource();
     const key = libraryListKey(source, cat);
     const cached = refresh ? undefined : libraryListCacheRef.current.get(source, cat);
+    libraryBrowseCatalogRef.current = needsRevalidation(cat) || cached?.extensionPage ? null : activeCatalogRef.current;
     const keepShown = shownLibraryListRef.current === key;
     const shown = cached?.entries ?? (keepShown ? stateRef.current.libraryEntries : []);
     if (!cached && !keepShown) shownLibraryListRef.current = null;
@@ -2473,8 +2354,9 @@ export function useRemoteSession() {
 
     if (!api) return;
 
+    const context = libraryLoadContext(api);
     try {
-      const loaded = await loadCategoryList(cat, query ?? null, libraryLoadContext(api));
+      const loaded = await loadCategoryList(cat, query ?? null, context);
       if (loadGeneration !== libraryLoadGenerationRef.current || api !== apiRef.current) return;
       if (librarySource() !== source) {
         await loadLibraryCategory(cat, activeApi, query, refresh);
@@ -2486,7 +2368,11 @@ export function useRemoteSession() {
       const unchanged = cached && entries === cached.entries && list.label === cached.label && list.hasMore === cached.hasMore;
       if (!unchanged) showLibraryList(key, list);
     } catch (err: any) {
-      if (loadGeneration !== libraryLoadGenerationRef.current) return;
+      if (loadGeneration !== libraryLoadGenerationRef.current || api !== apiRef.current) return;
+      if (recoverCatalogBrowse(err, context.catalog)) {
+        await loadLibraryCategory(cat, api, query, refresh);
+        return;
+      }
       setState((prev) => ({ ...prev, libraryStatus: ContentStatus.Error, connectionMessage: err?.message || 'Could not load library' }));
     }
   };
@@ -2497,6 +2383,7 @@ export function useRemoteSession() {
       stateRef.current.libraryEntries.length > 0 && libraryPageLoadingRef.current === libraryLoadGenerationRef.current;
     libraryBackStackRef.current.push({
       sortEpoch: sortingEpochRef.current,
+      catalog: libraryBrowseCatalogRef.current,
       category: currentLibraryCategoryRef.current,
       entries: stateRef.current.libraryEntries,
       query: stateRef.current.libraryQuery,
@@ -2517,6 +2404,7 @@ export function useRemoteSession() {
       folderRoot: stateRef.current.folderRoot,
     });
     if (extensionPageRef.current?.kind === 'orderedAlbums') extensionPageRef.current = null;
+    libraryBrowseCatalogRef.current = null;
     libraryLoadGenerationRef.current++;
     shownLibraryListRef.current = null;
     setState((prev) => ({ ...prev, libraryIsNested: true }));
@@ -2547,6 +2435,8 @@ export function useRemoteSession() {
     const catalog = activeCatalogRef.current;
     const generation = ++libraryLoadGenerationRef.current;
     libraryContextRef.current = context;
+    libraryPageRef.current = null;
+    libraryBrowseCatalogRef.current = null;
 
     try {
       const sort = context.kind === 'artist' ? librarySortingRef.current?.artists : librarySortingRef.current?.albumArtists;
@@ -2558,6 +2448,7 @@ export function useRemoteSession() {
         return;
       }
 
+      libraryBrowseCatalogRef.current = catalog;
       const albums = await loadGroupAlbumRows(context, api, catalog, syncedCatalogStoreRef.current);
       if (generation !== libraryLoadGenerationRef.current || api !== apiRef.current) return;
       const entries = libraryEntriesRef.current.albums(albums, context);
@@ -2569,6 +2460,7 @@ export function useRemoteSession() {
       }));
     } catch (err: any) {
       if (generation !== libraryLoadGenerationRef.current || api !== apiRef.current) return;
+      if (recoverCatalogBrowse(err, catalog)) return loadGroupAlbums(context);
       setState((prev) => ({
         ...prev,
         libraryStatus: ContentStatus.Error,
@@ -2683,7 +2575,8 @@ export function useRemoteSession() {
     const attempt = connectionAttemptRef.current;
     libraryPageLoadingRef.current = generation;
     const api = apiRef.current;
-    const catalog = activeCatalogRef.current;
+    const catalog = !append || libraryBrowseCatalogRef.current ? activeCatalogRef.current : null;
+    if (!append) libraryBrowseCatalogRef.current = catalog;
     const currentOffset = append ? stateRef.current.libraryEntries.length : 0;
     const pageSize = LIBRARY_PAGE_SIZE;
 
@@ -2754,6 +2647,7 @@ export function useRemoteSession() {
       }));
     } catch (err: any) {
       if (api !== apiRef.current || attempt !== connectionAttemptRef.current || generation !== libraryLoadGenerationRef.current) return;
+      if (recoverCatalogBrowse(err, catalog)) return startSongPage(filter, playContext, albumKey, false, albumIdentity);
       setState((prev) => ({
         ...prev,
         libraryStatus: ContentStatus.Error,
@@ -3608,35 +3502,27 @@ export function useRemoteSession() {
   };
 
   const loadQueueArtwork = async (songIndexes: number[], api: RemoteApi) => {
-    const catalog = activeCatalogRef.current;
-    const playerScope = connectedPlayerKeyRef.current;
-    const requestAttempt = connectionAttemptRef.current;
     const sources = artworkSources(api);
-    for (const songIndex of new Set(songIndexes)) {
-      if (songIndex < 0 || queueArtworkBySongRef.current.has(songIndex)) continue;
-      if (apiRef.current !== api) return;
-      const albumKey = catalog
-        ? await syncedCatalogStoreRef.current.albumKeyForSong(catalog.libraryId, catalog.revision, songIndex).catch(() => null)
-        : null;
-      if (
-        apiRef.current !== api ||
-        connectedPlayerKeyRef.current !== playerScope ||
-        connectionAttemptRef.current !== requestAttempt ||
-        activeCatalogRef.current?.libraryId !== catalog?.libraryId ||
-        activeCatalogRef.current?.revision !== catalog?.revision
-      ) return;
-      const uri = await resolveArtworkUri(
-        { albumKey, songIndex },
+    const pending = [...new Set(songIndexes)].filter((id) => id >= 0 && !queueArtworkBySongRef.current.has(id));
+    if (!pending.length || !sources.isCurrent?.()) return;
+    const catalog = sources.catalog;
+    const keys = catalog
+      ? await syncedCatalogStoreRef.current.albumKeysForSongs(catalog.libraryId, catalog.revision, pending).catch(() => null)
+      : null;
+    const albumUris = new Map<string, string | null>();
+    for (const songIndex of pending) {
+      if (!sources.isCurrent?.()) return;
+      if (queueArtworkBySongRef.current.has(songIndex)) continue;
+      const albumKey = keys?.get(songIndex);
+      if (albumKey && !albumUris.has(albumKey)) {
+        albumUris.set(albumKey, await resolveArtworkUri({ albumKey, songIndex: null }, sources));
+      }
+      if (!sources.isCurrent?.()) return;
+      const uri = (albumKey ? albumUris.get(albumKey) : null) ?? await resolveArtworkUri(
+        { albumKey: null, songIndex },
         { ...sources, network: allowsQueueArtworkRequests() ? api : null },
       );
-      const currentCatalog = activeCatalogRef.current;
-      if (
-        apiRef.current !== api ||
-        connectedPlayerKeyRef.current !== playerScope ||
-        connectionAttemptRef.current !== requestAttempt ||
-        currentCatalog?.libraryId !== catalog?.libraryId ||
-        currentCatalog?.revision !== catalog?.revision
-      ) return;
+      if (!sources.isCurrent?.()) return;
       if (!uri) continue;
       queueArtworkBySongRef.current.set(songIndex, uri);
       queueArtworkPendingRef.current.set(songIndex, uri);
@@ -3679,7 +3565,10 @@ export function useRemoteSession() {
 
     if (stateRef.current.libraryIsNested && libraryBackStackRef.current.length > 0) {
       const prev = libraryBackStackRef.current.pop()!;
+      const api = apiRef.current;
+      const reload = api !== null && prev.catalog !== null && !sameCatalogRevision(prev.catalog, activeCatalogRef.current);
       currentLibraryCategoryRef.current = prev.category;
+      libraryBrowseCatalogRef.current = prev.catalog;
       libraryContextRef.current = prev.context;
       libraryPageRef.current = prev.page;
       extensionPageRef.current = prev.extensionPage;
@@ -3688,11 +3577,11 @@ export function useRemoteSession() {
       libraryLoadGenerationRef.current++;
       setState((curr) => ({
         ...curr,
-        libraryEntries: prev.entries,
+        libraryEntries: reload ? [] : prev.entries,
         libraryQuery: prev.query,
-        libraryStatus: prev.status,
-        libraryCountLabel: prev.countLabel,
-        libraryHasMore: prev.hasMore,
+        libraryStatus: reload ? ContentStatus.Loading : prev.status,
+        libraryCountLabel: reload ? null : prev.countLabel,
+        libraryHasMore: !reload && prev.hasMore,
         libraryIsNested: prev.isNested,
         libraryNestedTitle: prev.nestedTitle,
         activePlaylist: prev.activePlaylist,
@@ -3700,8 +3589,8 @@ export function useRemoteSession() {
         folderPath: prev.folderPath,
         folderRoot: prev.folderRoot,
       }));
-      const api = apiRef.current;
-      if (api && prev.sortEpoch !== sortingEpochRef.current) refreshSortedView(api, prev.context, prev.isNested, prev.nestedTitle);
+      if (api && reload) restartCatalogBrowse(api, prev.isNested, prev.query);
+      else if (api && prev.sortEpoch !== sortingEpochRef.current) refreshSortedView(api, prev.context, prev.isNested, prev.nestedTitle);
       else if (api && !prev.isNested && prev.extensionPage?.kind === 'orderedAlbums') returnToRatingAlbums(api);
       return;
     }
@@ -4094,6 +3983,12 @@ export function useRemoteSession() {
         const api = apiRef.current;
         const generation = libraryLoadGenerationRef.current;
         if (!api || !stateRef.current.libraryHasMore || libraryPageLoadingRef.current === generation) return;
+        const browseCatalog = libraryBrowseCatalogRef.current;
+        if (browseCatalog && !sameCatalogRevision(browseCatalog, activeCatalogRef.current)) {
+          const { libraryIsNested, libraryQuery } = stateRef.current;
+          restartCatalogBrowse(api, libraryIsNested, libraryQuery);
+          break;
+        }
         if (extensionPageRef.current) {
           const cursor = extensionPageRef.current;
           const screen = stateRef.current.screen;
@@ -4184,14 +4079,12 @@ export function useRemoteSession() {
           const isSearch = currentLibraryCategoryRef.current === LibraryCategory.Search;
           const shown = stateRef.current.libraryEntries;
           const offset = isSearch ? shown.filter((entry) => entry.kind === 'song').length : shown.length;
-          const source = librarySource();
+          const catalog = browseCatalog ? activeCatalogRef.current : null;
+          const source = librarySource(catalog);
+          const context = libraryLoadContext(api, catalog);
+          const query = stateRef.current.libraryQuery.trim() || null;
           try {
-            const page = await loadSongsAfter(
-              libraryLoadContext(api),
-              shown,
-              offset,
-              stateRef.current.libraryQuery.trim() || null
-            );
+            const page = await loadSongsAfter(context, shown, offset, query);
             if (generation !== libraryLoadGenerationRef.current) return;
             const all = [...shown, ...page.entries];
             const list: LibraryList = {
@@ -4203,7 +4096,7 @@ export function useRemoteSession() {
                 : `Showing ${all.length} of ${page.total} tracks`,
               extensionPage: null,
             };
-            if (!isSearch && shownLibraryListRef.current === libraryListKey(source, LibraryCategory.Songs)) {
+            if (!isSearch && source === librarySource() && shownLibraryListRef.current === libraryListKey(source, LibraryCategory.Songs)) {
               libraryListCacheRef.current.set(source, LibraryCategory.Songs, list);
             }
             setState((prev) => ({
@@ -4213,10 +4106,11 @@ export function useRemoteSession() {
               libraryStatus: ContentStatus.Ready,
               libraryCountLabel: list.label,
             }));
-          } catch {
-            if (generation === libraryLoadGenerationRef.current) {
-              setState((prev) => ({ ...prev, libraryStatus: ContentStatus.Error }));
-            }
+          } catch (error) {
+            if (generation !== libraryLoadGenerationRef.current || api !== apiRef.current) return;
+            if (recoverCatalogBrowse(error, context.catalog)) {
+              await loadLibraryCategory(currentLibraryCategoryRef.current, api, query);
+            } else setState((prev) => ({ ...prev, libraryStatus: ContentStatus.Error }));
           } finally {
             if (libraryPageLoadingRef.current === generation) libraryPageLoadingRef.current = null;
           }

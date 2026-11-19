@@ -818,6 +818,7 @@ export const pt_PT: Record<string, TranslationValue> = {
   "Waiting to resume library sync": "Aguarda para retomar a sincronização da biblioteca",
   "Waiting to retry library sync": "Aguarda para tentar novamente a sincronização da biblioteca",
   "Library sync failed": "Falha na sincronização da biblioteca",
+  "Local catalog unavailable": "Catálogo local indisponível",
   "Tap reload to try again": "Toque em recarregar para tentar novamente",
   "To queue": "Para fazer fila",
   "Nothing": "Nada",

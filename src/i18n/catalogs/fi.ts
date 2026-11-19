@@ -798,6 +798,7 @@ export const fi: Record<string, TranslationValue> = {
   "Waiting to resume library sync": "Odotetaan kirjaston synkronoinnin jatkamista",
   "Waiting to retry library sync": "Odotetaan kirjaston synkronointia uudelleen",
   "Library sync failed": "Kirjaston synkronointi epäonnistui",
+  "Local catalog unavailable": "Paikallinen luettelo ei ole käytettävissä",
   "Tap reload to try again": "Yritä uudelleen napauttamalla Lataa uudelleen",
   "To queue": "jonoon",
   "Nothing": "Ei mitään",

@@ -22,8 +22,9 @@ export function describeLibrarySync(message: string, t: Translate = (source, var
   const counts = countsOf(message);
   const progress = counts && counts.total > 0 ? counts.done / counts.total : null;
   const lower = message.toLowerCase();
-  if (lower.startsWith('library sync failed')) {
-    return { title: t('Library sync failed'), detail: t('Tap reload to try again'), progress: null, paused: true, failed: true };
+  if (lower.startsWith('library sync failed') || lower === 'local catalog unavailable') {
+    const title = lower === 'local catalog unavailable' ? t('Local catalog unavailable') : t('Library sync failed');
+    return { title, detail: t('Tap reload to try again'), progress: null, paused: true, failed: true };
   }
   if (lower.startsWith('waiting')) {
     return { title: t('Library sync paused'), detail: t(message), progress: null, paused: true };

@@ -798,6 +798,7 @@ export const nl: Record<string, TranslationValue> = {
   "Waiting to resume library sync": "Wachten op het hervatten van de bibliotheeksynchronisatie",
   "Waiting to retry library sync": "Wachten op nieuwe poging tot bibliotheeksynchronisatie",
   "Library sync failed": "Synchronisatie van bibliotheek mislukt",
+  "Local catalog unavailable": "Lokale catalogus niet beschikbaar",
   "Tap reload to try again": "Tik op herladen om het opnieuw te proberen",
   "To queue": "Om in de rij te staan",
   "Nothing": "Niets",

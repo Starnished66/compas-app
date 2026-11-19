@@ -778,6 +778,7 @@ export const ja: Record<string, TranslationValue> = {
   "Waiting to resume library sync": "ライブラリ同期の再開を待っています",
   "Waiting to retry library sync": "ライブラリ同期の再試行を待機しています",
   "Library sync failed": "ライブラリの同期に失敗しました",
+  "Local catalog unavailable": "ローカルカタログを利用できません",
   "Tap reload to try again": "「リロード」をタップしてもう一度試してください",
   "To queue": "キューに入れる",
   "Nothing": "何もない",

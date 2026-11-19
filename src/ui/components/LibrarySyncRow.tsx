@@ -16,9 +16,13 @@ export function LibrarySyncRow({ syncMessage, onSync }: LibrarySyncRowProps) {
   const { t } = useI18n();
   const { phase, sync } = useLibrarySyncRequest(syncMessage, onSync);
   const songCount = useSyncedSongCount(syncMessage ?? null);
+  const unavailable = syncMessage === 'Local catalog unavailable';
+  const error = unavailable ? (
+    <StatusIndicator status="error" dotSize="sm" variant="caption" tone="inkMuted" label={t('Local catalog unavailable')} numberOfLines={2} />
+  ) : undefined;
 
   const trailing =
-    phase === 'syncing' ? (
+    !unavailable && phase === 'syncing' ? (
       <StatusIndicator status="busy" dotSize="sm" variant="caption" tone="inkMuted" label={syncMessage ? `${syncMessage}…` : t('Checking player library…')} />
     ) : phase === 'done' ? (
       <StatusIndicator status="ok" pulse={false} dotSize="sm" variant="caption" tone="inkMuted" label={upToDateLabel(songCount, t)} />
@@ -26,5 +30,5 @@ export function LibrarySyncRow({ syncMessage, onSync }: LibrarySyncRowProps) {
       <Button label={t('Sync now')} variant="plain" size="sm" accessibilityLabel={t('Check the player for library changes')} onPress={sync} />
     );
 
-  return <ListRow variant="action" title={t('Library sync')} trailing={trailing} />;
+  return <ListRow variant="action" title={t('Library sync')} subtitle={error} trailing={trailing} />;
 }
