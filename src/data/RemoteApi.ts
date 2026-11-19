@@ -19,6 +19,7 @@ import {
   LibrarySortScope,
   LibrarySortMode,
   LibrarySortingSnapshot,
+  LibrarySortSnapshot,
   CollectionPlayRequest,
   WifiImportStatus,
   WifiImportDirectoryPage,
@@ -26,6 +27,7 @@ import {
   WifiImportUploadResult,
 } from './types';
 import { parseDacMode } from './dacMode';
+import { isLibrarySortMode, isLibrarySortScope, LIBRARY_SORT_SECTIONS } from './librarySortModes';
 import type { NativeUploadProgress } from './nativeFileUpload';
 import { SettingsApi } from './SettingsApi';
 import { PluginsApi } from './PluginsApi';
@@ -709,20 +711,24 @@ export class RemoteApi {
 
   async librarySorting(): Promise<LibrarySortingSnapshot> {
     const json = await this.jsonGet(`${this.prefix}/library/sorting`);
-    const parse = (value: any) => {
-      if (!value || ![0, 1, 2].includes(value.configured) || ![0, 1, 2].includes(value.effective) ||
-        !Array.isArray(value.available) || value.available.length !== 3 || value.available.some((v: unknown) => typeof v !== 'boolean')) {
+    const parse = (scope: LibrarySortScope): LibrarySortSnapshot => {
+      const { configured, effective, available, reverse } = json?.[scope] ?? {};
+      const { slots } = LIBRARY_SORT_SECTIONS[scope];
+      if (!Array.isArray(available) || !slots.some((count) => count === available.length) ||
+        available.some((slot) => typeof slot !== 'boolean') ||
+        !isLibrarySortMode(scope, configured, available.length) ||
+        !isLibrarySortMode(scope, effective, available.length) ||
+        (reverse !== undefined && typeof reverse !== 'boolean')) {
         throw new Error('Invalid library sorting response');
       }
-      return { configured: value.configured as LibrarySortMode, effective: value.effective as LibrarySortMode,
-        available: value.available as [boolean, boolean, boolean] };
+      return { configured, effective, available, reverse: reverse === true };
     };
-    return { albums: parse(json.albums), artists: parse(json.artists), albumArtists: parse(json.album_artists) };
+    return { albums: parse('albums'), artists: parse('artists'), albumArtists: parse('album_artists') };
   }
 
   async setLibrarySorting(scope: LibrarySortScope, mode: LibrarySortMode): Promise<void> {
-    if (!['albums', 'artists', 'album_artists'].includes(scope)) throw new Error('Invalid sorting scope');
-    assertIntegerArgument(mode, 'Sort mode', 0, 2);
+    if (!isLibrarySortScope(scope)) throw new Error('Invalid sorting scope');
+    if (!isLibrarySortMode(scope, mode)) throw new Error('Invalid sort mode for scope');
     await this.command('/library/sorting', [['scope', scope], ['mode', String(mode)]]);
   }
 

@@ -1684,6 +1684,32 @@ Object.assign(catalogs.ru, {
   'Unavailable: {option}': 'Недоступно: {option}',
 });
 
+const ratingSortLabels: Record<string, string> = {
+  en: 'Rating', es: 'Valoración', de: 'Bewertung', fr: 'Note', it: 'Valutazione', ru: 'Рейтинг',
+  fi: 'Arvosana', ja: '評価', nl: 'Beoordeling', pt_BR: 'Avaliação', pt_PT: 'Avaliação',
+  uk: 'Оцінка', vi: 'Xếp hạng', zh_CN: '评分',
+};
+const albumArtistYearSortLabels: Record<string, string> = {
+  en: 'Album Artist, then Year', es: 'Artista del álbum y luego año', de: 'Albuminterpret, dann Jahr',
+  fr: 'Artiste de l’album, puis année', it: 'Artista album, poi anno', ru: 'Исполнитель альбома, затем год',
+  fi: 'Albumin esittäjä, sitten vuosi', ja: 'アルバムアーティスト、次に年', nl: 'Albumartiest, daarna jaar',
+  pt_BR: 'Artista do álbum e depois ano', pt_PT: 'Artista do álbum e depois ano', uk: 'Виконавець альбому, потім рік',
+  vi: 'Nghệ sĩ album, rồi năm', zh_CN: '专辑艺术家，然后按年份',
+};
+const reverseSortLabels: Record<string, string> = {
+  en: 'Reversed order', es: 'Orden inverso', de: 'Umgekehrte Reihenfolge', fr: 'Ordre inversé',
+  it: 'Ordine inverso', ru: 'Обратный порядок', fi: 'Käänteinen järjestys', ja: '逆順',
+  nl: 'Omgekeerde volgorde', pt_BR: 'Ordem inversa', pt_PT: 'Ordem inversa', uk: 'Зворотний порядок',
+  vi: 'Thứ tự đảo ngược', zh_CN: '反向顺序',
+};
+for (const [language, label] of Object.entries(ratingSortLabels)) {
+  Object.assign(catalogs[language as Language], {
+    Rating: label,
+    'Album Artist, then Year': albumArtistYearSortLabels[language],
+    'Reversed order': reverseSortLabels[language],
+  });
+}
+
 // File transfer tab.
 Object.assign(catalogs.en, {
   '{count} folders': { one: '{count} folder', other: '{count} folders' },

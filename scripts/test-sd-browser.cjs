@@ -173,6 +173,7 @@ async function checkHidden() {
 async function checkRemoteHidden() {
   const { RemoteApi } = load('src/data/RemoteApi.ts', {
     './redirectGuard': {}, './cryptoUtils': {}, './dacMode': {}, './SettingsApi': {}, './PluginsApi': {}, './HttpTransport': {},
+    './librarySortModes': load('src/data/librarySortModes.ts'),
   });
   const api = new RemoteApi({});
   const queries = [];

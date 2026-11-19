@@ -65,6 +65,7 @@ export function BottomSheet({
   const sheetHeightRef = useRef(windowHeight);
   const closingRef = useRef(false);
   const previousContentKey = useRef(contentKey);
+  const scrollRef = useRef<ScrollView>(null);
   const onCloseRef = useRef(onClose);
   const onHiddenRef = useRef(onHidden);
   onHiddenRef.current = onHidden;
@@ -100,6 +101,7 @@ export function BottomSheet({
   useEffect(() => {
     if (previousContentKey.current === contentKey) return;
     previousContentKey.current = contentKey;
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
     if (reducedMotion) {
       swap.setValue(1);
       return;
@@ -207,6 +209,7 @@ export function BottomSheet({
           </View>
           {scrollable ? (
             <ScrollView
+              ref={scrollRef}
               style={styles.scroll}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}

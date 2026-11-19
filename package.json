@@ -31,7 +31,11 @@
     "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
+    "@types/jest": "30.0.0",
     "@types/react": "~19.2.2",
+    "jest": "30.5.2",
+    "react-test-renderer": "19.2.3",
+    "ts-jest": "29.4.15",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -42,6 +46,7 @@
     "typecheck": "tsc --noEmit",
     "check:translations": "node scripts/check-translations.cjs",
     "test:dac-mode": "node scripts/test-dac-mode.cjs",
+    "test:library-sorting": "node scripts/test-library-sorting.cjs",
     "test:sd-browser": "node scripts/test-sd-browser.cjs",
     "test:connection-transport-errors": "node scripts/test-connection-transport-errors.cjs",
     "test:auto-reconnect": "node scripts/test-auto-reconnect.cjs"

@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { ConnectionStatus, ConnectionTransport, LibrarySortMode, LibrarySortScope, RemoteAction, RemoteTheme, RemoteUiState } from '../../data/types';
+import { ConnectionStatus, ConnectionTransport, RemoteAction, RemoteTheme, RemoteUiState } from '../../data/types';
+import { LIBRARY_SORT_MODES } from '../../data/librarySortModes';
 import { AccentSetting } from '../components/AccentSetting';
 import { AppText } from '../components/AppText';
 import { BackgroundSetting } from '../components/BackgroundSetting';
@@ -101,7 +102,7 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
             <ListRow title={t('Back')} leading={<Icon name="chevronLeft" />} onPress={() => setSortingOpen(false)} />
             <LibrarySortingSetting
               sorting={librarySorting}
-              onChange={(scope: LibrarySortScope, mode: LibrarySortMode) => {
+              onChange={(scope, mode) => {
                 onAction({ type: 'SetLibrarySorting', scope, mode });
               }}
             />
@@ -233,7 +234,7 @@ export function SettingsSheet({ state, onAction, visible, onClose, onOpenConnect
               <Divider />
               <ListRow
                 title={t('Sort library')}
-                subtitle={t(['Name (A–Z)', 'Recently Added', 'Release Year (oldest first)'][librarySorting.albums.effective])}
+                subtitle={`${t(LIBRARY_SORT_MODES[librarySorting.albums.effective].label)}${librarySorting.albums.reverse ? ` · ${t('Reversed order')}` : ''}`}
                 trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
                 onPress={() => setSortingOpen(true)}
               />

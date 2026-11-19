@@ -4,7 +4,7 @@ import { CatalogSong, LibraryCategory, LibraryEntry, LibraryGroup, LibrarySortin
 import { GroupKind, LibraryEntryFactory } from './LibraryEntryFactory';
 import { ExtensionPage, LibraryList } from './LibraryListCache';
 import { sortedByTitle } from './titleOrder';
-import { loadServerOrderedAlbumGroups } from './librarySorting';
+import { isServerOrderedAlbumSort, loadServerOrderedAlbumGroups } from './librarySorting';
 
 export const LIBRARY_PAGE_SIZE = 50;
 
@@ -137,7 +137,7 @@ export async function loadCategoryList(
       !query &&
       context.features.has('library_sorting') &&
       !!context.librarySorting &&
-      context.librarySorting.albums.effective !== 0;
+      isServerOrderedAlbumSort(context.librarySorting.albums);
     const loadedGroups = serverAlbumOrder
       ? await loadServerOrderedAlbumGroups(api, 'albums')
       : await groupList(context, group, query);

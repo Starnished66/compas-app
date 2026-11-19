@@ -34,6 +34,7 @@ import { FlipContext, FlipMode, FlipRegistry } from '../library/flipRegistry';
 import { availableCategoryOptions, categoryNoun, isSortableCategory } from '../library/libraryCategories';
 import { LibraryEntryKind, opensCollection } from '../library/libraryEntryKind';
 import { LibraryItem, entryItems, nodeItem, songIds, withLetterHeaders } from '../library/libraryItems';
+import { isServerOrderedAlbumSort } from '../../session/librarySorting';
 import { inlineLibraryError, libraryStateMessage } from '../library/libraryStateMessage';
 import { playCollection } from '../library/collectionPlayback';
 import { isShuffleMode } from '../../session/playbackModes';
@@ -100,7 +101,6 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   const { columns, tileWidth } = useAlbumGrid();
   const nested = state.libraryIsNested;
   const librarySorting = state.librarySorting;
-  const albumSortMode = librarySorting?.albums.effective ?? 0;
   const searchActive = (searchOpen || category === LibraryCategory.Search) && !nested;
   const trail = useCollectionTrail(state.libraryEntries, nested);
   const { rememberOpening } = trail;
@@ -214,11 +214,12 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   });
 
   const sortable = !nested && isSortableCategory(category);
-  const localDirectionSort = sortable && (category !== LibraryCategory.Albums || albumSortMode === 0);
+  const serverOrderedAlbums = category === LibraryCategory.Albums && isServerOrderedAlbumSort(librarySorting?.albums);
+  const localDirectionSort = sortable && (category !== LibraryCategory.Albums || !serverOrderedAlbums);
   const entries = useSortDirection(state.libraryEntries, localDirectionSort && !ascending);
   useEffect(() => {
-    if (category === LibraryCategory.Albums && albumSortMode !== 0) setAscending(true);
-  }, [category, albumSortMode]);
+    if (category === LibraryCategory.Albums && serverOrderedAlbums) setAscending(true);
+  }, [category, serverOrderedAlbums]);
   const step = nested ? trail.current : null;
   const artistDetail = nested && state.libraryNestedTitle === NESTED_ALBUMS_TITLE;
   const albumDetail = nested && !artistDetail && step?.kind === 'album';

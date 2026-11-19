@@ -1,4 +1,7 @@
 import type { DacMode } from './dacMode';
+import type { LibrarySortMode, LibrarySortScope } from './librarySortModes';
+
+export type { LibrarySortMode, LibrarySortScope } from './librarySortModes';
 
 export interface Capabilities {
   version: number;
@@ -35,12 +38,11 @@ export interface WifiImportUploadResult {
   bytes: number;
 }
 
-export type LibrarySortScope = 'albums' | 'artists' | 'album_artists';
-export type LibrarySortMode = 0 | 1 | 2;
 export interface LibrarySortSnapshot {
   configured: LibrarySortMode;
   effective: LibrarySortMode;
-  available: readonly [boolean, boolean, boolean];
+  available: readonly boolean[];
+  reverse?: boolean;
 }
 export interface LibrarySortingSnapshot {
   albums: LibrarySortSnapshot;

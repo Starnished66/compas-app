@@ -82,7 +82,7 @@ import { discoveryEndpoint, discoveryHostnameEndpoint } from './wifiDiscovery';
 import { publicLibraryIdentityMatches, verifyWifiUpgradeIdentity } from './wifiUpgradeIdentity';
 import { isCurrentWifiImportSession } from './wifiImportSession';
 import { wifiImportErrorMessage } from './wifiImportError';
-import { loadServerOrderedAlbumGroups } from './librarySorting';
+import { isServerOrderedAlbumSort, loadServerOrderedAlbumGroups, requestLibrarySortChange } from './librarySorting';
 import { playlistNameIssue } from '../ui/playlistName';
 import { withPolledPlayback } from './polledPlayback';
 import { useMediaSessionSync } from './useMediaSessionSync';
@@ -2245,23 +2245,16 @@ export function useRemoteSession() {
 
   const setLibrarySorting = async (scope: LibrarySortScope, mode: LibrarySortMode) => {
     const api = apiRef.current;
-    if (!api || sortingWriteRef.current || !featureSetRef.current.has('library_sorting')) return;
+    const current = librarySortingRef.current;
+    if (!api || !current || sortingWriteRef.current || !featureSetRef.current.has('library_sorting')) return;
     const attempt = connectionAttemptRef.current;
+    const isCurrent = () => api === apiRef.current && attempt === connectionAttemptRef.current;
     sortingWriteRef.current = true;
     try {
-      await api.setLibrarySorting(scope, mode);
-      for (let i = 0; i < 15; i++) {
-        if (api !== apiRef.current || attempt !== connectionAttemptRef.current) return;
-        await new Promise((resolve) => setTimeout(resolve, 150));
-        if (api !== apiRef.current || attempt !== connectionAttemptRef.current) return;
-        const sorting = await api.librarySorting();
-        if (api !== apiRef.current || attempt !== connectionAttemptRef.current) return;
-        const selected = scope === 'album_artists' ? sorting.albumArtists : sorting[scope];
-        if (selected.configured === mode) { publishLibrarySorting(api, sorting); return; }
-      }
-      throw new Error('The player has not confirmed the sorting change.');
+      const sorting = await requestLibrarySortChange(api, current, scope, mode, isCurrent);
+      if (sorting && isCurrent()) publishLibrarySorting(api, sorting);
     } catch (error: any) {
-      if (api === apiRef.current && attempt === connectionAttemptRef.current) setState((prev) => ({ ...prev, connectionMessage: error.message || 'Could not change sorting' }));
+      if (isCurrent()) setState((prev) => ({ ...prev, connectionMessage: error.message || 'Could not change sorting' }));
     } finally { sortingWriteRef.current = false; }
   };
 
@@ -2446,7 +2439,7 @@ export function useRemoteSession() {
     try {
       let albums: LibraryGroup[] = [];
       const sort = kind === 'artist' ? librarySortingRef.current?.artists : librarySortingRef.current?.albumArtists;
-      if (api && featureSetRef.current.has('library_sorting') && sort && sort.effective !== 0) {
+      if (api && featureSetRef.current.has('library_sorting') && isServerOrderedAlbumSort(sort)) {
         albums = await loadServerOrderedAlbumGroups(api, kind === 'artist' ? 'artists' : 'album_artists', kind === 'artist' ? { artist: group.name } : { albumArtist: group.name });
       } else if (catalog) {
         const stored = await syncedCatalogStoreRef.current.groups(
