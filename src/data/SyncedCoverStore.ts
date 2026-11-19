@@ -30,17 +30,27 @@ export class SyncedCoverStore {
 
   async getUri(libraryId: string, coverKey: string, mimeType: string = 'image/jpeg'): Promise<string | null> {
     if (!libraryId.trim() || !coverKey.trim()) return null;
-    const target = this.fileFor(libraryId, coverKey);
+    const diskUri = await this.getDiskUri(libraryId, coverKey);
+    if (diskUri) return diskUri;
+    const base64 = this.memoryGet(this.memoryKey(libraryId, coverKey));
+    return base64 ? `data:${mimeType};base64,${base64}` : null;
+  }
+
+  async getDiskUri(libraryId: string, coverKey: string): Promise<string | null> {
+    if (!libraryId.trim() || !coverKey.trim()) return null;
+    return this.verifiedUri(this.fileFor(libraryId, coverKey));
+  }
+
+  private async verifiedUri(target: string): Promise<string | null> {
     try {
       const info = await FileSystem.getInfoAsync(target);
       if (info.exists && !info.isDirectory && (info.size || 0) > 0) {
         return target.startsWith('file:') ? target : `file://${target}`;
       }
     } catch {
-      // The in-memory copy is still usable if disk access fails.
+      // A failed stat leaves the file unverified.
     }
-    const base64 = this.memoryGet(this.memoryKey(libraryId, coverKey));
-    return base64 ? `data:${mimeType};base64,${base64}` : null;
+    return null;
   }
 
   private memoryKey(libraryId: string, coverKey: string): string {
@@ -85,65 +95,65 @@ export class SyncedCoverStore {
     return b64 ? base64ToBytes(b64) : null;
   }
 
-  /** True only when the cover is durably on disk; a memory-only fallback copy still needs a retry. */
-  async contains(libraryId: string, coverKey: string): Promise<boolean> {
-    if (!libraryId.trim() || !coverKey.trim()) return false;
-    const target = this.fileFor(libraryId, coverKey);
-    try {
-      const info = await FileSystem.getInfoAsync(target);
-      return Boolean(info.exists && (info.size || 0) > 0);
-    } catch {
-      return false;
-    }
-  }
-
-  /** Returns false on cancellation or disk failure. An owned disk failure keeps a retryable memory copy. */
   async put(
     libraryId: string, coverKey: string, data: Uint8Array | string, ownsWrite: () => boolean = () => true
-  ): Promise<boolean> {
-    if (!ownsWrite() || !libraryId.trim() || !coverKey.trim()) return false;
+  ): Promise<string | null> {
+    if (!ownsWrite()) return null;
     const base64 = typeof data === 'string' ? data : bytesToBase64(data);
-    if (!base64) return false;
+    if (!base64) return null;
+    const uri = await this.storeDownload(libraryId, coverKey, async (temporary) => {
+      try {
+        await FileSystem.writeAsStringAsync(temporary, base64, { encoding: FileSystem.EncodingType.Base64 });
+        return true;
+      } catch {
+        return undefined;
+      }
+    }, ownsWrite);
+    if (uri === undefined && ownsWrite()) this.memorySet(this.memoryKey(libraryId, coverKey), base64);
+    return uri ?? null;
+  }
 
-    const key = this.memoryKey(libraryId, coverKey);
+  /** A missing cover returns null. A local disk failure returns undefined and can be retried. */
+  async storeDownload(
+    libraryId: string,
+    coverKey: string,
+    write: (fileUri: string) => Promise<boolean | undefined>,
+    ownsWrite: () => boolean,
+  ): Promise<string | null | undefined> {
+    if (!ownsWrite() || !libraryId.trim() || !coverKey.trim()) return null;
     const target = this.fileFor(libraryId, coverKey);
     const parentDir = target.substring(0, target.lastIndexOf('/'));
+    try {
+      const info = await FileSystem.getInfoAsync(parentDir);
+      if (!ownsWrite()) return null;
+      if (!info.exists) await FileSystem.makeDirectoryAsync(parentDir, { intermediates: true });
+    } catch {
+      return undefined;
+    }
+    if (!ownsWrite()) return null;
+
     const tempFile = `${parentDir}/.${Date.now()}.${Math.random().toString(36).substring(2)}.tmp`;
     let moved = false;
-
+    this.activeTemporaries.add(tempFile);
     try {
-      const dirInfo = await FileSystem.getInfoAsync(parentDir);
-      if (!ownsWrite()) return false;
-      if (!dirInfo.exists) {
-        await FileSystem.makeDirectoryAsync(parentDir, { intermediates: true });
-        if (!ownsWrite()) return false;
+      const written = await write(tempFile);
+      if (!ownsWrite() || written === false) return null;
+      if (written === undefined) return undefined;
+      try {
+        await FileSystem.moveAsync({ from: tempFile, to: target });
+      } catch {
+        return undefined;
       }
-
-      this.activeTemporaries.add(tempFile);
-      await FileSystem.writeAsStringAsync(tempFile, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      if (!ownsWrite()) return false;
-
-      await FileSystem.moveAsync({ from: tempFile, to: target });
       moved = true;
-      if (!ownsWrite()) return false;
-      const readBack = await FileSystem.getInfoAsync(target);
-      if (!ownsWrite()) return false;
-      if (readBack.exists && (readBack.size || 0) > 0) {
-        this.memoryStore.delete(key);
-        return true;
-      }
-    } catch {
-      // Leave disk failures retryable and provide a memory copy while the write is owned.
+      if (!ownsWrite()) return null;
+      const uri = await this.verifiedUri(target);
+      if (!ownsWrite()) return null;
+      if (uri) this.memoryStore.delete(this.memoryKey(libraryId, coverKey));
+      return uri ?? undefined;
     } finally {
-      if (!moved && this.activeTemporaries.has(tempFile)) {
-        await FileSystem.deleteAsync(tempFile, { idempotent: true }).catch(() => {});
-      }
+      if (!moved) await FileSystem.deleteAsync(tempFile, { idempotent: true }).catch(() => {});
       this.activeTemporaries.delete(tempFile);
     }
-    if (ownsWrite()) this.memorySet(key, base64);
-    return false;
   }
 
   async delete(libraryId: string, coverKey: string): Promise<void> {

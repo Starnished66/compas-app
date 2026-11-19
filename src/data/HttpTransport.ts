@@ -7,6 +7,8 @@ export interface HttpRequest {
   body?: Uint8Array;
   /** Overrides the transport's default timeout for this one request (slow player-side work). */
   timeoutMs?: number;
+  /** Cancels this request while it is waiting in the serialized queue. */
+  queueSignal?: AbortSignal;
 }
 
 export interface HttpResponse {
@@ -33,6 +35,7 @@ export type FileDownloader = (
 ) => Promise<FileDownloadResult>;
 
 export interface FileDownloadTransport extends HttpTransport {
+  readonly downloadRejectsRedirects?: boolean;
   download(request: HttpRequest, fileUri: string): Promise<HttpResponse>;
 }
 
@@ -70,6 +73,8 @@ export function createHttpResponse(
 
 const CURRENT_ARTWORK_TARGET = '/api/v1/art';
 
+export class ArtworkDestinationError extends Error {}
+
 export class ArtworkRequestPreemptedException extends Error {
   /** True when a foreground command cancelled the request; false when it only timed out. Preempted reads can be requeued. */
   readonly preempted: boolean;
@@ -105,6 +110,7 @@ export function isArtworkPreemptibleTransport(transport: unknown): transport is 
 /** Serializes one-request-per-socket player traffic like the native session's network dispatcher. */
 export class SerializedHttpTransport implements HttpTransport, ArtworkPreemptibleTransport {
   readonly download?: (request: HttpRequest, fileUri: string) => Promise<HttpResponse>;
+  readonly downloadRejectsRedirects?: boolean;
   private nextOrder = 0;
   private running = false;
   private readonly pending: Array<{
@@ -118,6 +124,7 @@ export class SerializedHttpTransport implements HttpTransport, ArtworkPreemptibl
   constructor(private readonly inner: HttpTransport) {
     if (isFileDownloadTransport(inner)) {
       this.download = (request, fileUri) => this.enqueue(request, () => inner.download(request, fileUri));
+      this.downloadRejectsRedirects = inner.downloadRejectsRedirects;
     }
   }
 
@@ -142,7 +149,30 @@ export class SerializedHttpTransport implements HttpTransport, ArtworkPreemptibl
 
   private enqueue(request: HttpRequest, run: () => Promise<HttpResponse>): Promise<HttpResponse> {
     return new Promise<HttpResponse>((resolve, reject) => {
-      this.pending.push({ request, order: this.nextOrder++, run, resolve, reject });
+      const signal = request.queueSignal;
+      if (signal?.aborted) {
+        reject(new Error('Request cancelled'));
+        return;
+      }
+      const entry = { request, order: this.nextOrder++, run, resolve, reject };
+      if (signal) {
+        const abort = () => {
+          const index = this.pending.indexOf(entry);
+          if (index !== -1) this.pending.splice(index, 1);
+          entry.reject(new Error('Request cancelled'));
+        };
+        entry.run = () => {
+          signal.removeEventListener('abort', abort);
+          if (signal.aborted) throw new Error('Request cancelled');
+          return run();
+        };
+        entry.reject = (error: unknown) => {
+          signal.removeEventListener('abort', abort);
+          reject(error);
+        };
+        signal.addEventListener('abort', abort);
+      }
+      this.pending.push(entry);
       this.pending.sort((left, right) => this.priority(left.request) - this.priority(right.request) || left.order - right.order);
       this.pump();
     });
@@ -195,13 +225,14 @@ export class FetchHttpTransport implements HttpTransport, ArtworkPreemptibleTran
   private activeArtworkControllers = new Map<number | 'general', AbortController>();
   private preemptedControllers = new WeakSet<AbortController>();
 
-  constructor(baseUrl: string, timeoutMs: number = 8000, downloadFile?: FileDownloader) {
+  constructor(baseUrl: string, timeoutMs: number = 8000, downloadFile?: FileDownloader, readonly downloadRejectsRedirects = false) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.timeoutMs = timeoutMs;
     if (downloadFile) {
       this.download = (request, fileUri) =>
         this.withAbortSignal(request, async (signal) => {
           const result = await downloadFile(this.urlFor(request), fileUri, request.headers ?? {}, signal);
+          if (signal.aborted && request.target !== CURRENT_ARTWORK_TARGET) throw new Error('Download aborted');
           refuseRedirect(result.status);
           return createHttpResponse(
             result.status,

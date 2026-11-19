@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import type { FileDownloadResult } from './HttpTransport';
+import { ArtworkDestinationError, type FileDownloader, type FileDownloadResult } from './HttpTransport';
 import { nativeTransferError } from './nativeTransferError';
-import { getPinSafeTransfers } from '../../modules/compas-files/src';
+import { getPinSafeDownloads } from '../../modules/compas-files/src';
 
 function isSuccess(status: number): boolean {
   return status >= 200 && status < 300;
@@ -17,6 +17,27 @@ async function takeErrorBody(fileUri: string): Promise<string> {
   }
 }
 
+export function pinSafeFileDownloader(): FileDownloader | undefined {
+  const native = getPinSafeDownloads();
+  if (typeof native?.downloadFile !== 'function') return undefined;
+  return async (url, fileUri, headers, signal) => {
+    if (signal.aborted) throw new Error('Download aborted');
+    const taskId = `download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const cancelNative = () => { void Promise.resolve(native.cancelTransfer(taskId)).catch(() => {}); };
+    signal.addEventListener('abort', cancelNative);
+    try {
+      return await native.downloadFile(taskId, url, fileUri, headers);
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code === 'ERR_TRANSFER_DESTINATION') {
+        throw new ArtworkDestinationError(nativeTransferError(error).message);
+      }
+      throw nativeTransferError(error);
+    } finally {
+      signal.removeEventListener('abort', cancelNative);
+    }
+  };
+}
+
 export async function downloadToFile(
   url: string,
   fileUri: string,
@@ -24,19 +45,8 @@ export async function downloadToFile(
   signal: AbortSignal
 ): Promise<FileDownloadResult> {
   if (signal.aborted) throw new Error('Download aborted');
-  const native = getPinSafeTransfers();
-  if (native) {
-    const taskId = `download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const cancelNative = () => native.cancelTransfer(taskId);
-    signal.addEventListener('abort', cancelNative);
-    try {
-      return await native.downloadFile(taskId, url, fileUri, headers);
-    } catch (error) {
-      throw nativeTransferError(error);
-    } finally {
-      signal.removeEventListener('abort', cancelNative);
-    }
-  }
+  const pinSafe = pinSafeFileDownloader();
+  if (pinSafe) return pinSafe(url, fileUri, headers, signal);
   // iOS defaults to a background URLSession, which is scheduled by the system and retries
   // unreachable hosts instead of failing, so short player requests stay in the foreground.
   const task = FileSystem.createDownloadResumable(url, fileUri, {

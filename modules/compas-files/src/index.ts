@@ -111,3 +111,13 @@ export function getPinSafeTransfers(): Pick<CompasFilesNativeModule, 'uploadFile
   const module = getNativeModule();
   return module && typeof module.uploadFile === 'function' ? module : null;
 }
+
+type PinSafeDownloads = Pick<CompasFilesNativeModule, 'downloadFile'> & {
+  cancelTransfer(taskId: string): void | Promise<void>;
+};
+
+/** The native redirect-rejecting downloader; Android only, other platforms keep the base64 path. */
+export function getPinSafeDownloads(): PinSafeDownloads | null {
+  const android = getPinSafeTransfers();
+  return typeof android?.downloadFile === 'function' ? android : null;
+}

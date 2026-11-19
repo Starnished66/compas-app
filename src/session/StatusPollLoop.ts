@@ -8,6 +8,20 @@ interface PollGeneration {
 
 export class StatusPollLoop {
   private generation: PollGeneration = { inFlight: false };
+  private idleWaiters: Array<() => void> = [];
+
+  /** Resolves once no status read is in flight, so a queued read cannot run before its route is applied. */
+  whenIdle(): Promise<void> {
+    if (!this.generation.inFlight) return Promise.resolve();
+    return new Promise((resolve) => this.idleWaiters.push(resolve));
+  }
+
+  private wakeIdleWaiters(): void {
+    if (this.generation.inFlight) return;
+    const waiters = this.idleWaiters;
+    this.idleWaiters = [];
+    waiters.forEach((resolve) => resolve());
+  }
 
   request(poll: Poll, delayMs: number): void {
     const generation = this.generation;
@@ -31,6 +45,7 @@ export class StatusPollLoop {
   stop(): void {
     clearTimeout(this.generation.timer);
     this.generation = { inFlight: false };
+    this.wakeIdleWaiters();
   }
 
   private async run(generation: PollGeneration, poll: Poll): Promise<void> {
@@ -46,6 +61,7 @@ export class StatusPollLoop {
         generation.pending = undefined;
         if (pending) this.request(pending.poll, Math.max(0, pending.dueAt - Date.now()));
         else if (nextDelay !== undefined) this.request(poll, nextDelay);
+        this.wakeIdleWaiters();
       }
     }
   }

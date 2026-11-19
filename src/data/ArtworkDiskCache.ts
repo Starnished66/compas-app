@@ -156,7 +156,9 @@ export class ArtworkDiskCache {
       if (!ownsWrite() || !written) return null;
       if (size === undefined) {
         const info = await FileSystem.getInfoAsync(temporary);
-        size = info.exists ? info.size || 0 : 0;
+        if (!ownsWrite()) return null;
+        if (!info.exists || info.isDirectory || !info.size) throw new Error('Artwork download file is missing or empty');
+        size = info.size;
       }
       if (!ownsWrite()) return null;
       await FileSystem.moveAsync({ from: temporary, to: target });

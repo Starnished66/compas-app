@@ -159,6 +159,7 @@ export class RemoteApi {
   private transport: HttpTransport;
   private pin: string | null;
   private prefix = '/api/v1';
+  private lastCatalogRevision: string | null = null;
 
   constructor(transport: HttpTransport, pin?: string | null) {
     if (pin != null && !/^[0-9]{4,12}$/.test(pin)) {
@@ -300,7 +301,7 @@ export class RemoteApi {
   async status(): Promise<PlaybackStatus> {
     const json = await this.jsonGet(`${this.prefix}/status`);
     const dacMode = parseDacMode(json.dac_mode, json.bluetooth_dac_mode);
-    return {
+    const status: PlaybackStatus = {
       dacMode,
       playing: jsonBoolean(json.playing),
       paused: jsonBoolean(json.paused),
@@ -328,18 +329,13 @@ export class RemoteApi {
         ? { id: json.collection_job.id, state: json.collection_job.state, error: typeof json.collection_job.error === 'string' ? json.collection_job.error : null }
         : null,
     };
+    this.lastCatalogRevision = typeof json.catalog_revision === 'string' && json.catalog_revision.trim()
+      ? json.catalog_revision : null;
+    return status;
   }
 
   async art(index?: number | null): Promise<ArtImage | null> {
-    if (index != null) assertIntegerArgument(index, 'Index', 0);
-    const params: [string, string][] = index != null ? [['index', index.toString()]] : [];
-    const response = await this.send('GET', `${this.prefix}/art`, params);
-    if (response.statusCode === 404) return null;
-    this.ensureSuccess(response);
-    return {
-      contentType: response.header('content-type'),
-      base64: response.bodyBase64 ?? bytesToBase64(response.body),
-    };
+    return this.readArt(`${this.prefix}/art`, this.artParams(index));
   }
 
   get commandGeneration(): number {
@@ -350,9 +346,27 @@ export class RemoteApi {
     return isFileDownloadTransport(this.transport);
   }
 
-  async downloadArt(fileUri: string): Promise<boolean> {
+  get canDownloadLibraryArt(): boolean {
+    return isFileDownloadTransport(this.transport) && this.transport.downloadRejectsRedirects === true;
+  }
+
+  get catalogRevision(): string | null {
+    return this.lastCatalogRevision;
+  }
+
+  async downloadArt(fileUri: string, index?: number | null): Promise<boolean> {
+    return this.downloadArtRequest(fileUri, `${this.prefix}/art`, this.artParams(index));
+  }
+
+  private artParams(index?: number | null): [string, string][] {
+    if (index == null) return [];
+    assertIntegerArgument(index, 'Index', 0);
+    return [['index', index.toString()]];
+  }
+
+  private async downloadArtRequest(fileUri: string, path: string, params: [string, string][]): Promise<boolean> {
     if (!isFileDownloadTransport(this.transport)) throw new Error('Transport cannot download files');
-    const response = await this.transport.download(this.request('GET', `${this.prefix}/art`), fileUri);
+    const response = await this.transport.download(this.request('GET', path, params), fileUri);
     if (response.statusCode === 404) return false;
     this.ensureSuccess(response);
     return true;
@@ -539,7 +553,8 @@ export class RemoteApi {
     offset: number = 0,
     limit: number = 50,
     query?: string | null,
-    filter: LibraryFilter = {}
+    filter: LibraryFilter = {},
+    signal?: AbortSignal,
   ): Promise<LibraryPage> {
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
       throw new Error('Invalid library offset or limit');
@@ -557,7 +572,7 @@ export class RemoteApi {
     if (filter.album != null) params.push(['album', filter.album]);
     if (filter.genre != null) params.push(['genre', filter.genre]);
 
-    const json = await this.jsonGet(`${this.prefix}/library`, params);
+    const json = await this.jsonGet(`${this.prefix}/library`, params, signal);
     const songs: Song[] = (Array.isArray(json.songs) ? json.songs : []).map((s: any) => ({
       index: Number(s.index != null ? s.index : -1),
       title: String(s.title || ''),
@@ -689,14 +704,26 @@ export class RemoteApi {
   }
 
   async catalogArt(revision: string, representativeId: number, coverKey: string): Promise<ArtImage | null> {
+    return this.readArt(`${this.prefix}/catalog/art`, this.catalogArtParams(revision, representativeId, coverKey));
+  }
+
+  async downloadCatalogArt(fileUri: string, revision: string, representativeId: number, coverKey: string): Promise<boolean> {
+    return this.downloadArtRequest(fileUri, `${this.prefix}/catalog/art`, this.catalogArtParams(revision, representativeId, coverKey));
+  }
+
+  private catalogArtParams(revision: string, representativeId: number, coverKey: string): [string, string][] {
     if (!revision.trim() || !Number.isSafeInteger(representativeId) || representativeId <= 0 || !coverKey.trim()) {
       throw new Error('Invalid catalog art parameters');
     }
-    const response = await this.send('GET', `${this.prefix}/catalog/art`, [
+    return [
       ['revision', revision],
       ['representative_id', representativeId.toString()],
       ['cover_key', coverKey],
-    ]);
+    ];
+  }
+
+  private async readArt(path: string, params: [string, string][]): Promise<ArtImage | null> {
+    const response = await this.send('GET', path, params);
     if (response.statusCode === 404) return null;
     this.ensureSuccess(response);
     return {
@@ -705,8 +732,8 @@ export class RemoteApi {
     };
   }
 
-  async artists(): Promise<LibraryGroup[]> {
-    return this.groups(`${this.prefix}/library/artists`);
+  async artists(signal?: AbortSignal): Promise<LibraryGroup[]> {
+    return this.groups(`${this.prefix}/library/artists`, [], 'artists', signal);
   }
 
   async librarySorting(): Promise<LibrarySortingSnapshot> {
@@ -763,14 +790,14 @@ export class RemoteApi {
   }
 
   async albumArtists(): Promise<LibraryGroup[]> {
-    return this.groups(`${this.prefix}/library/album_artists`);
+    return this.groups(`${this.prefix}/library/album_artists`, [], 'artists');
   }
 
-  async genres(): Promise<LibraryGroup[]> {
-    return this.groups(`${this.prefix}/library/genres`);
+  async genres(signal?: AbortSignal): Promise<LibraryGroup[]> {
+    return this.groups(`${this.prefix}/library/genres`, [], 'genres', signal);
   }
 
-  async albums(filter: LibraryFilter = {}): Promise<LibraryGroup[]> {
+  async albums(filter: LibraryFilter = {}, signal?: AbortSignal): Promise<LibraryGroup[]> {
     if (filter.artist != null && filter.albumArtist != null) {
       throw new Error('Use artist or albumArtist, not both');
     }
@@ -784,7 +811,7 @@ export class RemoteApi {
     if (filter.artist) params.push(['artist', filter.artist]);
     if (filter.albumArtist) params.push(['album_artist', filter.albumArtist]);
 
-    return this.groups(`${this.prefix}/library/albums`, params);
+    return this.groups(`${this.prefix}/library/albums`, params, 'albums', signal);
   }
 
   async topRatedAlbums(): Promise<LibraryGroup[]> {
@@ -920,10 +947,11 @@ export class RemoteApi {
 
   private async groups(
     path: string,
-    params: [string, string][] = [],
-    key = path.endsWith('/albums') ? 'albums' : path.endsWith('/genres') ? 'genres' : 'artists',
+    params: [string, string][],
+    key: 'albums' | 'genres' | 'artists',
+    signal?: AbortSignal,
   ): Promise<LibraryGroup[]> {
-    const json = await this.jsonGet(path, params);
+    const json = await this.jsonGet(path, params, signal);
     const arr = Array.isArray(json[key]) ? json[key] : [];
     return arr.map((g: any) => ({
       name: String(g.name || ''),
@@ -942,8 +970,9 @@ export class RemoteApi {
     this.ensureSuccess(res);
   }
 
-  private async jsonGet(path: string, params: [string, string][] = []): Promise<any> {
-    const res = await this.send('GET', path, params);
+  private async jsonGet(path: string, params: [string, string][] = [], signal?: AbortSignal): Promise<any> {
+    const request = this.request('GET', path, params);
+    const res = await this.transport.execute(signal ? { ...request, queueSignal: signal } : request);
     this.ensureSuccess(res);
     return JSON.parse(res.text());
   }

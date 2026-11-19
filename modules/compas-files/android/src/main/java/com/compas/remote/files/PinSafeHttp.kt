@@ -5,6 +5,7 @@ import com.facebook.react.modules.network.OkHttpClientProvider
 import expo.modules.kotlin.exception.CodedException
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.Collections
 import java.util.concurrent.TimeUnit
@@ -104,6 +105,34 @@ fun pinSafeClient(base: OkHttpClient.Builder = OkHttpClient.Builder()): OkHttpCl
 /** The original OkHttp message is kept so the app can tell a dropped link from a refusal. */
 class TransferException(message: String) : CodedException("ERR_TRANSFER", message, null)
 class TransferCancelledException : CodedException("ERR_TRANSFER_CANCELLED", "Transfer cancelled", null)
+private class TransferDestinationException(cause: Exception) :
+    CodedException("ERR_TRANSFER_DESTINATION", cause.message ?: "Could not write download", cause)
+
+private inline fun <T> writeDestination(write: () -> T): T {
+    try {
+        return write()
+    } catch (error: IOException) {
+        throw TransferDestinationException(error)
+    } catch (error: SecurityException) {
+        throw TransferDestinationException(error)
+    }
+}
+
+private fun saveDownload(input: InputStream, file: File) {
+    val output = writeDestination { file.outputStream() }
+    try {
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            writeDestination { output.write(buffer, 0, count) }
+        }
+    } catch (error: Throwable) {
+        runCatching { output.close() }
+        throw error
+    }
+    writeDestination { output.close() }
+}
 
 private const val PROGRESS_INTERVAL_MS = 100L
 
@@ -161,7 +190,7 @@ class PinSafeTransfers(private val client: OkHttpClient = pinSafeClient()) {
         start(taskId, request, { response ->
             val responseHeaders = response.headers.toMultimap().mapValues { it.value.firstOrNull() ?: "" }
             if (response.isSuccessful) {
-                response.body?.byteStream()?.use { input -> file.outputStream().use { input.copyTo(it) } }
+                response.body?.byteStream()?.use { input -> saveDownload(input, file) }
                 Triple(response.code, responseHeaders, "")
             } else {
                 Triple(response.code, responseHeaders, response.body?.string() ?: "")
@@ -184,8 +213,10 @@ class PinSafeTransfers(private val client: OkHttpClient = pinSafeClient()) {
                 val result = try {
                     Result.success(response.use(read))
                 } catch (e: Throwable) {
-                    // Anything else (for example a SecurityException on the file) must not crash OkHttp's thread or leave the promise pending.
-                    Result.failure(if (call.isCanceled()) TransferCancelledException() else TransferException(e.message ?: "Transfer failed"))
+                    Result.failure(
+                        if (call.isCanceled()) TransferCancelledException()
+                        else e as? TransferDestinationException ?: TransferException(e.message ?: "Transfer failed")
+                    )
                 }
                 finish(taskId)
                 done(result)

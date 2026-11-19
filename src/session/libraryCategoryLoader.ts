@@ -18,26 +18,78 @@ export interface CategoryLoadContext {
   entries: LibraryEntryFactory;
   features: ReadonlySet<string>;
   librarySorting?: LibrarySortingSnapshot | null;
+  searchReads?: SearchReads;
+  searchSignal?: AbortSignal;
+}
+
+interface SearchGroupSnapshot {
+  api: RemoteApi;
+  revision: string | null;
+  controller?: AbortController;
+  groups: Promise<LibraryGroup[][]>;
+}
+
+export class SearchReads {
+  private snapshot?: SearchGroupSnapshot;
+  private songs?: AbortController;
+
+  groups(api: RemoteApi): SearchGroupSnapshot {
+    const revision = api.catalogRevision ?? null;
+    if (this.snapshot?.api === api && this.snapshot.revision === revision) return this.snapshot;
+    this.invalidateGroups();
+    const controller = new AbortController();
+    const { signal } = controller;
+    const groups = Promise.all(SEARCH_GROUPS.map((group) => group.fetch(api, signal))).then((result) => {
+      if (this.snapshot?.controller === controller) this.snapshot.controller = undefined;
+      return result;
+    }, (error) => {
+      if (this.snapshot?.controller === controller) this.invalidateGroups();
+      throw error;
+    });
+    return this.snapshot = { api, revision, controller, groups };
+  }
+
+  songSignal(): AbortSignal {
+    return (this.songs ??= new AbortController()).signal;
+  }
+
+  cancelSongs(): void {
+    this.songs?.abort();
+    this.songs = undefined;
+  }
+
+  invalidateGroups(): void {
+    this.snapshot?.controller?.abort();
+    this.snapshot = undefined;
+  }
+
+  reset(keepVerified = false): void {
+    this.cancelSongs();
+    if (!keepVerified || this.snapshot?.controller || !this.snapshot?.revision) this.invalidateGroups();
+  }
 }
 
 interface GroupCategory {
   catalogKind: CatalogGroupKind;
   entryKind: GroupKind | 'album';
-  fetch(api: RemoteApi): Promise<LibraryGroup[]>;
+  fetch(api: RemoteApi, signal?: AbortSignal): Promise<LibraryGroup[]>;
   noun: string;
 }
 
 const GROUP_CATEGORIES: Partial<Record<LibraryCategory, GroupCategory>> = {
-  [LibraryCategory.Albums]: { catalogKind: CatalogGroupKind.Album, entryKind: 'album', fetch: (api) => api.albums(), noun: 'albums' },
-  [LibraryCategory.Artists]: { catalogKind: CatalogGroupKind.Artist, entryKind: 'artist', fetch: (api) => api.artists(), noun: 'artists' },
+  [LibraryCategory.Albums]: { catalogKind: CatalogGroupKind.Album, entryKind: 'album', fetch: (api, signal) => signal ? api.albums({}, signal) : api.albums(), noun: 'albums' },
+  [LibraryCategory.Artists]: { catalogKind: CatalogGroupKind.Artist, entryKind: 'artist', fetch: (api, signal) => api.artists(signal), noun: 'artists' },
   [LibraryCategory.AlbumArtists]: {
     catalogKind: CatalogGroupKind.AlbumArtist,
     entryKind: 'albumArtist',
     fetch: (api) => api.albumArtists(),
     noun: 'album artists',
   },
-  [LibraryCategory.Genres]: { catalogKind: CatalogGroupKind.Genre, entryKind: 'genre', fetch: (api) => api.genres(), noun: 'genres' },
+  [LibraryCategory.Genres]: { catalogKind: CatalogGroupKind.Genre, entryKind: 'genre', fetch: (api, signal) => api.genres(signal), noun: 'genres' },
 };
+
+const SEARCH_GROUPS = [LibraryCategory.Artists, LibraryCategory.Albums, LibraryCategory.Genres]
+  .map((category) => GROUP_CATEGORIES[category]!);
 
 export function songFromCatalog(song: CatalogSong): Song {
   return {
@@ -92,35 +144,56 @@ function list(entries: LibraryEntry[], total: number, label: string, extensionPa
 }
 
 async function songsPage(context: CategoryLoadContext, offset: number, query: string | null) {
-  const { catalog, store, api } = context;
-  if (!catalog) return api.library(offset, LIBRARY_PAGE_SIZE, query);
+  const { catalog, store, api, searchSignal } = context;
+  if (!catalog) return searchSignal
+    ? api.library(offset, LIBRARY_PAGE_SIZE, query, {}, searchSignal)
+    : api.library(offset, LIBRARY_PAGE_SIZE, query);
   const page = await store.songPage(catalog.libraryId, catalog.revision, offset, LIBRARY_PAGE_SIZE, query);
   return { total: page.total, songs: page.songs.map(songFromCatalog) };
 }
 
 async function groupList(context: CategoryLoadContext, group: GroupCategory, query: string | null): Promise<LibraryGroup[]> {
   const { catalog, store, api } = context;
-  if (!catalog) {
-    const groups = await group.fetch(api);
-    if (!query) return groups;
-    const term = query.toLocaleLowerCase();
-    return groups.filter((item) => item.name.toLocaleLowerCase().includes(term));
-  }
+  if (!catalog) return filterGroups(await group.fetch(api), query);
   const stored = await store.groups(catalog.libraryId, catalog.revision, group.catalogKind, query);
   return stored.map(libraryGroupFromCatalog);
+}
+
+function filterGroups(groups: LibraryGroup[], query: string | null): LibraryGroup[] {
+  if (!query) return groups;
+  const term = query.toLocaleLowerCase();
+  return groups.filter((item) => item.name.toLocaleLowerCase().includes(term));
 }
 
 function groupEntries(context: CategoryLoadContext, group: GroupCategory, groups: LibraryGroup[]): LibraryEntry[] {
   return group.entryKind === 'album' ? context.entries.albums(groups, null) : context.entries.groups(groups, group.entryKind);
 }
 
+async function searchPages(context: CategoryLoadContext, term: string) {
+  const { api, catalog, searchReads, searchSignal } = context;
+  if (catalog || !searchReads) {
+    return Promise.all([
+      Promise.all(SEARCH_GROUPS.map((group) => groupList(context, group, term))),
+      songsPage(context, 0, term),
+    ]);
+  }
+  while (!searchSignal?.aborted) {
+    const { groups, revision } = searchReads.groups(api);
+    try {
+      const [allGroups, songs] = await Promise.all([groups, songsPage(context, 0, term)]);
+      if (searchSignal?.aborted) break;
+      if (revision === (api.catalogRevision ?? null)) {
+        return [allGroups.map((group) => filterGroups(group, term)), songs] as const;
+      }
+    } catch (error) {
+      if (searchSignal?.aborted || revision === (api.catalogRevision ?? null)) throw error;
+    }
+  }
+  throw new Error('Request cancelled');
+}
+
 async function searchList(context: CategoryLoadContext, term: string): Promise<LibraryList> {
-  const [artists, albums, genres, songs] = await Promise.all([
-    groupList(context, GROUP_CATEGORIES[LibraryCategory.Artists]!, term),
-    groupList(context, GROUP_CATEGORIES[LibraryCategory.Albums]!, term),
-    groupList(context, GROUP_CATEGORIES[LibraryCategory.Genres]!, term),
-    songsPage(context, 0, term),
-  ]);
+  const [[artists, albums, genres], songs] = await searchPages(context, term);
   const factory = context.entries;
   const songEntries = factory.songs(songs.songs, {}, context.catalog?.revision ?? null);
   const entries = [
