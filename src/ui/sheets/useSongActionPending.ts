@@ -5,7 +5,7 @@ export type PendingSongAction =
   | { kind: 'queue'; title: string }
   | { kind: 'playlist'; title: string; key: string; playlistName: string }
   | { kind: 'create'; title: string; playlistName: string }
-  | { kind: 'favorite'; title: string; favorite: boolean; entryId: string | null }
+  | { kind: 'rating'; title: string; rating: number; previous: number; stars: boolean; entryId: string | null }
   | { kind: 'remove'; title: string; playlistName: string }
   | { kind: 'move'; title: string; direction: -1 | 1 };
 
@@ -56,16 +56,16 @@ export function useSongActionPending(
 
   useEffect(() => {
     if (!pending || state.songActionsVisible) return;
-    if (pending.action.kind !== 'favorite' && connected) onConfirmedRef.current(pending.action);
+    if (pending.action.kind !== 'rating' && connected) onConfirmedRef.current(pending.action);
     clear();
   }, [clear, connected, pending, state.songActionsVisible]);
 
   useEffect(() => {
-    if (pending?.action.kind !== 'favorite' || state.songActionFavorite !== pending.action.favorite) return;
+    if (pending?.action.kind !== 'rating' || state.songActionRating !== pending.action.rating) return;
     onConfirmedRef.current(pending.action);
     clear();
     onAction({ type: 'CloseSongActions' });
-  }, [clear, onAction, pending, state.songActionFavorite]);
+  }, [clear, onAction, pending, state.songActionRating]);
 
   useEffect(() => {
     if (!pending) return;

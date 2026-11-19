@@ -7,6 +7,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Divider } from '../components/Divider';
 import { InlineError } from '../components/InlineError';
+import { StarRating } from '../components/StarRating';
 import { SheetActionRow } from '../components/SheetActionRow';
 import { usePalette } from '../PaletteProvider';
 import { playlistDisplayName } from '../playlistName';
@@ -61,9 +62,9 @@ function showsFavorites(state: RemoteUiState): boolean {
   return state.screen.type === 'Library' && state.screen.category === LibraryCategory.Favorites;
 }
 
-function setFavoriteFor(onAction: (action: RemoteAction) => void, entryId: string, favorite: boolean) {
+function setRatingFor(onAction: (action: RemoteAction) => void, entryId: string, rating: number) {
   onAction({ type: 'OpenSongActions', id: entryId });
-  onAction({ type: 'SetSongFavorite', favorite });
+  onAction({ type: 'SetSongRating', rating });
   onAction({ type: 'CloseSongActions' });
 }
 
@@ -105,17 +106,19 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
             ...view({ name: action.playlistName }),
           });
           return;
-        case 'favorite': {
+        case 'rating': {
           const entryId = action.entryId;
           const undoable = entryId != null && !showsFavorites(latest);
           snackbar.show({
-            text: action.favorite ? t('Added to favorites') : t('Removed from favorites'),
+            text: action.stars
+              ? (action.rating ? t('Rating saved') : t('Rating cleared'))
+              : action.rating ? t('Added to favorites') : t('Removed from favorites'),
             ...(undoable
               ? {
                   actionLabel: t('Undo'),
                   onAction: () => {
                     if (stateRef.current.libraryEntries.some((entry) => entry.id === entryId)) {
-                      setFavoriteFor(onAction, entryId, !action.favorite);
+                      setRatingFor(onAction, entryId, action.previous);
                     }
                   },
                 }
@@ -156,7 +159,8 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
   const uniqueEntryId = matches.length === 1 ? matches[0].id : null;
   const title = state.songActionTitle;
   const features = state.supportedFeatures;
-  const canFavorite = state.songActionFavorite != null && features.includes('favorites_edit');
+  const stars = features.includes('ratings_edit');
+  const rating = state.songActionRating;
   const playlist = state.activePlaylist;
   const canEditPlaylistTrack = Boolean(
     playlist?.writable && state.playlistRevision && state.songActionPosition != null && features.includes('playlist_edit'),
@@ -190,9 +194,9 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
     run({ kind: 'create', title, playlistName: name.trim() }, { type: 'CreatePlaylistWithSong', name });
   };
 
-  const toggleFavorite = () => {
-    const favorite = !state.songActionFavorite;
-    run({ kind: 'favorite', title, favorite, entryId: uniqueEntryId }, { type: 'SetSongFavorite', favorite });
+  const setRating = (next: number) => {
+    if (rating == null) return;
+    run({ kind: 'rating', title, rating: next, previous: rating, stars, entryId: uniqueEntryId }, { type: 'SetSongRating', rating: next });
   };
 
   const movePlaylistTrack = (direction: -1 | 1) =>
@@ -225,14 +229,16 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
         busy={pending?.kind === 'queue'}
         onPress={() => run({ kind: 'queue', title }, { type: 'AddSongToQueue' })}
       />
-      {canFavorite ? (
+      {rating != null && stars ? (
+        <StarRating rating={rating} onChange={setRating} disabled={busy} busy={pending?.kind === 'rating'} style={styles.rating} />
+      ) : rating != null && features.includes('favorites_edit') ? (
         <SheetActionRow
           icon="heart"
-          iconFilled={Boolean(state.songActionFavorite)}
-          iconColor={state.songActionFavorite ? palette.accent : undefined}
-          label={t(state.songActionFavorite ? 'Remove from favorites' : 'Add to favorites')}
-          busy={pending?.kind === 'favorite'}
-          onPress={toggleFavorite}
+          iconFilled={rating > 0}
+          iconColor={rating ? palette.accent : undefined}
+          label={t(rating ? 'Remove from favorites' : 'Add to favorites')}
+          busy={pending?.kind === 'rating'}
+          onPress={() => setRating(rating ? 0 : 5)}
         />
       ) : null}
       <SheetActionRow icon="playlistAdd" label={t('Add to playlist…')} onPress={openPlaylistStep} />
@@ -331,6 +337,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  rating: { alignSelf: 'center' },
   error: {
     paddingHorizontal: Space.lg,
     paddingTop: Space.md,

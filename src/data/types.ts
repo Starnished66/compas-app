@@ -80,6 +80,7 @@ export interface PlaybackStatus {
   sourceSampleRateHz?: number;
   bluetoothAudioOutput?: boolean | null;
   favorite?: boolean | null;
+  rating?: number | null;
   accentColor?: string | null;
   deviceModel?: string | null;
   playerVersion?: string | null;
@@ -143,6 +144,7 @@ export interface LibraryPage {
 }
 
 export interface LibraryGroup {
+  stars?: number;
   name: string;
   count: number;
   index: number;
@@ -281,6 +283,7 @@ export interface RemoteTrack {
 }
 
 export interface LibraryEntry {
+  stars?: number;
   id: string;
   title: string;
   subtitle: string;
@@ -334,7 +337,8 @@ export interface RemoteUiState {
   catalogArtworkRefreshGeneration: number;
   volume: number;
   playbackMode: PlaybackMode;
-  currentFavorite: boolean;
+  currentRating: number;
+  pendingCurrentRating?: { track: RemoteTrack; rating: number };
   supportedFeatures: string[];
   playerAccentColor?: string | null;
   deviceModel?: string | null;
@@ -359,7 +363,7 @@ export interface RemoteUiState {
   songActionTitle: string;
   playlistOptions: Playlist[];
   playlistOptionsStatus: ContentStatus;
-  songActionFavorite: boolean | null;
+  songActionRating: number | null;
   songActionPosition: number | null;
   playlistTrackCount: number;
   activePlaylist?: Playlist | null;
@@ -381,6 +385,13 @@ export interface BulkActionProgress {
   phase: 'resolving' | 'writing' | 'done' | 'cancelled' | 'error';
   message?: string | null;
   messageValues?: Record<string, string | number>;
+}
+
+export type RatingWriteResult = { rating: number } | { error: string };
+
+interface CurrentRatingEdit {
+  expectedTrack?: RemoteTrack;
+  onSettled?: (result: RatingWriteResult) => void;
 }
 
 export type RemoteAction =
@@ -437,8 +448,9 @@ export type RemoteAction =
   | { type: 'ClearQueue' }
   | { type: 'MoveQueueTrack'; id: string; direction: -1 | 1 }
   | { type: 'PlayQueueTrack'; id: string }
-  | { type: 'SetCurrentFavorite'; favorite: boolean }
-  | { type: 'SetSongFavorite'; favorite: boolean }
+  | ({ type: 'SetCurrentFavorite'; favorite: boolean } & CurrentRatingEdit)
+  | ({ type: 'SetCurrentRating'; rating: number } & CurrentRatingEdit)
+  | { type: 'SetSongRating'; rating: number }
   | { type: 'CreateEmptyPlaylist'; name: string }
   | { type: 'RenamePlaylist'; key: string; name: string }
   | { type: 'DeletePlaylist'; key: string }

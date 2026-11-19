@@ -2,6 +2,13 @@ import type { TranslationValue } from '../catalogs';
 
 // Machine-assisted translation, reviewed for audio terminology and interpolation.
 export const pt_BR: Record<string, TranslationValue> = {
+  "Add to {name}": "Adicionar a {name}",
+  "{count} stars": { one: "{count} estrela", many: "{count} estrelas", other: "{count} estrelas" },
+  "Clear rating": "Limpar avaliação",
+  "Saving rating\u2026": "Salvando avaliação…",
+  "Rating saved": "Avaliação salva",
+  "Rating cleared": "Avaliação removida",
+  "Could not update rating": "Não foi possível atualizar a avaliação",
   "No songs rated 3 stars or higher yet": "Ainda não há músicas com 3 estrelas ou mais",
   "Top rated": "Mais bem avaliadas",
   "Top rated albums": "Álbuns mais bem avaliados",

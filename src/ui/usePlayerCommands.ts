@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ConnectionTransport, PlaybackMode, RemoteAction, RemoteUiState } from '../data/types';
+import { ConnectionTransport, PlaybackMode, RatingWriteResult, RemoteAction, RemoteUiState } from '../data/types';
 import { PlaybackPosition } from '../session/PlaybackPositionStore';
 import { formatPlaybackTime } from './playbackTime';
 import { recordSkip } from './skipDirection';
 import { useOptimisticErrorSnackbar } from './sheets/useOptimisticErrorSnackbar';
-import { trackKey } from './trackKey';
+import { sameSong, trackKey } from './trackKey';
 import { usePlaybackPositionStore } from './usePlaybackPosition';
 import { isShuffleMode, toggleRepeatMode } from '../session/playbackModes';
 import { useI18n } from '../i18n';
 import { dacControlsDisabled } from '../data/dacMode';
+import { localizedMessage } from './localizedLabels';
+import { useSnackbar } from './snackbar/useSnackbar';
 
 export interface PlayerCommands {
   disabled: boolean;
@@ -21,7 +23,8 @@ export interface PlayerCommands {
   setVolume(volume: number): void;
   toggleShuffle(): void;
   cycleRepeat(): void;
-  setFavorite(favorite: boolean): void;
+  displayedRating: number;
+  setRating(rating: number): void;
 }
 
 interface PendingCommand {
@@ -42,19 +45,21 @@ function repeatLabel(mode: PlaybackMode): string {
   return 'Repeat off…';
 }
 
+function displayedRating(state: RemoteUiState): number {
+  const edit = state.pendingCurrentRating;
+  return edit && sameSong(edit.track, state.currentTrack) ? edit.rating : state.currentRating;
+}
+
 export function usePlayerCommands(state: RemoteUiState, onAction: (action: RemoteAction) => void): PlayerCommands {
   const { t } = useI18n();
   const positionStore = usePlaybackPositionStore();
-  // Commands are fire-and-forget in the session; a failure lands in connectionMessage, which the
-  // session snackbars skip whenever a screen shows it inline (hidden under Now Playing), so the
-  // control that sent the command reports it here.
-  const watchResult = useOptimisticErrorSnackbar(state.connectionMessage, state.currentFavorite);
+  const snackbar = useSnackbar();
+  const watchResult = useOptimisticErrorSnackbar(state.connectionMessage);
   const [pending, setPending] = useState<PendingCommand | null>(null);
   const counter = useRef(0);
-  const latest = useRef({ state, onAction, watchResult, positionStore, t });
-  latest.current = { state, onAction, watchResult, positionStore, t };
+  const latest = useRef({ state, onAction, watchResult, positionStore, t, snackbar });
+  latest.current = { state, onAction, watchResult, positionStore, t, snackbar };
   const feedbackMs = state.connectionTransport === ConnectionTransport.Bluetooth ? BLUETOOTH_FEEDBACK_MS : WIFI_FEEDBACK_MS;
-
   useEffect(() => {
     const settled = pending?.settled;
     if (!settled) return;
@@ -74,10 +79,13 @@ export function usePlayerCommands(state: RemoteUiState, onAction: (action: Remot
   }, [feedbackMs, pending]);
 
   const commands = useMemo(() => {
+    const begin = (label: string, options: Omit<PendingCommand, 'id' | 'label'>) => {
+      setPending({ id: ++counter.current, label: latest.current.t(label), ...options });
+    };
+
     const run = (action: RemoteAction, label: string, options: Omit<PendingCommand, 'id' | 'label'> = { skipping: false }) => {
       if (dacControlsDisabled(latest.current.state.dacMode)) return;
-      counter.current += 1;
-      setPending({ id: counter.current, label: latest.current.t(label), ...options });
+      begin(label, options);
       latest.current.watchResult();
       latest.current.onAction(action);
     };
@@ -117,23 +125,38 @@ export function usePlayerCommands(state: RemoteUiState, onAction: (action: Remot
         const label = latest.current.t(repeatLabel(target));
         run({ type: 'CycleRepeatMode' }, isShuffleMode(mode) && !supportsShuffleModes ? `${latest.current.t('Shuffle off')} · ${label}` : label);
       },
-      setFavorite: (favorite: boolean) => {
-        run({ type: 'SetCurrentFavorite', favorite }, favorite ? 'Adding to favorites…' : 'Removing from favorites…', {
-          skipping: false,
-          settled: (current) => current.currentFavorite === favorite,
+      setRating: (rating: number) => {
+        const { state: before, t: translate, onAction: dispatch, snackbar: feedback } = latest.current;
+        if (dacControlsDisabled(before.dacMode)) return;
+        const expectedTrack = before.currentTrack;
+        if (!expectedTrack) return;
+        const stars = before.supportedFeatures.includes('ratings_edit');
+        begin(stars ? 'Saving rating…' : rating ? 'Adding to favorites…' : 'Removing from favorites…', {
+          skipping: false, settled: (current) =>
+            !sameSong(current.pendingCurrentRating?.track, expectedTrack) || !sameSong(current.currentTrack, expectedTrack),
         });
-        // Announced once the player reports the new favorite state, never ahead of a failure.
-        latest.current.watchResult({
-          message: {
-            text: favorite ? latest.current.t('Added to favorites') : latest.current.t('Removed from favorites'),
-            actionLabel: latest.current.t('Undo'),
-            onAction: () => latest.current.onAction({ type: 'SetCurrentFavorite', favorite: !favorite }),
-          },
-          confirmed: (current) => current === favorite,
-        });
+        const previous = displayedRating(before);
+        const undo: RemoteAction = stars ? { type: 'SetCurrentRating', rating: previous }
+          : { type: 'SetCurrentFavorite', favorite: rating === 0 };
+        const onSettled = (result: RatingWriteResult) => feedback.show('error' in result
+          ? { text: localizedMessage(result.error, translate) }
+          : {
+              text: translate(stars ? (result.rating ? 'Rating saved' : 'Rating cleared')
+                : (result.rating ? 'Added to favorites' : 'Removed from favorites')),
+              actionLabel: translate('Undo'),
+              onAction: () => latest.current.onAction(undo),
+            });
+        dispatch(stars ? { type: 'SetCurrentRating', rating, expectedTrack, onSettled }
+          : { type: 'SetCurrentFavorite', favorite: rating > 0, expectedTrack, onSettled });
       },
     };
   }, []);
 
-  return { ...commands, disabled: dacControlsDisabled(state.dacMode), pendingLabel: pending?.label ?? null, skipping: Boolean(pending?.skipping) };
+  return {
+    ...commands,
+    displayedRating: displayedRating(state),
+    disabled: dacControlsDisabled(state.dacMode),
+    pendingLabel: pending?.label ?? null,
+    skipping: Boolean(pending?.skipping),
+  };
 }

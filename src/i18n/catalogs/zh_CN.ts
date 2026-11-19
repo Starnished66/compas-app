@@ -2,6 +2,13 @@ import type { TranslationValue } from '../catalogs';
 
 // Machine-assisted translation, reviewed for audio terminology and interpolation.
 export const zh_CN: Record<string, TranslationValue> = {
+  "Add to {name}": "添加到{name}",
+  "{count} stars": "{count} 星",
+  "Clear rating": "清除评分",
+  "Saving rating\u2026": "正在保存评分…",
+  "Rating saved": "评分已保存",
+  "Rating cleared": "评分已清除",
+  "Could not update rating": "无法更新评分",
   "No songs rated 3 stars or higher yet": "暂无获得 3 星或更高评分的歌曲",
   "Top rated": "高分歌曲",
   "Top rated albums": "高分专辑",

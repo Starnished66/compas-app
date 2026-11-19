@@ -42,6 +42,7 @@ import { useTrackChangeMotion } from '../useTrackChangeMotion';
 import { useScreenInsets } from '../useScreenInsets';
 import { insetBeyond } from '../insetBeyond';
 import { useI18n } from '../../i18n';
+import { StarRating } from '../components/StarRating';
 import { useDisplayTrack } from '../useDisplayTrack';
 import {
   shouldCommitNowPlayingGestureClose,
@@ -271,6 +272,7 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
 
   const artSize = Math.max(0, Math.min(artArea.width, artArea.height - ART_TOP_PADDING));
   const subtitle = shown ? [shown.artist || t('Unknown artist'), shown.album].filter(Boolean).join(' · ') : '';
+  const canRate = state.supportedFeatures.includes('ratings_edit');
   const canFavorite = state.supportedFeatures.includes('favorites_edit');
 
   const onArtAreaLayout = (event: LayoutChangeEvent) => {
@@ -342,15 +344,19 @@ export function NowPlayingScreen({ state, onAction, visible, onClose }: NowPlayi
                     ) : null}
                   </RNAnimated.View>
                 </RNAnimated.View>
-                {canFavorite && track ? (
+                {!canRate && canFavorite && track ? (
                   <FavoriteButton
-                    favorite={state.currentFavorite}
-                    onChange={commands.setFavorite}
+                    rating={commands.displayedRating}
+                    onChange={commands.setRating}
                     disabled={commands.disabled}
                     style={FAVORITE_PULL}
                   />
                 ) : null}
               </View>
+              {canRate && track?.title ? (
+                <StarRating rating={commands.displayedRating} onChange={commands.setRating}
+                  disabled={commands.disabled} style={styles.rating} />
+              ) : null}
               <AudioFormatBadges track={track} variant="line" onPress={() => setFormatVisible(true)} />
               <SeekBar
                 playing={visible && state.isPlaying}
@@ -437,6 +443,7 @@ const styles = StyleSheet.create({
   info: {
     gap: Space.md,
   },
+  rating: { alignSelf: 'flex-end' },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

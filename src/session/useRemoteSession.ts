@@ -32,7 +32,7 @@ import {
 } from '../data/types';
 import { RemoteEndpoint } from '../data/RemoteEndpoint';
 import { RemoteApi } from '../data/RemoteApi';
-import { SerializedHttpTransport } from '../data/HttpTransport';
+import { RequestCancelledError, SerializedHttpTransport } from '../data/HttpTransport';
 import { createWifiTransport } from '../data/wifiTransport';
 import { PIN_NOT_SAVED_MESSAGE, SecurePinStore } from '../data/SecurePinStore';
 import { ArtworkDiskCache } from '../data/ArtworkDiskCache';
@@ -87,6 +87,8 @@ import { isServerOrderedAlbumSort, requestLibrarySortChange } from './librarySor
 import {
   orderedAlbumList, pageRevision, readChangedRatingAlbums, readMoreOrderedAlbums, readOrderedAlbumPage,
 } from './orderedAlbumPaging';
+import { sameSong } from '../ui/trackKey';
+import { RATING_TIMEOUT_ERROR, ratingFromStatus, readSongRating, useCurrentRatingEdit } from './trackRating';
 import { playlistNameIssue } from '../ui/playlistName';
 import { withPolledPlayback } from './polledPlayback';
 import { useMediaSessionSync } from './useMediaSessionSync';
@@ -219,7 +221,7 @@ export function useRemoteSession() {
     isPlaying: false,
     volume: 0.68,
     playbackMode: PlaybackMode.RepeatAll,
-    currentFavorite: false,
+    currentRating: 0,
     supportedFeatures: [],
     queue: [],
     queueTotal: 0,
@@ -238,7 +240,7 @@ export function useRemoteSession() {
     songActionTitle: '',
     playlistOptions: [],
     playlistOptionsStatus: ContentStatus.Ready,
-    songActionFavorite: null,
+    songActionRating: null,
     songActionPosition: null,
     playlistTrackCount: 0,
     activePlaylist: null,
@@ -312,6 +314,8 @@ export function useRemoteSession() {
   const bulkActionCancelledRef = useRef(false);
 
   const connectionAttemptRef = useRef<number>(0);
+  // Counts established player sessions; a same-player Wi-Fi handoff keeps the number.
+  const playerSessionRef = useRef(0);
   const catalogSyncGenerationRef = useRef<number>(0);
   const librarySortingRef = useRef<LibrarySortingSnapshot | null>(null);
   const sortingEpochRef = useRef(0);
@@ -475,6 +479,7 @@ export function useRemoteSession() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      currentRatingEdit.cancel();
       stopPolling();
       apiRef.current = null;
       connectionAttemptRef.current++;
@@ -872,6 +877,7 @@ export function useRemoteSession() {
   // The previous session can't be resumed once a new attempt replaced its attempt number.
   const dropLiveSession = () => {
     if (!apiRef.current) return;
+    currentRatingEdit.cancel();
     stopSearchReads(false);
     apiRef.current = null;
     stopPolling();
@@ -1012,6 +1018,7 @@ export function useRemoteSession() {
         setState((prev) => ({ ...prev, libraryEntries: [], queue: [], libraryIsNested: false }));
       }
       apiRef.current = api;
+      playerSessionRef.current++;
       featureSetRef.current = new Set(caps.features);
       connectedPlayerKeyRef.current = playerKey;
       lastPlayerKeyRef.current = playerKey;
@@ -1072,7 +1079,8 @@ export function useRemoteSession() {
         dacMode: status.dacMode ?? 'none',
         volume: normalizedVolume(status.volume),
         playbackMode: mode,
-        currentFavorite: !!status.favorite,
+        currentRating: ratingFromStatus(status, caps.features.includes('ratings_edit')),
+        pendingCurrentRating: undefined,
         supportedFeatures: caps.features,
         playerAccentColor: caps.features.includes('player_accent') ? status.accentColor ?? null : null,
         deviceModel: caps.features.includes('device_info') ? status.deviceModel ?? null : null,
@@ -1155,6 +1163,7 @@ export function useRemoteSession() {
   };
 
   const disconnect = () => {
+    currentRatingEdit.cancel();
     stopSearchReads(false);
     autoReconnectGenerationRef.current++;
     bulkActionCancelledRef.current = true;
@@ -1214,7 +1223,8 @@ export function useRemoteSession() {
       playerAccentColor: null,
       deviceModel: null,
       playerVersion: null,
-      currentFavorite: false,
+      currentRating: 0,
+      pendingCurrentRating: undefined,
       queue: [],
       queueLoadingMore: false,
       libraryEntries: [],
@@ -1633,7 +1643,7 @@ export function useRemoteSession() {
           volume: displayedVolume,
           currentTrack,
           playbackMode: mode,
-          currentFavorite: !!status.favorite,
+          currentRating: ratingFromStatus(status, featureSetRef.current.has('ratings_edit')),
         }));
         setState((prev) => prev.dacMode === (status.dacMode ?? 'none')
           ? prev : { ...prev, dacMode: status.dacMode ?? 'none' });
@@ -1688,6 +1698,8 @@ export function useRemoteSession() {
         const playerKey = connectedPlayerKeyRef.current;
         nowPlayingArtwork.invalidatePending();
         stopSearchReads(false);
+        currentRatingEdit.cancel();
+        setState((prev) => prev.pendingCurrentRating ? { ...prev, pendingCurrentRating: undefined } : prev);
         apiRef.current = null;
         connectedPlayerKeyRef.current = null;
         bluetoothAudioOutputRef.current = null;
@@ -1939,6 +1951,7 @@ export function useRemoteSession() {
           sourceSampleRateHz: status.sourceSampleRateHz,
         } : null,
         playbackMode: fromNumeric(status.playMode, featureSetRef.current.has('shuffle_modes')),
+        currentRating: ratingFromStatus(status, caps.features.includes('ratings_edit')),
         supportedFeatures: caps.features,
         playerAccentColor: caps.features.includes('player_accent') ? status.accentColor ?? null : null,
         deviceModel: caps.features.includes('device_info') ? status.deviceModel ?? null : null,
@@ -2728,14 +2741,16 @@ export function useRemoteSession() {
       songActionTitle: target.song.title,
       playlistOptions: [],
       playlistOptionsStatus: ContentStatus.Ready,
-      songActionFavorite: null,
+      songActionRating: null,
       songActionPosition: target.song.position ?? null,
       connectionMessage: null,
     }));
-    if (featureSetRef.current.has('favorites_edit') && target.song.index > 0) {
-      api.favoriteStates([target.song.index]).then((states) => {
+    const index = target.song.index;
+    const ratings = featureSetRef.current.has('ratings_edit');
+    if (index > 0 && (ratings || featureSetRef.current.has('favorites_edit'))) {
+      readSongRating(api, index, ratings).then((rating) => {
         if (api === apiRef.current && songActionEntryIdRef.current === id) {
-          setState((prev) => ({ ...prev, songActionFavorite: states.get(target.song.index) ?? false }));
+          setState((prev) => ({ ...prev, songActionRating: rating }));
         }
       }).catch(() => {});
     }
@@ -3054,36 +3069,49 @@ export function useRemoteSession() {
     }
   };
 
-  const setCurrentFavorite = async (favorite: boolean) => {
+  // A verified Wi-Fi handoff keeps the same player session even though its API and address change.
+  const ratingPlayerSession = () => apiRef.current ? playerSessionRef.current : undefined;
+  const setTrackRating = async (rating: number, current: boolean, reportError = true,
+    track = currentTrackRef.current, signal?: AbortSignal, confirm?: () => boolean, expired?: () => boolean) => {
     const api = apiRef.current;
-    if (!api || !featureSetRef.current.has('favorites_edit')) return;
+    const target = current ? null : songActionTargetRef.current;
+    const stars = featureSetRef.current.has('ratings_edit');
+    if (!api || (!stars && !featureSetRef.current.has('favorites_edit')) || (!current && (!target || target.song.index < 1))) return;
+    const playerSession = ratingPlayerSession();
     try {
-      const saved = await api.setFavorite(favorite);
-      if (api === apiRef.current) {
-        setState((prev) => ({ ...prev, currentFavorite: saved, connectionMessage: null }));
-        void revalidateRatingAlbums(api);
+      const index = target?.song.index;
+      const revision = target?.catalogRevision;
+      const saved = stars ? await api.setRating(index, rating, revision, signal)
+        : (await api.setFavorite(rating > 0, index, revision, signal)) ? 5 : 0;
+      const activeApi = apiRef.current;
+      if (!activeApi || playerSession !== ratingPlayerSession()) return;
+      if (current ? sameSong(currentTrackRef.current, track) && confirm?.() : songActionTargetRef.current === target) {
+        const field = current ? 'currentRating' : 'songActionRating';
+        setState((prev) => ({ ...prev, [field]: saved, connectionMessage: null }));
       }
+      void revalidateRatingAlbums(activeApi);
+      if (!current && currentLibraryCategoryRef.current === LibraryCategory.Favorites) {
+        await loadLibraryCategory(LibraryCategory.Favorites, activeApi);
+      }
+      return { rating: saved };
     } catch (err: any) {
-      setState((prev) => ({ ...prev, connectionMessage: err?.message || 'Could not update favorite' }));
+      // An edit that already ended has reported its outcome. A write cancelled in the queue was never sent.
+      if (playerSession !== ratingPlayerSession() || expired?.()) return;
+      const error: string = err instanceof RequestCancelledError ? RATING_TIMEOUT_ERROR
+        : err?.message || (stars ? 'Could not update rating' : 'Could not update favorite');
+      if (reportError) setState((prev) => ({ ...prev, connectionMessage: error }));
+      return { error };
     }
   };
 
-  const setSongFavorite = async (favorite: boolean) => {
-    const api = apiRef.current;
-    const target = songActionTargetRef.current;
-    if (!api || !target || !featureSetRef.current.has('favorites_edit') || target.song.index < 1) return;
-    try {
-      const saved = await api.setFavorite(favorite, target.song.index, target.catalogRevision);
-      if (api !== apiRef.current) return;
-      setState((prev) => ({ ...prev, songActionFavorite: saved, connectionMessage: null }));
-      void revalidateRatingAlbums(api);
-      if (currentLibraryCategoryRef.current === LibraryCategory.Favorites) {
-        await loadLibraryCategory(LibraryCategory.Favorites, api);
-      }
-    } catch (err: any) {
-      setState((prev) => ({ ...prev, connectionMessage: err?.message || 'Could not update favorite' }));
-    }
-  };
+  const currentRatingEdit = useCurrentRatingEdit({
+    current: () => ({ playerSession: ratingPlayerSession(), track: currentTrackRef.current,
+      stars: featureSetRef.current.has('ratings_edit') }),
+    publish: (pendingCurrentRating) => setState((prev) => ({ ...prev, pendingCurrentRating })),
+    reportTimeout: (connectionMessage) => setState((prev) => ({ ...prev, connectionMessage })),
+    write: (rating, track, reportError, signal, confirm, expired) =>
+      setTrackRating(rating, true, reportError, track, signal, confirm, expired),
+  });
 
   const createEmptyPlaylist = async (name: string) => {
     const api = apiRef.current;
@@ -4185,11 +4213,13 @@ export function useRemoteSession() {
         break;
 
       case 'SetCurrentFavorite':
-        setCurrentFavorite(action.favorite);
+      case 'SetCurrentRating':
+        currentRatingEdit.edit(action.type === 'SetCurrentRating' ? action.rating : action.favorite ? 5 : 0,
+          action.expectedTrack, action.onSettled);
         break;
 
-      case 'SetSongFavorite':
-        setSongFavorite(action.favorite);
+      case 'SetSongRating':
+        setTrackRating(action.rating, false);
         break;
 
       case 'CreateEmptyPlaylist':

@@ -13,6 +13,7 @@ import { FlipView } from './FlipView';
 import { Icon } from './Icon';
 import { ListRow } from './ListRow';
 import { ReadOnlyBadge } from './ReadOnlyBadge';
+import { StarRating } from './StarRating';
 import { TrackRow } from './TrackRow';
 
 export interface LibraryEntryRowProps {
@@ -69,14 +70,24 @@ function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress
   const isPlaylist = kind === 'playlist';
   const showsChevron = opensCollection(kind);
   const readOnly = isPlaylist && !entry.writable;
-  const trailing = selectionMode ? (
+  const stars = entry.stars;
+  const accessory = selectionMode ? (
     <Icon name={selected ? 'check' : 'selectionCircle'} />
-  ) : showsChevron || readOnly ? (
-    <View style={styles.trailing}>
+  ) : (
+    <>
       {readOnly ? <ReadOnlyBadge /> : null}
       {showsChevron ? <Icon name="chevronRight" size={CHEVRON_SIZE} color={palette.inkMuted} /> : null}
+    </>
+  );
+  const trailing = selectionMode && stars == null ? accessory : showsChevron || readOnly || stars != null ? (
+    <View style={styles.trailing}>
+      {stars != null ? <StarRating rating={stars} /> : null}
+      {accessory}
     </View>
   ) : undefined;
+  const accessibilityLabel = [
+    entry.title, subtitle, stars == null ? null : t('{count} stars', { count: stars }),
+  ].filter(Boolean).join(', ');
 
   const radius = kind === 'artist' ? 'full' : 'sm';
   const placeholderIcon = placeholderIconFor(kind);
@@ -95,7 +106,7 @@ function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress
         onLongPress={longPress}
         disabled={disabled}
         selected={selectionMode && selected}
-        accessibilityLabel={entry.subtitle ? `${entry.title}, ${subtitle}` : entry.title}
+        accessibilityLabel={accessibilityLabel}
       />
     </FlipView>
   );

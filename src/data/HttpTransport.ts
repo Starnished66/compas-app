@@ -75,6 +75,13 @@ const CURRENT_ARTWORK_TARGET = '/api/v1/art';
 
 export class ArtworkDestinationError extends Error {}
 
+/** A request cancelled while it waited in the serialized queue; it never reached the player. */
+export class RequestCancelledError extends Error {
+  constructor() {
+    super('Request cancelled');
+  }
+}
+
 export class ArtworkRequestPreemptedException extends Error {
   /** True when a foreground command cancelled the request; false when it only timed out. Preempted reads can be requeued. */
   readonly preempted: boolean;
@@ -151,7 +158,7 @@ export class SerializedHttpTransport implements HttpTransport, ArtworkPreemptibl
     return new Promise<HttpResponse>((resolve, reject) => {
       const signal = request.queueSignal;
       if (signal?.aborted) {
-        reject(new Error('Request cancelled'));
+        reject(new RequestCancelledError());
         return;
       }
       const entry = { request, order: this.nextOrder++, run, resolve, reject };
@@ -159,11 +166,11 @@ export class SerializedHttpTransport implements HttpTransport, ArtworkPreemptibl
         const abort = () => {
           const index = this.pending.indexOf(entry);
           if (index !== -1) this.pending.splice(index, 1);
-          entry.reject(new Error('Request cancelled'));
+          entry.reject(new RequestCancelledError());
         };
         entry.run = () => {
           signal.removeEventListener('abort', abort);
-          if (signal.aborted) throw new Error('Request cancelled');
+          if (signal.aborted) throw new RequestCancelledError();
           return run();
         };
         entry.reject = (error: unknown) => {

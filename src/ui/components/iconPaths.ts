@@ -20,6 +20,7 @@ const strokeAndFill = (d: string): IconElement => ({ kind: 'path', d, paint: 'bo
 const lines = (d: string): IconGlyph => ({ elements: [stroke(d)] });
 
 const HEART = 'M11 18s-6.5-4-6.5-8.5A3.5 3.5 0 0 1 11 7.2a3.5 3.5 0 0 1 6.5 2.3C17.5 14 11 18 11 18z';
+const STAR = 'M11 2.5 13.6 7.8 19.5 8.7 15.3 12.8 16.3 18.7 11 15.9 5.7 18.7 6.7 12.8 2.5 8.7 8.4 7.8z';
 const PLAY = 'M7.5 4.8v12.4a.6.6 0 0 0 .9.5l10-6.2a.6.6 0 0 0 0-1L8.4 4.3a.6.6 0 0 0-.9.5z';
 const REPEAT = 'M4 10.5V9a3 3 0 0 1 3-3h11M15.5 3.5 18 6l-2.5 2.5M18 11.5V13a3 3 0 0 1-3 3H4M6.5 18.5 4 16l2.5-2.5';
 const SHUFFLE =
@@ -46,6 +47,7 @@ export const iconGlyphs = {
   repeat: lines(REPEAT),
   repeatOne: { elements: [stroke(REPEAT), { kind: 'path', d: 'M9.9 10.1 11.2 9v4.6', strokeWidth: 1.5 }] },
   volume: { elements: [stroke('M4 9h3l4-3.5v11L7 13H4z'), stroke('M14.5 8.5a3.5 3.5 0 0 1 0 5M16.8 6.2a6.6 6.6 0 0 1 0 9.6')] },
+  star: { elements: [stroke(STAR)], filledElements: [strokeAndFill(STAR)] },
   heart: { elements: [stroke(HEART)], filledElements: [strokeAndFill(HEART)] },
   chevronLeft: lines('M13.5 5 7.5 11l6 6'),
   chevronRight: lines('M9 5l6 6-6 6'),

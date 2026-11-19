@@ -1,6 +1,6 @@
 import { RemoteUiState } from '../data/types';
 
-export type PolledPlayback = Pick<RemoteUiState, 'isPlaying' | 'volume' | 'currentTrack' | 'playbackMode' | 'currentFavorite'>;
+export type PolledPlayback = Pick<RemoteUiState, 'isPlaying' | 'volume' | 'currentTrack' | 'playbackMode' | 'currentRating'>;
 
 export function polledPlaybackChanged(prev: PolledPlayback, polled: PolledPlayback): boolean {
   return (
@@ -8,7 +8,7 @@ export function polledPlaybackChanged(prev: PolledPlayback, polled: PolledPlayba
     prev.volume !== polled.volume ||
     prev.currentTrack !== polled.currentTrack ||
     prev.playbackMode !== polled.playbackMode ||
-    prev.currentFavorite !== polled.currentFavorite
+    prev.currentRating !== polled.currentRating
   );
 }
 

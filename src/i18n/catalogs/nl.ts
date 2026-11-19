@@ -2,6 +2,13 @@ import type { TranslationValue } from '../catalogs';
 
 // Machine-assisted translation, reviewed for audio terminology and interpolation.
 export const nl: Record<string, TranslationValue> = {
+  "Add to {name}": "Toevoegen aan {name}",
+  "{count} stars": { one: "{count} ster", other: "{count} sterren" },
+  "Clear rating": "Beoordeling wissen",
+  "Saving rating\u2026": "Beoordeling opslaan…",
+  "Rating saved": "Beoordeling opgeslagen",
+  "Rating cleared": "Beoordeling gewist",
+  "Could not update rating": "Beoordeling kon niet worden bijgewerkt",
   "No songs rated 3 stars or higher yet": "Nog geen nummers met 3 of meer sterren",
   "Top rated": "Best beoordeeld",
   "Top rated albums": "Best beoordeelde albums",

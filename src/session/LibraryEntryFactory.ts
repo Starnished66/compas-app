@@ -109,6 +109,7 @@ export class LibraryEntryFactory {
         subtitle: album.albumArtist || `${album.count} tracks`,
         subtitleTranslation: album.albumArtist ? undefined : { source: '{count} song', values: { count: album.count } },
         artwork: this.cover(album.albumKey),
+        ...(album.stars != null ? { stars: album.stars } : {}),
       };
     });
   }

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { ContentStatus, Playlist, RemoteAction, RemoteUiState } from '../../data/types';
+import { favoritesLabels } from '../library/libraryCategories';
 import { AppText } from '../components/AppText';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
@@ -24,6 +25,8 @@ export function BulkActionsSheet({ visible, ids, state, onAction, onClose }: Bul
   const [step, setStep] = useState<'actions' | 'playlists' | 'create'>('actions');
   const [name, setName] = useState('');
   const [started, setStarted] = useState(false);
+  const { label: favoritesLabel } = favoritesLabels(state.supportedFeatures);
+  const ratings = state.supportedFeatures.includes('ratings_edit');
   const canFavorite = state.supportedFeatures.includes('favorites_edit');
   const canEditPlaylists = state.supportedFeatures.includes('playlist_edit');
   const createNameIssue = playlistNameIssue(name.trim(), state.bulkPlaylistOptions?.map((playlist) => playlist.name) ?? []);
@@ -58,8 +61,8 @@ export function BulkActionsSheet({ visible, ids, state, onAction, onClose }: Bul
           <SheetActionRow icon="queueAdd" label={t('Add to queue')} onPress={() => run('queue')} />
           <SheetActionRow icon="shuffle" label={t('Add one random song to queue')} onPress={() => run('random')} />
           {canFavorite ? <>
-            <SheetActionRow icon="heart" label={t('Add to favorites')} onPress={() => run('favorite', { favorite: true })} />
-            <SheetActionRow icon="heart" label={t('Remove from favorites')} onPress={() => run('favorite', { favorite: false })} />
+            <SheetActionRow icon={ratings ? 'star' : 'heart'} label={ratings ? t('Add to {name}', { name: t(favoritesLabel) }) : t('Add to favorites')} onPress={() => run('favorite', { favorite: true })} />
+            <SheetActionRow icon={ratings ? 'star' : 'heart'} label={ratings ? t('Remove from {name}', { name: t(favoritesLabel) }) : t('Remove from favorites')} onPress={() => run('favorite', { favorite: false })} />
           </> : null}
           {canEditPlaylists ? <>
             <SheetActionRow icon="playlistAdd" label={t('Add to playlist')} onPress={() => { setStep('playlists'); onAction({ type: 'LoadBulkPlaylists' }); }} />

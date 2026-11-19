@@ -2,6 +2,13 @@ import type { TranslationValue } from '../catalogs';
 
 // Machine-assisted translation, reviewed for audio terminology and interpolation.
 export const fi: Record<string, TranslationValue> = {
+  "Add to {name}": "Lisää kokoelmaan {name}",
+  "{count} stars": { one: "{count} tähti", other: "{count} tähteä" },
+  "Clear rating": "Poista arvio",
+  "Saving rating\u2026": "Tallennetaan arviota…",
+  "Rating saved": "Arvio tallennettu",
+  "Rating cleared": "Arvio poistettu",
+  "Could not update rating": "Arvion päivittäminen epäonnistui",
   "No songs rated 3 stars or higher yet": "Ei vielä kappaleita, joilla on vähintään 3 tähteä",
   "Top rated": "Parhaiten arvioidut",
   "Top rated albums": "Parhaiten arvioidut albumit",

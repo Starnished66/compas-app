@@ -119,6 +119,10 @@ function assertIntegerArgument(value: number, field: string, min: number, max: n
   }
 }
 
+function parseRating(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 5 ? value : null;
+}
+
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== 'string') throw new Error(`Field '${field}' is missing or invalid`);
   return value;
@@ -317,6 +321,7 @@ export class RemoteApi {
       sourceSampleRateHz: Number(json.source_sample_rate || 0),
       bluetoothAudioOutput: nullableJsonBoolean(json.bluetooth_audio_output, 'bluetooth_audio_output'),
       favorite: json.favorite == null ? null : jsonBoolean(json.favorite),
+      rating: parseRating(json.rating),
       accentColor: typeof json.accent_color === 'string' && /^#[0-9a-fA-F]{6}$/.test(json.accent_color)
         ? json.accent_color.toUpperCase()
         : null,
@@ -532,21 +537,53 @@ export class RemoteApi {
   }
 
   async favoriteStates(ids: number[]): Promise<Map<number, boolean>> {
-    if (!ids.length || ids.length > 100) throw new Error('Favorite state batch must contain 1 to 100 songs');
-    ids.forEach((id) => assertIntegerArgument(id, 'Song ID', 1));
-    const json = await this.jsonGet(`${this.prefix}/favorites/state`, [['ids', ids.join(',')]]);
-    return new Map((Array.isArray(json.songs) ? json.songs : [])
-      .filter((item: any) => item.found)
-      .map((item: any) => [Number(item.index), jsonBoolean(item.favorite)]));
+    return this.songStates(ids, 'favorites', (item) => jsonBoolean(item.favorite));
   }
 
-  async setFavorite(favorite: boolean, index?: number, catalogRevision?: string | null): Promise<boolean> {
-    const params: [string, string][] = index == null ? [['current', '1']] : [['index', String(index)]];
-    if (index != null) assertIntegerArgument(index, 'Song ID', 1);
-    if (catalogRevision && index != null) params.push(['catalog_revision', catalogRevision]);
-    const res = await this.send('POST', `${this.prefix}/favorites/${favorite ? 'add' : 'remove'}`, params);
+  async ratingStates(ids: number[]): Promise<Map<number, number>> {
+    return this.songStates(ids, 'ratings', (item) => parseRating(item.rating));
+  }
+
+  private async songStates<T>(ids: number[], family: 'favorites' | 'ratings', read: (item: any) => T | null): Promise<Map<number, T>> {
+    if (!ids.length || ids.length > 100) throw new Error('Song state batch must contain 1 to 100 songs');
+    ids.forEach((id) => assertIntegerArgument(id, 'Song ID', 1));
+    const json = await this.jsonGet(`${this.prefix}/${family}/state`, [['ids', ids.join(',')]]);
+    const states = new Map<number, T>();
+    for (const item of Array.isArray(json.songs) ? json.songs : []) {
+      if (!item?.found) continue;
+      const value = read(item);
+      if (value !== null) states.set(Number(item.index), value);
+    }
+    return states;
+  }
+
+  async setFavorite(favorite: boolean, index?: number, catalogRevision?: string | null, signal?: AbortSignal): Promise<boolean> {
+    const result = await this.writeSongRating(`favorites/${favorite ? 'add' : 'remove'}`, [], index, catalogRevision, signal);
+    return jsonBoolean(result.favorite);
+  }
+
+  async setRating(index: number | undefined, stars: number, catalogRevision?: string | null, signal?: AbortSignal): Promise<number> {
+    assertIntegerArgument(stars, 'Rating', 0, 5);
+    const result = await this.writeSongRating('ratings/set', [['rating', String(stars)]], index, catalogRevision, signal);
+    const rating = parseRating(result?.rating);
+    if (rating == null) throw new Error('Could not update rating');
+    return rating;
+  }
+
+  private async writeSongRating(
+    path: string, params: [string, string][], index?: number, catalogRevision?: string | null, queueSignal?: AbortSignal,
+  ) {
+    if (index == null) {
+      params.push(['current', '1']);
+    } else {
+      assertIntegerArgument(index, 'Song ID', 1);
+      params.push(['index', String(index)]);
+      if (catalogRevision) params.push(['catalog_revision', catalogRevision]);
+    }
+    const request = this.request('POST', `${this.prefix}/${path}`, params);
+    const res = await this.transport.execute(queueSignal ? { ...request, queueSignal } : request);
     this.ensureSuccess(res);
-    return jsonBoolean(JSON.parse(res.text()).favorite);
+    return JSON.parse(res.text());
   }
 
   async library(
@@ -954,6 +991,7 @@ export class RemoteApi {
     const json = await this.jsonGet(path, params, signal);
     const arr = Array.isArray(json[key]) ? json[key] : [];
     return arr.map((g: any) => ({
+      ...(parseRating(g.stars) ? { stars: g.stars } : {}),
       name: String(g.name || ''),
       count: Number(g.count || 0),
       index: Number(g.index || 0),

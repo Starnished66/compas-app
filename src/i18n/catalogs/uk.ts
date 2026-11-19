@@ -2,6 +2,13 @@ import type { TranslationValue } from '../catalogs';
 
 // Machine-assisted translation, reviewed for audio terminology and interpolation.
 export const uk: Record<string, TranslationValue> = {
+  "Add to {name}": "Додати до {name}",
+  "{count} stars": { one: "{count} зірка", few: "{count} зірки", many: "{count} зірок", other: "{count} зірки" },
+  "Clear rating": "Скинути оцінку",
+  "Saving rating\u2026": "Збереження оцінки…",
+  "Rating saved": "Оцінку збережено",
+  "Rating cleared": "Оцінку скинуто",
+  "Could not update rating": "Не вдалося оновити оцінку",
   "No songs rated 3 stars or higher yet": "Поки що немає пісень з оцінкою 3 зірки або вище",
   "Top rated": "З найвищими оцінками",
   "Top rated albums": "Альбоми з найвищими оцінками",

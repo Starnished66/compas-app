@@ -28,6 +28,7 @@ import { SLIDER_THUMB_OVERHANG } from './Slider';
 import { TransportControls } from './TransportControls';
 import { VolumeRow } from './VolumeRow';
 import { useI18n } from '../../i18n';
+import { StarRating } from './StarRating';
 import { useDisplayTrack } from '../useDisplayTrack';
 
 export interface NowPlayingCardProps {
@@ -69,6 +70,7 @@ export function NowPlayingCard({
   const { artStyle, metaStyle } = useTrackChangeMotion(track);
   const liveOpacity = useOpacityTransition(dimmed, DIMMED_OPACITY, DIM_DURATION);
   const metaOpacity = useOpacityTransition(commands.skipping, SKIPPING_META_OPACITY, DIM_DURATION);
+  const canRate = state.supportedFeatures.includes('ratings_edit');
   const canFavorite = state.supportedFeatures.includes('favorites_edit');
   const shown = useDisplayTrack(track, state.dacMode, state.isPlaying) ?? track;
   const subtitle = shown.artist || t('Unknown artist');
@@ -155,11 +157,13 @@ export function NowPlayingCard({
             </Reanimated.View>
           </Pressable>
 
-          <Reanimated.View style={[styles.clip, animated.favorite]} pointerEvents={compact ? 'none' : 'box-none'}>
-            {canFavorite ? (
-              <FavoriteButton favorite={state.currentFavorite} onChange={commands.setFavorite} disabled={commands.disabled} />
-            ) : null}
-          </Reanimated.View>
+          {!canRate ? (
+            <Reanimated.View style={[styles.clip, animated.favorite]} pointerEvents={compact ? 'none' : 'box-none'}>
+              {canFavorite ? (
+                <FavoriteButton rating={commands.displayedRating} onChange={commands.setRating} disabled={commands.disabled} />
+              ) : null}
+            </Reanimated.View>
+          ) : null}
 
           <Reanimated.View
             style={[styles.clip, styles.compactTransportFrame, animated.compactTransport]}
@@ -178,6 +182,18 @@ export function NowPlayingCard({
             />
           </Reanimated.View>
         </Reanimated.View>
+
+        {canRate && track.title ? (
+          <Reanimated.View
+            style={[styles.clip, animated.transport, styles.rating]}
+            pointerEvents={compact ? 'none' : 'box-none'}
+            accessibilityElementsHidden={compact}
+            importantForAccessibility={compact ? 'no-hide-descendants' : 'auto'}
+          >
+            <StarRating rating={commands.displayedRating} onChange={commands.setRating}
+              disabled={commands.disabled} />
+          </Reanimated.View>
+        ) : null}
 
         <Reanimated.View
           style={[styles.seekFrame, !seekStays && styles.clip, animated.seek]}
@@ -253,6 +269,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: META_GAP,
   },
+  rating: { alignSelf: 'flex-end', maxHeight: Size.hitTarget },
   metaText: {
     gap: META_GAP,
   },

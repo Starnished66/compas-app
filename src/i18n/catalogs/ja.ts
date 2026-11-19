@@ -2,6 +2,13 @@ import type { TranslationValue } from '../catalogs';
 
 // Machine-assisted translation, reviewed for audio terminology and interpolation.
 export const ja: Record<string, TranslationValue> = {
+  "Add to {name}": "{name}に追加",
+  "{count} stars": "星{count}つ",
+  "Clear rating": "評価をクリア",
+  "Saving rating\u2026": "評価を保存中…",
+  "Rating saved": "評価を保存しました",
+  "Rating cleared": "評価をクリアしました",
+  "Could not update rating": "評価を更新できませんでした",
   "No songs rated 3 stars or higher yet": "星3つ以上の曲はまだありません",
   "Top rated": "高評価の曲",
   "Top rated albums": "高評価のアルバム",

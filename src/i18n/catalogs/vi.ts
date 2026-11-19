@@ -2,6 +2,13 @@ import type { TranslationValue } from '../catalogs';
 
 // Machine-assisted translation, reviewed for audio terminology and interpolation.
 export const vi: Record<string, TranslationValue> = {
+  "Add to {name}": "Thêm vào {name}",
+  "{count} stars": "{count} sao",
+  "Clear rating": "Xoá xếp hạng",
+  "Saving rating\u2026": "Đang lưu xếp hạng…",
+  "Rating saved": "Đã lưu xếp hạng",
+  "Rating cleared": "Đã xoá xếp hạng",
+  "Could not update rating": "Không thể cập nhật xếp hạng",
   "No songs rated 3 stars or higher yet": "Chưa có bài hát nào được đánh giá từ 3 sao trở lên",
   "Top rated": "Được đánh giá cao",
   "Top rated albums": "Album được đánh giá cao",
