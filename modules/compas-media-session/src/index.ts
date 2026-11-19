@@ -6,17 +6,20 @@ export interface MediaActionEvent {
   volume?: number;
 }
 
-export interface MediaStateUpdate {
+export interface MediaMetadataUpdate {
   title: string;
   artist: string;
   album: string;
   durationMs: number;
   artworkUri?: string | null;
+  /** Shown by Android as the output device in the media notification. */
+  deviceName?: string | null;
+}
+
+export interface MediaPlaybackUpdate {
   isPlaying: boolean;
   positionMs: number;
   volume: number;
-  /** Shown by Android as the output device in the media notification. */
-  deviceName?: string | null;
 }
 
 let nativeModule: any = null;
@@ -31,10 +34,16 @@ function getNativeModule() {
   return nativeModule;
 }
 
-export async function updateMediaState(update: MediaStateUpdate): Promise<boolean> {
+export async function updateMediaMetadata(update: MediaMetadataUpdate): Promise<boolean> {
   const mod = getNativeModule();
-  if (!mod || !mod.updateState) return false;
-  return await mod.updateState({ ...update, artworkUri: update.artworkUri ?? null, deviceName: update.deviceName ?? null });
+  if (!mod?.updateMetadata) return false;
+  return await mod.updateMetadata({ ...update, artworkUri: update.artworkUri ?? null, deviceName: update.deviceName ?? null });
+}
+
+export async function updateMediaPlayback(update: MediaPlaybackUpdate): Promise<boolean> {
+  const mod = getNativeModule();
+  if (!mod?.updatePlayback) return false;
+  return await mod.updatePlayback(update);
 }
 
 export async function clearMediaState(): Promise<boolean> {

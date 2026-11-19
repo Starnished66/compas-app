@@ -11,10 +11,10 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
 
 class RemotePlaybackService : Service() {
-    // Read by the session module's background executor when it publishes a notification.
-    @Volatile private var foreground = false
+    private var foreground = false
 
     override fun onCreate() {
         super.onCreate()
@@ -44,7 +44,11 @@ class RemotePlaybackService : Service() {
         // arrived meanwhile; only then is it safe to honour that stop.
         if (pendingStarts > 0) pendingStarts--
         val message = intent.getStringExtra(EXTRA_MESSAGE) ?: "Connecting to player…"
-        if (!publishWaitingNotification(message, promote = true)) return START_NOT_STICKY
+        val notification = pendingMediaNotification
+        if (pendingStarts == 0) pendingMediaNotification = null
+        val promoted = if (notification != null) publishNotification(notification, promote = true)
+            else publishWaitingNotification(message, promote = true)
+        if (!promoted) return START_NOT_STICKY
         if (stopRequested && pendingStarts == 0) {
             stopRequested = false
             stopPlaybackService()
@@ -159,9 +163,23 @@ class RemotePlaybackService : Service() {
         /** A stop requested while starts were pending; applied after the last one promotes. */
         var stopRequested = false
 
+        private var pendingMediaNotification: Notification? = null
+
+        // Session metadata can arrive before Android delivers a pending service start.
+        fun publishMediaNotification(context: Context, notification: Notification) {
+            if (pendingStarts > 0 && !stopRequested) pendingMediaNotification = notification
+            val service = instance
+            if (service != null) {
+                service.publishNotification(notification)
+            } else {
+                runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification) }
+            }
+        }
+
         /** Main thread only. Every stop goes through here: stopping while a start is still
          * undelivered kills the service before startForeground() and crashes the app. */
         fun requestStop(context: Context) {
+            pendingMediaNotification = null
             if (pendingStarts > 0) {
                 stopRequested = true
                 return
