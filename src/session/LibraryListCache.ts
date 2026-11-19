@@ -1,13 +1,22 @@
 import { LibraryCategory, LibraryEntry } from '../data/types';
+import type { LibraryContext } from './LibraryEntryFactory';
 
-export interface ExtensionPage {
+export interface OrderedAlbumCursor {
+  kind: 'orderedAlbums';
+  context: LibraryContext | null;
+  revision: string;
+  nextOffset: number;
+  total: number;
+}
+
+export type ExtensionPage = OrderedAlbumCursor | {
   kind: 'folder' | 'recent' | 'playlist';
   nextOffset: number;
   total: number;
   root?: string;
   path?: string;
   key?: string;
-}
+};
 
 export interface LibraryList {
   entries: LibraryEntry[];

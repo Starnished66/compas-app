@@ -3,6 +3,7 @@ import { FolderEntry, LibraryEntry, LibraryGroup, PlayContext, Playlist, Song } 
 export interface LibraryContext {
   kind: 'artist' | 'albumArtist';
   name: string;
+  groupEntryId: string;
 }
 
 export type GroupKind = 'artist' | 'albumArtist' | 'genre';
@@ -10,7 +11,7 @@ export type GroupKind = 'artist' | 'albumArtist' | 'genre';
 export type EntryTarget =
   | { type: 'Song'; song: Song; context: PlayContext; catalogRevision?: string | null }
   | { type: 'Playlist'; playlist: Playlist }
-  | { type: 'Group'; group: LibraryGroup; kind: GroupKind }
+  | { type: 'Group'; group: LibraryGroup; kind: GroupKind; orderedTrackCount?: { revision: string; count: number } }
   | { type: 'Album'; group: LibraryGroup; context: LibraryContext | null }
   | { type: 'Folder'; root: string; path: string; name: string }
   | { type: 'FolderTrack'; root: string; path: string; item: FolderEntry };
@@ -60,6 +61,18 @@ export class LibraryEntryFactory {
     return this.targets.get(id);
   }
 
+  orderedGroupTrackCount({ groupEntryId }: LibraryContext) {
+    const target = this.targets.get(groupEntryId);
+    return target?.type === 'Group' ? target.orderedTrackCount : undefined;
+  }
+
+  saveOrderedGroupTrackCount({ groupEntryId, kind, name }: LibraryContext, revision: string, count: number): void {
+    const target = this.targets.get(groupEntryId);
+    if (target?.type === 'Group' && target.kind === kind && target.group.name === name) {
+      target.orderedTrackCount = { revision, count };
+    }
+  }
+
   songs(
     songs: readonly Song[],
     context: PlayContext = {},
@@ -83,8 +96,8 @@ export class LibraryEntryFactory {
     });
   }
 
-  albums(albums: readonly LibraryGroup[], context: LibraryContext | null): LibraryEntry[] {
-    const ids = new UniqueIds();
+  albums(albums: readonly LibraryGroup[], context: LibraryContext | null, after: readonly LibraryEntry[] = []): LibraryEntry[] {
+    const ids = new UniqueIds(this.idsFor(after));
     const source = this.source();
     return albums.map((album) => {
       const identity = album.albumKey ? [album.albumKey] : [album.name, album.albumArtist ?? ''];
@@ -105,7 +118,9 @@ export class LibraryEntryFactory {
     const source = this.source();
     return groups.map((group) => {
       const id = ids.next(['group', source, kind, group.name]);
-      this.targets.set(id, { type: 'Group', group, kind });
+      const previous = this.targets.get(id);
+      const orderedTrackCount = previous?.type === 'Group' ? previous.orderedTrackCount : undefined;
+      this.targets.set(id, { type: 'Group', group, kind, orderedTrackCount });
       return {
         id,
         title: group.name,

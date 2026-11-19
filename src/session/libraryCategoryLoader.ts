@@ -1,10 +1,11 @@
 import { RemoteApi } from '../data/RemoteApi';
 import { CatalogGroup, CatalogGroupKind, CatalogIdentity, SyncedCatalogStore } from '../data/SyncedCatalogStore';
 import { CatalogSong, LibraryCategory, LibraryEntry, LibraryGroup, LibrarySortingSnapshot, Song } from '../data/types';
-import { GroupKind, LibraryEntryFactory } from './LibraryEntryFactory';
+import { GroupKind, LibraryContext, LibraryEntryFactory } from './LibraryEntryFactory';
 import { ExtensionPage, LibraryList } from './LibraryListCache';
 import { sortedByTitle } from './titleOrder';
-import { isServerOrderedAlbumSort, loadServerOrderedAlbumGroups } from './librarySorting';
+import { isServerOrderedAlbumSort } from './librarySorting';
+import { albumGroupFilter, orderedAlbumList, readOrderedAlbumPage } from './orderedAlbumPaging';
 
 export const LIBRARY_PAGE_SIZE = 50;
 
@@ -50,7 +51,7 @@ export function songFromCatalog(song: CatalogSong): Song {
   };
 }
 
-export function libraryGroupFromCatalog(group: CatalogGroup): LibraryGroup {
+function libraryGroupFromCatalog(group: CatalogGroup): LibraryGroup {
   return {
     name: group.name,
     count: group.count,
@@ -58,6 +59,20 @@ export function libraryGroupFromCatalog(group: CatalogGroup): LibraryGroup {
     albumArtist: group.albumArtist,
     albumKey: group.albumKey ?? null,
   };
+}
+
+export async function loadGroupAlbumRows(
+  context: LibraryContext,
+  api: RemoteApi | null,
+  catalog: CatalogIdentity | null,
+  store: SyncedCatalogStore,
+): Promise<LibraryGroup[]> {
+  const filter = albumGroupFilter(context);
+  if (!catalog) return api ? api.albums(filter) : [];
+  const rows = await store.groups(
+    catalog.libraryId, catalog.revision, CatalogGroupKind.Album, null, filter.artist ?? null, filter.albumArtist ?? null,
+  );
+  return rows.map(libraryGroupFromCatalog);
 }
 
 function requireFeature(context: CategoryLoadContext, feature: string, message: string): void {
@@ -138,10 +153,8 @@ export async function loadCategoryList(
       context.features.has('library_sorting') &&
       !!context.librarySorting &&
       isServerOrderedAlbumSort(context.librarySorting.albums);
-    const loadedGroups = serverAlbumOrder
-      ? await loadServerOrderedAlbumGroups(api, 'albums')
-      : await groupList(context, group, query);
-    const groups = serverAlbumOrder ? loadedGroups : sortedByTitle(loadedGroups, (item) => item.name);
+    if (serverAlbumOrder) return orderedAlbumList(factory, null, await readOrderedAlbumPage(api, null));
+    const groups = sortedByTitle(await groupList(context, group, query), (item) => item.name);
     return list(groupEntries(context, group, groups), groups.length, `${groups.length} ${group.noun}`);
   }
 

@@ -38,7 +38,6 @@ import { PIN_NOT_SAVED_MESSAGE, SecurePinStore } from '../data/SecurePinStore';
 import { ArtworkDiskCache } from '../data/ArtworkDiskCache';
 import {
   SyncedCatalogStore,
-  CatalogGroupKind,
   CatalogIdentity,
   StoredCatalogCover,
 } from '../data/SyncedCatalogStore';
@@ -59,8 +58,8 @@ import {
 import {
   CategoryLoadContext,
   LIBRARY_PAGE_SIZE,
-  libraryGroupFromCatalog,
   loadCategoryList,
+  loadGroupAlbumRows,
   loadSongsAfter,
   songFromCatalog,
 } from './libraryCategoryLoader';
@@ -82,7 +81,10 @@ import { discoveryEndpoint, discoveryHostnameEndpoint } from './wifiDiscovery';
 import { publicLibraryIdentityMatches, verifyWifiUpgradeIdentity } from './wifiUpgradeIdentity';
 import { isCurrentWifiImportSession } from './wifiImportSession';
 import { wifiImportErrorMessage } from './wifiImportError';
-import { isServerOrderedAlbumSort, loadServerOrderedAlbumGroups, requestLibrarySortChange } from './librarySorting';
+import { isServerOrderedAlbumSort, requestLibrarySortChange } from './librarySorting';
+import {
+  orderedAlbumList, pageRevision, readChangedRatingAlbums, readMoreOrderedAlbums, readOrderedAlbumPage,
+} from './orderedAlbumPaging';
 import { playlistNameIssue } from '../ui/playlistName';
 import { withPolledPlayback } from './polledPlayback';
 import { useMediaSessionSync } from './useMediaSessionSync';
@@ -287,8 +289,7 @@ export function useRemoteSession() {
   const extensionPageRef = useRef<LibrarySnapshot['extensionPage']>(null);
   const activePlaylistRef = useRef<Playlist | null>(null);
   const featureSetRef = useRef<Set<string>>(new Set());
-  const libraryPageLoadingRef = useRef(false);
-  const libraryPageLoadTokenRef = useRef(0);
+  const libraryPageLoadingRef = useRef<number | null>(null);
   const currentLibraryCategoryRef = useRef<LibraryCategory>(LibraryCategory.Artists);
   const searchReturnCategoryRef = useRef<LibraryCategory>(LibraryCategory.Artists);
   const libraryLoadGenerationRef = useRef(0);
@@ -2284,11 +2285,7 @@ export function useRemoteSession() {
     libraryListCacheRef.current.clear();
     if (api !== apiRef.current || stateRef.current.screen.type !== 'Library') return;
     if (nested && nestedTitle === 'Albums' && context) {
-      const count = stateRef.current.libraryEntries.reduce((total, entry) => {
-        const target = libraryEntriesRef.current.target(entry.id);
-        return total + (target?.type === 'Album' ? target.group.count : 0);
-      }, 0);
-      void loadGroupAlbums({ name: context.name, count, index: 0, albumArtist: '' }, context.kind);
+      void loadGroupAlbums(context);
     } else if (!nested && currentLibraryCategoryRef.current === LibraryCategory.Albums) {
       void loadLibraryCategory(LibraryCategory.Albums, api, null, true);
     }
@@ -2370,8 +2367,9 @@ export function useRemoteSession() {
     librarySorting: librarySortingRef.current,
   });
 
-  const showLibraryList = (key: string, list: LibraryList) => {
+  const showLibraryList = (key: string | null, list: LibraryList) => {
     extensionPageRef.current = list.extensionPage;
+    if (list.extensionPage?.kind === 'orderedAlbums') libraryContextRef.current = list.extensionPage.context;
     shownLibraryListRef.current = key;
     setState((prev) => ({
       ...prev,
@@ -2380,6 +2378,46 @@ export function useRemoteSession() {
       libraryHasMore: list.hasMore,
       libraryStatus: list.entries.length > 0 ? ContentStatus.Ready : ContentStatus.Empty,
     }));
+  };
+
+  // `restored` is the cursor being shown again on a return, when screen state may still be in transition.
+  const revalidateRatingAlbums = async (api: RemoteApi, reopening = false, restored?: ExtensionPage | null) => {
+    if (api !== apiRef.current || librarySortingRef.current?.albums.effective !== 8) return;
+    const source = librarySource();
+    const category = LibraryCategory.Albums;
+    const key = libraryListKey(source, category);
+    const cachedCursor = () => libraryListCacheRef.current.get(source, category)?.extensionPage;
+    const generation = libraryLoadGenerationRef.current;
+    const shownKey = shownLibraryListRef.current;
+    const ownsList = () => generation === libraryLoadGenerationRef.current && shownKey !== null &&
+      shownKey === shownLibraryListRef.current && currentLibraryCategoryRef.current === category;
+    const ownsSource = () => api === apiRef.current && source === librarySource() && librarySortingRef.current?.albums.effective === 8;
+    const shownCursor = () => ownsList() ? extensionPageRef.current : null;
+    const screen = stateRef.current.screen;
+    const libraryScreen = screen.type === 'Queue' ? screenBackStackRef.current.at(-1) : screen;
+    const previous = cachedCursor() ?? restored ??
+      (libraryScreen?.type === 'Library' && libraryScreen.category === category ? shownCursor() : null);
+    const page = await readChangedRatingAlbums(api, previous);
+    if (!page || !ownsSource()) return;
+    const { revision } = page;
+    const cached = libraryListCacheRef.current.get(source, category);
+    const cachedRevision = pageRevision(cached?.extensionPage);
+    // Another check may have stored this revision already (maybe with more pages), or a newer one.
+    if (cached && cachedRevision !== pageRevision(previous) && cachedRevision !== revision) return;
+    const latest = cached && cachedRevision === revision ? cached : orderedAlbumList(libraryEntriesRef.current, null, page);
+    libraryListCacheRef.current.set(source, category, latest);
+    if (ownsList() && pageRevision(extensionPageRef.current) !== revision &&
+        (reopening || stateRef.current.screen.type === 'Library')) {
+      libraryLoadGenerationRef.current++;
+      showLibraryList(key, latest);
+    }
+  };
+
+  // Back to a Rating list: reload from cache, or check the shown rows when the cache was cleared.
+  const returnToRatingAlbums = (api: RemoteApi) => {
+    if (librarySortingRef.current?.albums.effective !== 8) return;
+    if (libraryListCacheRef.current.get(librarySource(), LibraryCategory.Albums)) void loadLibraryCategory(LibraryCategory.Albums);
+    else void revalidateRatingAlbums(api, true, extensionPageRef.current);
   };
 
   const loadLibraryCategory = async (
@@ -2429,6 +2467,7 @@ export function useRemoteSession() {
     if (cached) {
       extensionPageRef.current = cached.extensionPage;
       shownLibraryListRef.current = key;
+      if (api && cat === LibraryCategory.Albums) void revalidateRatingAlbums(api, true);
       if (!needsRevalidation(cat)) return;
     }
 
@@ -2436,7 +2475,7 @@ export function useRemoteSession() {
 
     try {
       const loaded = await loadCategoryList(cat, query ?? null, libraryLoadContext(api));
-      if (loadGeneration !== libraryLoadGenerationRef.current) return;
+      if (loadGeneration !== libraryLoadGenerationRef.current || api !== apiRef.current) return;
       if (librarySource() !== source) {
         await loadLibraryCategory(cat, activeApi, query, refresh);
         return;
@@ -2453,12 +2492,16 @@ export function useRemoteSession() {
   };
 
   const pushLibraryState = () => {
+    const cursor = extensionPageRef.current;
+    const cancelsContinuation = (cursor?.kind === 'orderedAlbums' || cursor?.kind === 'folder') &&
+      stateRef.current.libraryEntries.length > 0 && libraryPageLoadingRef.current === libraryLoadGenerationRef.current;
     libraryBackStackRef.current.push({
       sortEpoch: sortingEpochRef.current,
       category: currentLibraryCategoryRef.current,
       entries: stateRef.current.libraryEntries,
       query: stateRef.current.libraryQuery,
-      status: stateRef.current.libraryStatus,
+      status: cancelsContinuation && stateRef.current.libraryStatus === ContentStatus.Loading
+        ? ContentStatus.Ready : stateRef.current.libraryStatus,
       countLabel: stateRef.current.libraryCountLabel,
       hasMore: stateRef.current.libraryHasMore,
       isNested: stateRef.current.libraryIsNested,
@@ -2473,22 +2516,24 @@ export function useRemoteSession() {
       folderPath: stateRef.current.folderPath,
       folderRoot: stateRef.current.folderRoot,
     });
+    if (extensionPageRef.current?.kind === 'orderedAlbums') extensionPageRef.current = null;
     libraryLoadGenerationRef.current++;
     shownLibraryListRef.current = null;
     setState((prev) => ({ ...prev, libraryIsNested: true }));
   };
 
-  const openGroup = async (group: LibraryGroup, kind: 'artist' | 'albumArtist' | 'genre') => {
+  const openGroup = async (id: string, group: LibraryGroup, kind: 'artist' | 'albumArtist' | 'genre') => {
     if (kind === 'genre') {
       libraryContextRef.current = null;
       setState((prev) => ({ ...prev, libraryNestedTitle: 'Tracks' }));
       await startSongPage({ genre: group.name }, {}, null, false);
       return;
     }
-    await loadGroupAlbums(group, kind);
+    await loadGroupAlbums({ kind, name: group.name, groupEntryId: id });
   };
 
-  const loadGroupAlbums = async (group: LibraryGroup, kind: 'artist' | 'albumArtist') => {
+  const loadGroupAlbums = async (context: LibraryContext) => {
+    if (extensionPageRef.current?.kind === 'orderedAlbums') extensionPageRef.current = null;
     setState((prev) => ({
       ...prev,
       libraryNestedTitle: 'Albums',
@@ -2501,30 +2546,19 @@ export function useRemoteSession() {
     const api = apiRef.current;
     const catalog = activeCatalogRef.current;
     const generation = ++libraryLoadGenerationRef.current;
-    const context: LibraryContext = { kind, name: group.name };
     libraryContextRef.current = context;
 
     try {
-      let albums: LibraryGroup[] = [];
-      const sort = kind === 'artist' ? librarySortingRef.current?.artists : librarySortingRef.current?.albumArtists;
+      const sort = context.kind === 'artist' ? librarySortingRef.current?.artists : librarySortingRef.current?.albumArtists;
       if (api && featureSetRef.current.has('library_sorting') && isServerOrderedAlbumSort(sort)) {
-        albums = await loadServerOrderedAlbumGroups(api, kind === 'artist' ? 'artists' : 'album_artists', kind === 'artist' ? { artist: group.name } : { albumArtist: group.name });
-      } else if (catalog) {
-        const stored = await syncedCatalogStoreRef.current.groups(
-          catalog.libraryId,
-          catalog.revision,
-          CatalogGroupKind.Album,
-          null,
-          kind === 'artist' ? group.name : null,
-          kind === 'albumArtist' ? group.name : null
-        );
-        albums = stored.map(libraryGroupFromCatalog);
-      } else if (api) {
-        albums = await api.albums(
-          kind === 'artist' ? { artist: group.name } : { albumArtist: group.name }
-        );
+        const page = await readOrderedAlbumPage(api, context);
+        if (generation === libraryLoadGenerationRef.current && api === apiRef.current) {
+          showLibraryList(null, orderedAlbumList(libraryEntriesRef.current, context, page));
+        }
+        return;
       }
 
+      const albums = await loadGroupAlbumRows(context, api, catalog, syncedCatalogStoreRef.current);
       if (generation !== libraryLoadGenerationRef.current || api !== apiRef.current) return;
       const entries = libraryEntriesRef.current.albums(albums, context);
       setState((prev) => ({
@@ -2642,13 +2676,12 @@ export function useRemoteSession() {
     append: boolean = false,
     albumIdentity?: AlbumBrowseIdentity
   ) => {
-    if (append && libraryPageLoadingRef.current) return;
+    if (append && libraryPageLoadingRef.current === libraryLoadGenerationRef.current) return;
     if (!append) libraryPageRef.current = { filter, playContext, albumKey, albumIdentity };
     if (!append) ++libraryLoadGenerationRef.current;
     const generation = libraryLoadGenerationRef.current;
     const attempt = connectionAttemptRef.current;
-    const loadToken = ++libraryPageLoadTokenRef.current;
-    libraryPageLoadingRef.current = true;
+    libraryPageLoadingRef.current = generation;
     const api = apiRef.current;
     const catalog = activeCatalogRef.current;
     const currentOffset = append ? stateRef.current.libraryEntries.length : 0;
@@ -2727,7 +2760,7 @@ export function useRemoteSession() {
         libraryCountLabel: err?.message || 'Failed to load tracks',
       }));
     } finally {
-      if (loadToken === libraryPageLoadTokenRef.current) libraryPageLoadingRef.current = false;
+      if (libraryPageLoadingRef.current === generation) libraryPageLoadingRef.current = null;
     }
   };
 
@@ -2781,7 +2814,7 @@ export function useRemoteSession() {
         break;
       case 'Group':
         pushLibraryState();
-        await openGroup(target.group, target.kind);
+        await openGroup(id, target.group, target.kind);
         break;
       case 'Album':
         pushLibraryState();
@@ -3099,6 +3132,7 @@ export function useRemoteSession() {
         : '{succeeded} succeeded, {failed} failed, {processed} processed of {total}. {error} Completed changes remain applied.', isCancelled() ? countValues() : { ...countValues(), error: err?.message || 'Could not complete the selected action.' });
     } finally {
       if (queueActionNeedsRefresh && ownsPlayer()) await refreshQueue(api);
+      if (action.action === 'favorite' && succeeded > 0 && ownsPlayer()) void revalidateRatingAlbums(api);
       if (run === bulkActionRunRef.current) {
         bulkActionBusyRef.current = false;
         bulkActionCancelledRef.current = false;
@@ -3147,7 +3181,10 @@ export function useRemoteSession() {
     if (!api || !featureSetRef.current.has('favorites_edit')) return;
     try {
       const saved = await api.setFavorite(favorite);
-      if (api === apiRef.current) setState((prev) => ({ ...prev, currentFavorite: saved, connectionMessage: null }));
+      if (api === apiRef.current) {
+        setState((prev) => ({ ...prev, currentFavorite: saved, connectionMessage: null }));
+        void revalidateRatingAlbums(api);
+      }
     } catch (err: any) {
       setState((prev) => ({ ...prev, connectionMessage: err?.message || 'Could not update favorite' }));
     }
@@ -3161,6 +3198,7 @@ export function useRemoteSession() {
       const saved = await api.setFavorite(favorite, target.song.index, target.catalogRevision);
       if (api !== apiRef.current) return;
       setState((prev) => ({ ...prev, songActionFavorite: saved, connectionMessage: null }));
+      void revalidateRatingAlbums(api);
       if (currentLibraryCategoryRef.current === LibraryCategory.Favorites) {
         await loadLibraryCategory(LibraryCategory.Favorites, api);
       }
@@ -3633,6 +3671,9 @@ export function useRemoteSession() {
     if (stateRef.current.screen.type === 'Queue') {
       const screenUnderQueue = screenBackStackRef.current.pop() ?? { type: 'Home' };
       setState((curr) => ({ ...curr, screen: screenUnderQueue }));
+      const api = apiRef.current;
+      if (api && screenUnderQueue.type === 'Library' && screenUnderQueue.category === LibraryCategory.Albums &&
+          !stateRef.current.libraryIsNested) returnToRatingAlbums(api);
       return;
     }
 
@@ -3659,20 +3700,19 @@ export function useRemoteSession() {
         folderPath: prev.folderPath,
         folderRoot: prev.folderRoot,
       }));
-      if (prev.sortEpoch !== sortingEpochRef.current && apiRef.current) refreshSortedView(apiRef.current, prev.context, prev.isNested, prev.nestedTitle);
+      const api = apiRef.current;
+      if (api && prev.sortEpoch !== sortingEpochRef.current) refreshSortedView(api, prev.context, prev.isNested, prev.nestedTitle);
+      else if (api && !prev.isNested && prev.extensionPage?.kind === 'orderedAlbums') returnToRatingAlbums(api);
       return;
     }
 
     if (screenBackStackRef.current.length > 0) {
       const prevScreen = screenBackStackRef.current.pop()!;
       setState((curr) => ({ ...curr, screen: prevScreen, libraryIsNested: false }));
-      if (
-        prevScreen.type === 'Library' &&
-        prevScreen.category !== LibraryCategory.Search &&
-        prevScreen.category !== currentLibraryCategoryRef.current
-      ) {
-        loadLibraryCategory(prevScreen.category);
-      }
+      if (prevScreen.type !== 'Library' || prevScreen.category === LibraryCategory.Search) return;
+      const api = apiRef.current;
+      if (prevScreen.category !== currentLibraryCategoryRef.current) loadLibraryCategory(prevScreen.category);
+      else if (api && prevScreen.category === LibraryCategory.Albums) returnToRatingAlbums(api);
       return;
     }
 
@@ -4052,17 +4092,35 @@ export function useRemoteSession() {
 
       case 'LoadMoreLibrary': {
         const api = apiRef.current;
-        if (!api || !stateRef.current.libraryHasMore || libraryPageLoadingRef.current) return;
+        const generation = libraryLoadGenerationRef.current;
+        if (!api || !stateRef.current.libraryHasMore || libraryPageLoadingRef.current === generation) return;
         if (extensionPageRef.current) {
           const cursor = extensionPageRef.current;
-          libraryPageLoadingRef.current = true;
+          const screen = stateRef.current.screen;
+          const source = librarySource();
+          const samePage = () => api === apiRef.current && cursor === extensionPageRef.current && generation === libraryLoadGenerationRef.current;
+          const ownsView = () => samePage() && screen.type === 'Library' && screen === stateRef.current.screen && source === librarySource();
+          if (cursor.kind === 'orderedAlbums' && !ownsView()) return;
+          libraryPageLoadingRef.current = generation;
           setState((prev) => ({ ...prev, libraryStatus: ContentStatus.Loading }));
           try {
+            if (cursor.kind === 'orderedAlbums') {
+              const page = await readMoreOrderedAlbums(api, cursor, ownsView);
+              if (!page || !ownsView()) return;
+              const { context } = cursor;
+              const key = context ? null : libraryListKey(source, LibraryCategory.Albums);
+              const shown = page.offset === 0 ? [] : stateRef.current.libraryEntries;
+              const list = orderedAlbumList(libraryEntriesRef.current, context, page, shown);
+              if (key) libraryListCacheRef.current.set(source, LibraryCategory.Albums, list);
+              showLibraryList(key, list);
+              return;
+            }
             let entries: LibraryEntry[] = [];
             let nextOffset = cursor.nextOffset;
             let total = cursor.total;
             if (cursor.kind === 'folder') {
               const page = await api.folder(cursor.path || '', cursor.nextOffset, cursor.root || 'sd');
+              if (!samePage()) return;
               entries = libraryEntriesRef.current.folderItems(
                 page.entries,
                 cursor.root || 'sd',
@@ -4083,6 +4141,7 @@ export function useRemoteSession() {
               total = page.total;
             } else if (cursor.key) {
               const page = await api.playlistPage(cursor.key, cursor.nextOffset);
+              if (!samePage()) return;
               if (stateRef.current.playlistRevision && page.revision && page.revision !== stateRef.current.playlistRevision) {
                 if (activePlaylistRef.current) await browsePlaylist(activePlaylistRef.current);
                 else await loadLibraryCategory(LibraryCategory.Favorites, api);
@@ -4097,7 +4156,7 @@ export function useRemoteSession() {
               nextOffset = page.nextOffset;
               total = page.total;
             }
-            if (api !== apiRef.current || extensionPageRef.current !== cursor) return;
+            if (!samePage()) return;
             extensionPageRef.current = { ...cursor, nextOffset, total };
             setState((prev) => ({
               ...prev,
@@ -4106,21 +4165,25 @@ export function useRemoteSession() {
               libraryStatus: ContentStatus.Ready,
             }));
           } catch (err: any) {
+            if (!samePage() || (cursor.kind === 'orderedAlbums' && !ownsView())) return;
             setState((prev) => ({ ...prev, libraryStatus: ContentStatus.Error, connectionMessage: err?.message || 'Could not load more items' }));
           } finally {
-            libraryPageLoadingRef.current = false;
+            if (libraryPageLoadingRef.current === generation) libraryPageLoadingRef.current = null;
+            if (cursor.kind === 'orderedAlbums' && samePage() && !ownsView()) {
+              setState((prev) => (prev.screen.type !== 'Library' || prev.screen === screen) && prev.libraryStatus === ContentStatus.Loading
+                ? { ...prev, libraryStatus: ContentStatus.Ready } : prev);
+            }
           }
         } else if (stateRef.current.libraryIsNested && libraryPageRef.current) {
           const page = libraryPageRef.current;
           startSongPage(page.filter, page.playContext, page.albumKey, true, page.albumIdentity);
         } else if (currentLibraryCategoryRef.current === LibraryCategory.Songs ||
                    currentLibraryCategoryRef.current === LibraryCategory.Search) {
-          libraryPageLoadingRef.current = true;
+          libraryPageLoadingRef.current = generation;
           setState((prev) => ({ ...prev, libraryStatus: ContentStatus.Loading }));
           const isSearch = currentLibraryCategoryRef.current === LibraryCategory.Search;
           const shown = stateRef.current.libraryEntries;
           const offset = isSearch ? shown.filter((entry) => entry.kind === 'song').length : shown.length;
-          const generation = libraryLoadGenerationRef.current;
           const source = librarySource();
           try {
             const page = await loadSongsAfter(
@@ -4151,9 +4214,11 @@ export function useRemoteSession() {
               libraryCountLabel: list.label,
             }));
           } catch {
-            setState((prev) => ({ ...prev, libraryStatus: ContentStatus.Error }));
+            if (generation === libraryLoadGenerationRef.current) {
+              setState((prev) => ({ ...prev, libraryStatus: ContentStatus.Error }));
+            }
           } finally {
-            libraryPageLoadingRef.current = false;
+            if (libraryPageLoadingRef.current === generation) libraryPageLoadingRef.current = null;
           }
         }
         break;
