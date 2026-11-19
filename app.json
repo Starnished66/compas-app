@@ -2,7 +2,7 @@
   "expo": {
     "name": "compás",
     "slug": "compas-remote",
-    "version": "0.5.0-beta.2",
+    "version": "0.5.0-beta.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -18,7 +18,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.compas.remote",
-      "versionCode": 30
+      "versionCode": 31
     },
     "web": {
       "favicon": "./assets/favicon.png"
