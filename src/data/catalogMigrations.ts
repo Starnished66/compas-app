@@ -1,4 +1,5 @@
-import type { SqlDatabase } from './catalogDatabase';
+import type { SqlConnection, SqlDatabase } from './catalogDatabase';
+import { writeGenreRows } from './catalogPageWriter';
 
 // Ordered schema steps; index i upgrades user_version i to i + 1. Never edit a shipped step, append a new one.
 const SCHEMA_MIGRATIONS: string[] = [
@@ -69,13 +70,44 @@ const SCHEMA_MIGRATIONS: string[] = [
     CREATE INDEX IF NOT EXISTS catalog_song_artists_name_nocase ON catalog_song_artists(library_id, revision, artist COLLATE NOCASE);
     ALTER TABLE catalog_state ADD COLUMN published_at INTEGER NOT NULL DEFAULT 0;
   `,
+  // v3: retain split genre memberships alongside the original song tags.
+  `
+    CREATE TABLE catalog_song_genres (
+      library_id TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      song_id INTEGER NOT NULL,
+      genre TEXT NOT NULL COLLATE NOCASE,
+      PRIMARY KEY (library_id, revision, song_id, genre)
+    );
+    CREATE INDEX catalog_song_genres_name ON catalog_song_genres(library_id, revision, genre, song_id);
+    CREATE TRIGGER catalog_song_genres_delete AFTER DELETE ON catalog_songs BEGIN
+      DELETE FROM catalog_song_genres
+      WHERE library_id = OLD.library_id AND revision = OLD.revision AND song_id = OLD.id;
+    END;
+  `,
 ];
+
+async function backfillGenres(tx: SqlConnection): Promise<void> {
+  // Include staged songs so a sync can still resume from its existing checkpoint.
+  let afterRowId: number | null = null;
+  for (;;) {
+    const rows: { rowid: number; libraryId: string; revision: string; id: number; genre: string }[] = await tx.query(
+      `SELECT rowid, library_id AS libraryId, revision, id, genre FROM catalog_songs
+       ${afterRowId == null ? '' : 'WHERE rowid > ?'} ORDER BY rowid LIMIT 500`,
+      afterRowId == null ? [] : [afterRowId]
+    );
+    if (!rows.length) return;
+    await writeGenreRows(tx, rows);
+    afterRowId = rows[rows.length - 1].rowid;
+  }
+}
 
 export async function migrateCatalog(db: SqlDatabase): Promise<void> {
   await db.transaction(async (tx) => {
     const row = await tx.queryFirst<{ user_version: number }>('PRAGMA user_version');
     for (let version = row?.user_version ?? 0; version < SCHEMA_MIGRATIONS.length; version++) {
       await tx.exec(SCHEMA_MIGRATIONS[version]);
+      if (version === 2) await backfillGenres(tx);
       await tx.exec(`PRAGMA user_version = ${version + 1}`);
     }
   });

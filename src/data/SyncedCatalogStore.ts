@@ -452,10 +452,11 @@ export class SyncedCatalogStore {
     albumArtist?: string | null,
     album?: string | null,
     genre?: string | null,
-    albumKey?: string | null
+    albumKey?: string | null,
+    splitGenres = false,
   ): Promise<CatalogPageSlice> {
     const db = await this.database();
-    const [where, args] = this.songWhere(libraryId, revision, query, artist, albumArtist, album, genre, albumKey);
+    const [where, args] = this.songWhere(libraryId, revision, query, artist, albumArtist, album, genre, albumKey, splitGenres);
 
     const order =
       albumKey != null || album != null
@@ -510,7 +511,8 @@ export class SyncedCatalogStore {
     kind: CatalogGroupKind,
     query?: string | null,
     artist?: string | null,
-    albumArtist?: string | null
+    albumArtist?: string | null,
+    splitGenres = false,
   ): Promise<CatalogGroup[]> {
     const db = await this.database();
 
@@ -572,11 +574,17 @@ export class SyncedCatalogStore {
       args.push(albumArtist);
     }
 
+    const useGenreRows = kind === CatalogGroupKind.Genre && splitGenres;
+    const genreColumn = useGenreRows ? 'catalog_song_genres.genre' : 'catalog_songs.genre';
+    const genreJoin = useGenreRows ? `JOIN catalog_song_genres ON
+      catalog_song_genres.library_id = catalog_songs.library_id AND
+      catalog_song_genres.revision = catalog_songs.revision AND
+      catalog_song_genres.song_id = catalog_songs.id` : '';
     const [nameCol, groupCol] =
       kind === CatalogGroupKind.AlbumArtist
         ? ['catalog_songs.album_artist', 'catalog_songs.album_artist']
         : kind === CatalogGroupKind.Genre
-        ? ['catalog_songs.genre', 'catalog_songs.genre']
+        ? [genreColumn, genreColumn]
         : ['catalog_songs.album', 'catalog_songs.album_key'];
 
     if (kind !== CatalogGroupKind.Album) {
@@ -606,7 +614,7 @@ export class SyncedCatalogStore {
                   MIN(catalog_songs.id) as idx,
                   '' as album_artist,
                   NULL as album_key
-           FROM catalog_songs
+           FROM catalog_songs ${genreJoin}
            WHERE ${filter.join(' AND ')}
            GROUP BY ${groupCol} COLLATE NOCASE
            ORDER BY MIN(${nameCol}) COLLATE NOCASE`;
@@ -648,7 +656,8 @@ export class SyncedCatalogStore {
     albumArtist?: string | null,
     album?: string | null,
     genre?: string | null,
-    albumKey?: string | null
+    albumKey?: string | null,
+    splitGenres = false,
   ): [string, any[]] {
     const clauses = ['library_id = ?', 'revision = ?'];
     const args: any[] = [libraryId, revision];
@@ -670,7 +679,13 @@ export class SyncedCatalogStore {
       args.push(album);
     }
     if (genre) {
-      clauses.push('genre = ? COLLATE NOCASE');
+      if (splitGenres) {
+        clauses.push(`id IN (SELECT song_id FROM catalog_song_genres WHERE
+          library_id = ? AND revision = ? AND genre = ? COLLATE NOCASE)`);
+        args.push(libraryId, revision);
+      } else {
+        clauses.push('genre = ? COLLATE NOCASE');
+      }
       args.push(genre);
     }
     if (albumKey != null) {

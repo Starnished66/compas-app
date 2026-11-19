@@ -1,8 +1,18 @@
 import type { SqlConnection } from './catalogDatabase';
+import { splitGenres } from './splitGenres';
 import type { CatalogCoversPage, CatalogPage } from './types';
 
 type Row = (string | number | null)[];
 const MAX_BINDINGS = 900;
+
+export async function writeGenreRows(
+  tx: SqlConnection, songs: { libraryId: string; revision: string; id: number; genre: string }[]
+): Promise<void> {
+  await insertRows(tx, 'INSERT INTO catalog_song_genres (library_id, revision, song_id, genre)',
+    songs.flatMap(({ libraryId, revision, id, genre }) =>
+      splitGenres(genre).map((name) => [libraryId, revision, id, name]))
+  );
+}
 
 async function insertRows(tx: SqlConnection, sql: string, rows: Row[], suffix = ''): Promise<void> {
   if (!rows.length) return;
@@ -25,8 +35,13 @@ export async function writeSongRows(tx: SqlConnection, page: CatalogPage): Promi
 
   for (let start = 0; start < songs.length; start += MAX_BINDINGS - 2) {
     const ids = songs.slice(start, start + MAX_BINDINGS - 2).map((song) => song.id);
+    const placeholders = ids.map(() => '?').join(', ');
     await tx.run(
-      `DELETE FROM catalog_song_artists WHERE library_id = ? AND revision = ? AND song_id IN (${ids.map(() => '?').join(', ')})`,
+      `DELETE FROM catalog_song_artists WHERE library_id = ? AND revision = ? AND song_id IN (${placeholders})`,
+      [libraryId, revision, ...ids]
+    );
+    await tx.run(
+      `DELETE FROM catalog_song_genres WHERE library_id = ? AND revision = ? AND song_id IN (${placeholders})`,
       [libraryId, revision, ...ids]
     );
   }
@@ -34,6 +49,7 @@ export async function writeSongRows(tx: SqlConnection, page: CatalogPage): Promi
     songs.flatMap((song) => [...new Set(song.artists.map((artist) => artist.trim()).filter(Boolean))]
       .map((artist) => [libraryId, revision, song.id, artist]))
   );
+  await writeGenreRows(tx, songs.map(({ id, genre }) => ({ libraryId, revision, id, genre })));
 }
 
 export async function writeCoverRows(

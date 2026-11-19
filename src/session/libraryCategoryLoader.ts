@@ -22,6 +22,10 @@ export interface CategoryLoadContext {
   searchSignal?: AbortSignal;
 }
 
+export function supportsSplitGenres(features: ReadonlySet<string>): boolean {
+  return features.has('genre_split');
+}
+
 interface SearchGroupSnapshot {
   api: RemoteApi;
   revision: string | null;
@@ -155,7 +159,9 @@ async function songsPage(context: CategoryLoadContext, offset: number, query: st
 async function groupList(context: CategoryLoadContext, group: GroupCategory, query: string | null): Promise<LibraryGroup[]> {
   const { catalog, store, api } = context;
   if (!catalog) return filterGroups(await group.fetch(api), query);
-  const stored = await store.groups(catalog.libraryId, catalog.revision, group.catalogKind, query);
+  const stored = await store.groups(
+    catalog.libraryId, catalog.revision, group.catalogKind, query, null, null, supportsSplitGenres(context.features),
+  );
   return stored.map(libraryGroupFromCatalog);
 }
 

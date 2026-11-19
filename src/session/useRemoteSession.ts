@@ -66,6 +66,7 @@ import {
   loadTopRatedAlbums,
   SearchReads,
   songFromCatalog,
+  supportsSplitGenres,
   TOP_RATED_ALBUMS_ROW,
 } from './libraryCategoryLoader';
 import { reconcileEntries } from './reconcileEntries';
@@ -2213,7 +2214,8 @@ export function useRemoteSession() {
   };
 
   const librarySource = (catalog = activeCatalogRef.current): string => {
-    return catalog ? `catalog:${catalog.libraryId}:${catalog.revision}` : `player:${connectionAttemptRef.current}`;
+    return catalog ? `catalog:${catalog.libraryId}:${catalog.revision}:${supportsSplitGenres(featureSetRef.current)}`
+      : `player:${connectionAttemptRef.current}`;
   };
 
   const libraryLoadContext = (api: RemoteApi, catalog = activeCatalogRef.current, search = false): CategoryLoadContext => ({
@@ -2599,7 +2601,8 @@ export function useRemoteSession() {
           filter.albumArtist ?? null,
           filter.album ?? null,
           filter.genre ?? null,
-          exactAlbumKey
+          exactAlbumKey,
+          supportsSplitGenres(featureSetRef.current),
         );
         songs = res.songs.map(songFromCatalog);
         total = res.total;
