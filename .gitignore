@@ -50,6 +50,7 @@ local.properties
 
 # Tests are local only.
 __tests__/
+/scripts/test-*.cjs
 *.test.ts
 *.test.tsx
 /jest.config.js
