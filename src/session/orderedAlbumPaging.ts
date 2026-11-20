@@ -33,7 +33,7 @@ export function orderedAlbumList(
   if (context && !hasMore) {
     const pageTracks = page.groups.reduce((count, group) => count + group.count, 0);
     const trackCount = shown.reduce((count, entry) => {
-      const target = factory.target(entry.id);
+      const target = factory.target(entry);
       return count + (target?.type === 'Album' ? target.group.count : 0);
     }, pageTracks);
     factory.saveOrderedGroupTrackCount(context, revision, trackCount);
@@ -41,7 +41,7 @@ export function orderedAlbumList(
   const added = factory.albums(page.groups, context, shown);
   const extensionPage: OrderedAlbumCursor = { kind: 'orderedAlbums', context, revision, nextOffset, total };
   return {
-    entries: shown.length ? [...shown, ...added] : added,
+    entries: shown.length ? factory.append(shown, added) : added,
     total,
     label: orderedAlbumCountLabel(factory, extensionPage),
     hasMore,
@@ -50,9 +50,9 @@ export function orderedAlbumList(
 }
 
 function orderedAlbumCountLabel(factory: LibraryEntryFactory, cursor: OrderedAlbumCursor): string {
-  const saved = cursor.context && factory.orderedGroupTrackCount(cursor.context);
+  const count = cursor.context ? factory.orderedGroupTrackCount(cursor.context, cursor.revision) : undefined;
   const albums = `${cursor.total} albums`;
-  return saved && saved.revision === cursor.revision ? `${albums} · ${saved.count} tracks` : albums;
+  return count === undefined ? albums : `${albums} · ${count} tracks`;
 }
 
 /** Page one of the root Rating list when its revision moved on from `previous`, else null. */

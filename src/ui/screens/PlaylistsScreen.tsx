@@ -38,16 +38,16 @@ import { isShuffleMode } from '../../session/playbackModes';
 import { LibraryEntryKind, isCurrentEntry, opensCollection } from '../library/libraryEntryKind';
 import { LibraryItem, entryItems, nodeItem, playlistTrackItems, songIds } from '../library/libraryItems';
 import { inlineLibraryError, libraryStateMessage } from '../library/libraryStateMessage';
-import { rememberPlaylistArtwork, withRememberedPlaylistArtwork } from '../library/playlistArtworkMemory';
 import { useAlbumGrid } from '../library/useAlbumGrid';
 import { useCollectionTrail } from '../library/useCollectionTrail';
 import { useLibraryLevels } from '../library/useLibraryLevels';
 import { useLibraryListScroll } from '../library/useLibraryListScroll';
-import { useFirstEntryArtwork } from '../library/useFirstEntryArtwork';
+import { usePlaylistArtwork } from '../library/useFirstEntryArtwork';
 import { useBackInterceptor } from '../useBackInterceptor';
 import { useStableTrack } from '../useStableTrack';
 import { PlaylistEditOutcome, usePlaylistTrackEdits } from '../library/usePlaylistTrackEdits';
 import { BulkSelectionBar } from '../components/BulkSelectionBar';
+import { useBulkSelection } from '../library/useBulkSelection';
 import { BulkActionsSheet } from '../sheets/BulkActionsSheet';
 import { favoritesLabels } from '../library/libraryCategories';
 import { TOP_RATED_ALBUMS_ROW } from '../../session/libraryCategoryLoader';
@@ -76,7 +76,8 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
   const [editing, setEditing] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
+  const bulkSelection = useBulkSelection(selectedIds, onAction);
+  const bulkActionsOpen = bulkSelection.ids !== null;
   const exitSelection = useCallback(() => { setSelectionMode(false); setSelectedIds(new Set()); }, []);
   useBackInterceptor(editing || selectionMode, () => { if (editing) setEditing(false); else exitSelection(); });
   // A page load or refresh keeps the selection; only ids that vanished are dropped. Opening another
@@ -136,10 +137,7 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
   useEffect(() => {
     if (editing && playlist && !edits.busy && tracks.length === 0) setEditing(false);
   }, [editing, edits.busy, playlist, tracks.length]);
-  const playlistArtwork = useFirstEntryArtwork(playlist ? state.libraryEntries : null);
-  useEffect(() => {
-    if (playlist && playlistArtwork) rememberPlaylistArtwork(playlist.key, playlistArtwork);
-  }, [playlist, playlistArtwork]);
+  const playlistArtwork = usePlaylistArtwork(playlist?.key, state.libraryEntries);
 
   if (!nested) {
     rootNames.current = state.libraryEntries
@@ -149,7 +147,7 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
 
   const listedEntries = useMemo(() => {
     if (nested) return state.libraryEntries;
-    return withRememberedPlaylistArtwork(state.libraryEntries).map((entry) =>
+    return state.libraryEntries.map((entry) =>
       entry.playlistKey === '@favorites' ? { ...entry, title: t(favoritesLabel) } : entry
     );
   }, [nested, state.libraryEntries, t, favoritesLabel]);
@@ -312,7 +310,7 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
     }
   }
 
-  if (selectionMode) items.push(nodeItem('bulk-selection', <BulkSelectionBar count={selectedIds.size} onActions={() => setBulkActionsOpen(true)} onCancel={exitSelection} />));
+  if (selectionMode) items.push(nodeItem('bulk-selection', <BulkSelectionBar count={selectedIds.size} onActions={bulkSelection.open} onCancel={exitSelection} />));
 
   const inlineError = inlineLibraryError(state);
   if (inlineError) {
@@ -431,10 +429,10 @@ export function PlaylistsScreen({ state, onAction, contentBottomInset = Space.lg
       />
       <BulkActionsSheet
         visible={bulkActionsOpen}
-        ids={[...selectedIds]}
+        ids={bulkSelection.ids ?? []}
         state={state}
         onAction={onAction}
-        onClose={() => { setBulkActionsOpen(false); exitSelection(); }}
+        onClose={() => { bulkSelection.close(); exitSelection(); }}
       />
     </View>
   );

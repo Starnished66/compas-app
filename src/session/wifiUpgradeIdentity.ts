@@ -77,6 +77,7 @@ export async function verifyWifiUpgradeIdentity(
   pin: string | null,
   canContinue: () => boolean,
   gate = ungated,
+  onVerified?: (matchingRevision: string | null) => void,
 ): Promise<boolean> {
   if (!canContinue() || !(await gate())) return false;
   try {
@@ -85,7 +86,9 @@ export async function verifyWifiUpgradeIdentity(
     if (!canContinue() || !publicLibraryIdentityMatches(source.libraryId, publicLibraryId)) return false;
     if (pin) candidate.setPin(pin);
     const destination = await candidate.catalog(0, 1);
-    return canContinue() && source.libraryId === destination.libraryId;
+    if (!canContinue() || source.libraryId !== destination.libraryId) return false;
+    onVerified?.(source.revision === destination.revision ? source.revision : null);
+    return true;
   } catch {
     return false;
   }

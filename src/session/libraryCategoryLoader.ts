@@ -147,13 +147,20 @@ function list(entries: LibraryEntry[], total: number, label: string, extensionPa
   };
 }
 
+export async function readNetworkSongPage<T>(api: RemoteApi, read: () => Promise<T>) {
+  // The song endpoints do not include a catalog revision. Capture the status revision at the read.
+  const revision = api.catalogRevision ?? null;
+  const page = await read();
+  return { ...page, sourceRevision: api.catalogRevision === revision ? revision : null };
+}
+
 async function songsPage(context: CategoryLoadContext, offset: number, query: string | null) {
   const { catalog, store, api, searchSignal } = context;
-  if (!catalog) return searchSignal
+  if (!catalog) return readNetworkSongPage(api, () => searchSignal
     ? api.library(offset, LIBRARY_PAGE_SIZE, query, {}, searchSignal)
-    : api.library(offset, LIBRARY_PAGE_SIZE, query);
+    : api.library(offset, LIBRARY_PAGE_SIZE, query));
   const page = await store.songPage(catalog.libraryId, catalog.revision, offset, LIBRARY_PAGE_SIZE, query);
-  return { total: page.total, songs: page.songs.map(songFromCatalog) };
+  return { total: page.total, songs: page.songs.map(songFromCatalog), sourceRevision: catalog.revision };
 }
 
 async function groupList(context: CategoryLoadContext, group: GroupCategory, query: string | null): Promise<LibraryGroup[]> {
@@ -201,14 +208,14 @@ async function searchPages(context: CategoryLoadContext, term: string) {
 async function searchList(context: CategoryLoadContext, term: string): Promise<LibraryList> {
   const [[artists, albums, genres], songs] = await searchPages(context, term);
   const factory = context.entries;
-  const songEntries = factory.songs(songs.songs, {}, context.catalog?.revision ?? null);
+  const songEntries = factory.songs(songs.songs, {}, context.catalog?.revision ?? songs);
   const entries = [
-    ...factory.groups(artists, 'artist').map((entry, i) => ({ ...entry, subtitle: `Artist · ${artists[i].count} tracks`, subtitleTranslation: { source: 'Artist · {count} song', values: { count: artists[i].count } } })),
+    ...factory.groups(artists, 'artist').map((entry, i) => Object.assign(entry, { subtitle: `Artist · ${artists[i].count} tracks`, subtitleTranslation: { source: 'Artist · {count} song', values: { count: artists[i].count } } })),
     ...factory
       .albums(albums, null)
-      .map((entry, i) => ({ ...entry, subtitle: `Album · ${albums[i].albumArtist || albums[i].count + ' tracks'}`, subtitleTranslation: albums[i].albumArtist ? { source: 'Album · {artist}', values: { artist: albums[i].albumArtist! } } : { source: 'Album · {count} song', values: { count: albums[i].count } } })),
-    ...factory.groups(genres, 'genre').map((entry, i) => ({ ...entry, subtitle: `Genre · ${genres[i].count} tracks`, subtitleTranslation: { source: 'Genre · {count} song', values: { count: genres[i].count } } })),
-    ...songEntries.map((entry, i) => ({ ...entry, subtitle: `Track · ${songs.songs[i].artist || 'Unknown artist'}`, subtitleTranslation: songs.songs[i].artist ? undefined : { source: 'Unknown artist' } })),
+      .map((entry, i) => Object.assign(entry, { subtitle: `Album · ${albums[i].albumArtist || albums[i].count + ' tracks'}`, subtitleTranslation: albums[i].albumArtist ? { source: 'Album · {artist}', values: { artist: albums[i].albumArtist! } } : { source: 'Album · {count} song', values: { count: albums[i].count } } })),
+    ...factory.groups(genres, 'genre').map((entry, i) => Object.assign(entry, { subtitle: `Genre · ${genres[i].count} tracks`, subtitleTranslation: { source: 'Genre · {count} song', values: { count: genres[i].count } } })),
+    ...songEntries.map((entry, i) => Object.assign(entry, { subtitle: `Track · ${songs.songs[i].artist || 'Unknown artist'}`, subtitleTranslation: songs.songs[i].artist ? undefined : { source: 'Unknown artist' } })),
   ];
   const groupCount = artists.length + albums.length + genres.length;
   return {
@@ -256,8 +263,8 @@ export async function loadCategoryList(
     }
     case LibraryCategory.Recent: {
       requireFeature(context, 'recently_played', 'Recently played requires a newer player build');
-      const page = await api.recent();
-      return list(factory.songs(page.songs, { playlist: '@recently_played' }), page.total, `${page.total} recently played tracks`, {
+      const page = await readNetworkSongPage(api, () => api.recent());
+      return list(factory.songs(page.songs, { playlist: '@recently_played' }, page), page.total, `${page.total} recently played tracks`, {
         kind: 'recent',
         nextOffset: page.nextOffset,
         total: page.total,
@@ -265,9 +272,9 @@ export async function loadCategoryList(
     }
     case LibraryCategory.Favorites: {
       requireFeature(context, 'favorites_edit', 'Favorites requires a newer player build');
-      const page = await api.playlistPage('@favorites');
+      const page = await readNetworkSongPage(api, () => api.playlistPage('@favorites'));
       const { noun } = favoritesLabels(context.features);
-      return list(factory.songs(page.songs, { playlist: '@favorites' }), page.total, `${page.total} ${noun}`, {
+      return list(factory.songs(page.songs, { playlist: '@favorites' }, page), page.total, `${page.total} ${noun}`, {
         kind: 'playlist',
         key: '@favorites',
         nextOffset: page.nextOffset,
@@ -285,7 +292,7 @@ export async function loadCategoryList(
     }
     case LibraryCategory.Songs: {
       const page = await songsPage(context, 0, query);
-      return list(factory.songs(page.songs, {}, context.catalog?.revision ?? null), page.total, `${page.total} tracks`);
+      return list(factory.songs(page.songs, {}, context.catalog?.revision ?? page), page.total, `${page.total} tracks`);
     }
     case LibraryCategory.Search: {
       const term = query?.trim() || '';
@@ -307,5 +314,5 @@ export async function loadSongsAfter(
   query: string | null,
 ): Promise<{ entries: LibraryEntry[]; total: number }> {
   const page = await songsPage(context, offset, query);
-  return { entries: context.entries.songs(page.songs, {}, context.catalog?.revision ?? null, shown), total: page.total };
+  return { entries: context.entries.songs(page.songs, {}, context.catalog?.revision ?? page, shown), total: page.total };
 }

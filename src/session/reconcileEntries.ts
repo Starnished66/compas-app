@@ -14,13 +14,17 @@ function sameEntry(a: LibraryEntry, b: LibraryEntry): boolean {
   );
 }
 
-export function reconcileEntries(previous: LibraryEntry[], next: LibraryEntry[]): LibraryEntry[] {
+export function reconcileEntries(
+  previous: LibraryEntry[],
+  next: LibraryEntry[],
+  reuse: (fresh: LibraryEntry, kept: LibraryEntry) => LibraryEntry = (_fresh, kept) => kept,
+): LibraryEntry[] {
   if (!previous.length) return next;
   const previousById = new Map(previous.map((entry) => [entry.id, entry]));
   let unchanged = previous.length === next.length;
   const reconciled = next.map((entry, index) => {
     const match = previousById.get(entry.id);
-    const kept = match && sameEntry(match, entry) ? match : entry;
+    const kept = match && sameEntry(match, entry) ? reuse(entry, match) : entry;
     if (kept !== previous[index]) unchanged = false;
     return kept;
   });

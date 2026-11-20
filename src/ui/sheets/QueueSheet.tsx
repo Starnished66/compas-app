@@ -24,6 +24,7 @@ import { useSnackbar } from '../snackbar/useSnackbar';
 import { Space } from '../tokens';
 import { DragHandleProps, useDragReorder } from '../useDragReorder';
 import { useQueueReorder } from '../useQueueReorder';
+import { VisibleQueueArtworkContext, useQueueArtworkViewability, useQueueRowArtwork } from '../useQueueArtworkViewability';
 import { useOptimisticErrorSnackbar } from './useOptimisticErrorSnackbar';
 import { useI18n } from '../../i18n';
 import { isShuffleMode } from '../../session/playbackModes';
@@ -97,12 +98,13 @@ const QueueRow = memo(function QueueRow({
   const palette = usePalette();
   const title = track.title || t('Unknown song');
   const subtitle = trackSubtitle(track, t);
+  const artworkUri = useQueueRowArtwork(track);
   if (selecting) {
     return (
       <TrackRow
         title={title}
         subtitle={subtitle}
-        artworkUri={track.artwork}
+        artworkUri={artworkUri}
         artworkSize={QUEUE_ROW_ARTWORK}
         selected={selected}
         onPress={() => onToggleSelected(track)}
@@ -126,7 +128,7 @@ const QueueRow = memo(function QueueRow({
       <TrackRow
         title={title}
         subtitle={subtitle}
-        artworkUri={track.artwork}
+        artworkUri={artworkUri}
         artworkSize={QUEUE_ROW_ARTWORK}
         onPress={play}
         onLongPress={() => onBeginSelecting(track)}
@@ -157,6 +159,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
     snackbar.show({ text: t('Moved “{title}”', { title: track.title }), actionLabel: t('Undo'), onAction: () => reorder.move(to, from) }),
   );
   const rows = reorder.queue;
+  const { onViewableItemsChanged, visibleArtwork } = useQueueArtworkViewability(rows, onAction, visible);
   const drag = useDragReorder({
     itemCount: rows.length,
     rowHeight: QUEUE_ROW_HEIGHT,
@@ -366,26 +369,29 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
         caption={hasRows && canEditQueue ? t('Drag ≡ to reorder · swipe left to remove') : undefined}
         style={styles.sectionHeader}
       />
-      <DragReorderCellContext.Provider value={drag.rowStyle}>
-        {/* Recycles row views; mounting fresh rows was most of the main-thread cost while flinging. */}
-        <FlashList
-          data={rows}
-          // FlashList keeps a cell's rendered row when only its index changes; rows bind drag handles
-          // by index, so a reorder must re-render them or a handle drags the song that used to be there.
-          extraData={rows}
-          maintainVisibleContentPosition={NO_POSITION_KEEPING}
-          CellRendererComponent={DragReorderCell}
-          scrollEnabled={drag.scrollEnabled}
-          keyExtractor={keyOf}
-          renderItem={renderTrack}
-          ListEmptyComponent={emptyState}
-          ListFooterComponent={footer}
-          onEndReached={loadMore}
-          onEndReachedThreshold={END_REACHED_THRESHOLD}
-          showsVerticalScrollIndicator={false}
-          style={StyleSheet.flatten([styles.list, { backgroundColor: palette.surface }])}
-        />
-      </DragReorderCellContext.Provider>
+      <VisibleQueueArtworkContext.Provider value={visibleArtwork}>
+        <DragReorderCellContext.Provider value={drag.rowStyle}>
+          {/* Recycles row views; mounting fresh rows was most of the main-thread cost while flinging. */}
+          <FlashList
+            data={rows}
+            // FlashList keeps a cell's rendered row when only its index changes; rows bind drag handles
+            // by index, so a reorder must re-render them or a handle drags the song that used to be there.
+            extraData={rows}
+            maintainVisibleContentPosition={NO_POSITION_KEEPING}
+            CellRendererComponent={DragReorderCell}
+            scrollEnabled={drag.scrollEnabled}
+            keyExtractor={keyOf}
+            renderItem={renderTrack}
+            onViewableItemsChanged={onViewableItemsChanged}
+            ListEmptyComponent={emptyState}
+            ListFooterComponent={footer}
+            onEndReached={loadMore}
+            onEndReachedThreshold={END_REACHED_THRESHOLD}
+            showsVerticalScrollIndicator={false}
+            style={StyleSheet.flatten([styles.list, { backgroundColor: palette.surface }])}
+          />
+        </DragReorderCellContext.Provider>
+      </VisibleQueueArtworkContext.Provider>
       <ConfirmDialog
         visible={confirmingClear}
         title={t('Clear the queue?')}

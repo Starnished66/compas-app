@@ -87,3 +87,40 @@ export async function openCatalogDatabase(): Promise<SqlDatabase> {
     throw error;
   }
 }
+
+export async function ensureCatalogState(tx: SqlConnection, libraryId: string): Promise<void> {
+  await tx.run('INSERT OR IGNORE INTO catalog_state (library_id) VALUES (?)', [libraryId]);
+}
+
+export async function readCatalogState(tx: SqlConnection, libraryId: string): Promise<{
+  activeRevision: string | null;
+  activeTotal: number;
+  stageRevision: string | null;
+  stageTotal: number;
+  stageNextOffset: number;
+  coversRevision: string | null;
+  coversTotal: number;
+  coversNextOffset: number;
+  coversComplete: boolean;
+}> {
+  const row = await tx.queryFirst(
+    `SELECT active_revision, active_total, stage_revision, stage_total, stage_next_offset,
+            covers_revision, covers_total, covers_next_offset, covers_complete
+     FROM catalog_state WHERE library_id = ?`,
+    [libraryId]
+  );
+  if (!row) {
+    throw new Error('Catalog state is missing');
+  }
+  return {
+    activeRevision: row.active_revision || null,
+    activeTotal: Number(row.active_total || 0),
+    stageRevision: row.stage_revision || null,
+    stageTotal: Number(row.stage_total || 0),
+    stageNextOffset: Number(row.stage_next_offset || 0),
+    coversRevision: row.covers_revision || null,
+    coversTotal: Number(row.covers_total || 0),
+    coversNextOffset: Number(row.covers_next_offset || 0),
+    coversComplete: Boolean(row.covers_complete),
+  };
+}

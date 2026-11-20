@@ -7,6 +7,7 @@ import { LibraryEntryKind, isCurrentEntry } from '../library/libraryEntryKind';
 import { LibraryItem } from '../library/libraryItems';
 import { LibraryListScroll } from '../library/useLibraryListScroll';
 import { LIBRARY_VIEWABILITY_CONFIG, useLibraryPaging } from '../library/useLibraryPaging';
+import { VisibleLibraryArtworkContext } from '../library/visibleLibraryArtwork';
 import { AlbumTileRow } from './AlbumTileRow';
 import { LibraryEntryRow } from './LibraryEntryRow';
 import { DragReorderCell } from './DragReorderCell';
@@ -93,7 +94,7 @@ function LibraryListContent({
   onEntrySelectionLongPress,
   songSwipe,
 }: LibraryListProps) {
-  const { onEndReached, onViewableItemsChanged } = useLibraryPaging({ hasMore, status, onAction });
+  const { onEndReached, onViewableItemsChanged, visibleArtwork } = useLibraryPaging({ items, hasMore, status, onAction });
   const showMoreSongs = useCallback(
     (entry: LibraryEntry) => onAction({ type: 'OpenSongActions', id: entry.id }),
     [onAction],
@@ -184,30 +185,32 @@ function LibraryListContent({
   ]);
 
   return (
-    <FlashList
-      ref={listRef}
-      getItemType={itemTypeOf}
-      maintainVisibleContentPosition={NO_POSITION_KEEPING}
-      style={unclippedScroll}
-      data={items}
-      keyExtractor={keyOf}
-      renderItem={renderItem}
-      CellRendererComponent={renderPlaylistTrack ? DragReorderCell : undefined}
-      stickyHeaderIndices={stickyHeaderIndices}
-      onEndReached={onEndReached}
-      onEndReachedThreshold={END_REACHED_THRESHOLD}
-      onViewableItemsChanged={onViewableItemsChanged}
-      viewabilityConfig={LIBRARY_VIEWABILITY_CONFIG}
-      onScroll={scroll?.onScroll}
-      onContentSizeChange={scroll?.onContentSizeChange}
-      scrollEventThrottle={SCROLL_EVENT_THROTTLE}
-      scrollEnabled={scrollEnabled}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="on-drag"
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={contentContainerStyle}
-      ListFooterComponent={loadingMore ? loadingFooter : null}
-    />
+    <VisibleLibraryArtworkContext.Provider value={visibleArtwork}>
+      <FlashList
+        ref={listRef}
+        getItemType={itemTypeOf}
+        maintainVisibleContentPosition={NO_POSITION_KEEPING}
+        style={unclippedScroll}
+        data={items}
+        keyExtractor={keyOf}
+        renderItem={renderItem}
+        CellRendererComponent={renderPlaylistTrack ? DragReorderCell : undefined}
+        stickyHeaderIndices={stickyHeaderIndices}
+        onEndReached={onEndReached}
+        onEndReachedThreshold={END_REACHED_THRESHOLD}
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={LIBRARY_VIEWABILITY_CONFIG}
+        onScroll={scroll?.onScroll}
+        onContentSizeChange={scroll?.onContentSizeChange}
+        scrollEventThrottle={SCROLL_EVENT_THROTTLE}
+        scrollEnabled={scrollEnabled}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={contentContainerStyle}
+        ListFooterComponent={loadingMore ? loadingFooter : null}
+      />
+    </VisibleLibraryArtworkContext.Provider>
   );
 }
 

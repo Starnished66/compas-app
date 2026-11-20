@@ -1,4 +1,3 @@
-import { ArtworkDiskCache } from '../data/ArtworkDiskCache';
 import { RemoteApi } from '../data/RemoteApi';
 import { CatalogIdentity, SyncedCatalogStore } from '../data/SyncedCatalogStore';
 import { TrackIdentity, trackKey } from '../ui/trackKey';
@@ -44,7 +43,7 @@ function ensureTrackUnchanged(api: RemoteApi, commandGeneration: number): void {
 
 async function fetchCurrentArt(
   api: RemoteApi,
-  cache: ArtworkDiskCache,
+  { artCache: cache, coverStore }: ArtworkSources,
   key: string | null,
   commandGeneration: number,
   isCurrent: () => boolean,
@@ -59,12 +58,13 @@ async function fetchCurrentArt(
   }
   const art = await api.art(null);
   if (!ownsWrite() || !art?.base64) return null;
-  const fallback = `data:${art.contentType || 'image/jpeg'};base64,${art.base64}`;
-  if (!key) return fallback;
-  await cache.put(key, art.base64, ownsWrite);
-  if (!ownsWrite()) return null;
-  const cached = await cache.getUri(key);
-  return ownsWrite() ? cached ?? fallback : null;
+  if (key) {
+    await cache.put(key, art.base64, ownsWrite);
+    if (!ownsWrite()) return null;
+    const cached = await cache.getUri(key);
+    if (!ownsWrite() || cached) return ownsWrite() ? cached : null;
+  }
+  return coverStore.rememberIndexedArtwork(key, art.base64, art.contentType || 'image/jpeg')();
 }
 
 export function createNowPlayingArtworkLookup(deps: NowPlayingArtworkDeps): NowPlayingArtworkLookup {
@@ -74,7 +74,10 @@ export function createNowPlayingArtworkLookup(deps: NowPlayingArtworkDeps): NowP
       const cover = await syncedAlbumCover(track, sources, deps.catalogStore).catch(() => null);
       if (sources.isCurrent?.() === false) return null;
       const key = nowPlayingCacheKey(track, sources.catalog, sources.playerScope);
-      return cover ?? (key ? sources.artCache.getUri(key) : null);
+      if (cover || !key) return cover;
+      const file = await sources.artCache.getUri(key);
+      if (sources.isCurrent?.() === false) return null;
+      return file ?? sources.coverStore.indexedArtwork(key)?.() ?? null;
     },
     async remote(track, commandGeneration, ownsLookup) {
       const api = deps.api();
@@ -86,7 +89,7 @@ export function createNowPlayingArtworkLookup(deps: NowPlayingArtworkDeps): NowP
       const sources = deps.sources();
       const artwork = await fetchCurrentArt(
         api,
-        sources.artCache,
+        sources,
         nowPlayingCacheKey(track, sources.catalog, sources.playerScope),
         commandGeneration,
         isCurrent,

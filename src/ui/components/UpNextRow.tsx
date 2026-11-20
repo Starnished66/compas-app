@@ -10,6 +10,7 @@ import { ArtworkThumb } from './ArtworkThumb';
 import { Icon } from './Icon';
 import { PlayingIndicator } from './PlayingIndicator';
 import { useI18n } from '../../i18n';
+import { useQueueRowArtwork } from '../useQueueArtworkViewability';
 
 export interface UpNextRowProps {
   track: RemoteTrack;
@@ -50,6 +51,7 @@ function UpNextRowContent({ track, index, editing, current, playing, onPress, on
     [progress],
   );
   const subtitle = track.artist || t('Unknown artist');
+  const artworkUri = useQueueRowArtwork(track);
 
   return (
     <Pressable
@@ -63,7 +65,7 @@ function UpNextRowContent({ track, index, editing, current, playing, onPress, on
     >
       <View style={styles.content}>
         <Animated.View style={[styles.shifted, editing && styles.shiftedEditing, motion.shifted]}>
-          <ArtworkThumb uri={track.artwork} size={Size.rowArtwork} placeholderIcon="music" />
+          <ArtworkThumb uri={artworkUri} size={Size.rowArtwork} placeholderIcon="music" />
           <View style={styles.text}>
             <AppText variant="bodyStrong" tone={current && !editing ? 'accent' : 'ink'} numberOfLines={1}>
               {track.title}

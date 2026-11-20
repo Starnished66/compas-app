@@ -1,7 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { sha256Sync, bytesToBase64, base64ToBytes } from './cryptoUtils';
 
-const MEMORY_FALLBACK_LIMIT = 32;
 const activeTemporaries = new Set<string>();
 const directoryRevisions = new Map<string, number>();
 
@@ -13,7 +12,6 @@ export class ArtworkDiskCache {
   readonly directory: string;
   readonly maxEntries: number;
   readonly maxBytes: number;
-  private memoryCache = new Map<string, string>(); // fallback memory cache, used only when disk writes fail
   // Built once from the directory, then kept current by writes and read hits. Map order is LRU (oldest first).
   private index: Map<string, IndexEntry> | null = null;
   private indexLoad: Promise<void> | null = null;
@@ -46,6 +44,10 @@ export class ArtworkDiskCache {
     return `${this.directory}/${this.nameFor(key)}`;
   }
 
+  private fileUri(target: string): string {
+    return target.startsWith('file:') ? target : `file://${target}`;
+  }
+
   private nameFor(key: string): string {
     return `${ArtworkDiskCache.hashKey(key)}.art`;
   }
@@ -64,14 +66,13 @@ export class ArtworkDiskCache {
       const info = await FileSystem.getInfoAsync(target);
       if (info.exists && !info.isDirectory) {
         this.touch(this.nameFor(key));
-        return target;
+        return this.fileUri(target);
       }
       this.forget(this.nameFor(key));
     } catch {
-      // The in-memory copy is still usable if disk access fails.
+      // A failed stat leaves the file unverified.
     }
-    const base64 = this.memoryCache.get(key);
-    return base64 ? (base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`) : null;
+    return null;
   }
 
   async get(key: number | string): Promise<string | null> {
@@ -93,7 +94,7 @@ export class ArtworkDiskCache {
     } catch {
       // fallback
     }
-    return this.memoryCache.get(key) || null;
+    return null;
   }
 
   async getBytes(key: number | string): Promise<Uint8Array | null> {
@@ -109,24 +110,15 @@ export class ArtworkDiskCache {
     const base64 = typeof data === 'string' ? data : bytesToBase64(data);
     if (!key || !base64 || !ownsWrite()) return;
     try {
-      const target = await this.writeTemporary(key, async (temporary) => {
+      await this.writeTemporary(key, async (temporary) => {
         await FileSystem.writeAsStringAsync(temporary, base64, {
           encoding: FileSystem.EncodingType.Base64,
         });
         return true;
       }, ownsWrite, Math.floor((base64.length * 3) / 4));
-      if (target && ownsWrite()) this.memoryCache.delete(key);
     } catch {
-      if (ownsWrite()) this.rememberInMemory(key, base64);
+      // Callers can retain a bounded memory fallback.
     }
-  }
-
-  private rememberInMemory(key: string, base64: string): void {
-    this.memoryCache.delete(key);
-    if (this.memoryCache.size >= MEMORY_FALLBACK_LIMIT) {
-      this.memoryCache.delete(this.memoryCache.keys().next().value as string);
-    }
-    this.memoryCache.set(key, base64);
   }
 
   store(
@@ -170,7 +162,7 @@ export class ArtworkDiskCache {
           return false;
         }
       });
-      return ownsWrite() ? target : null;
+      return ownsWrite() ? this.fileUri(target) : null;
     } finally {
       if (!moved) await FileSystem.deleteAsync(temporary, { idempotent: true }).catch(() => {});
       activeTemporaries.delete(temporary);
@@ -185,7 +177,6 @@ export class ArtworkDiskCache {
   }
 
   async clear(): Promise<void> {
-    this.memoryCache.clear();
     this.indexGeneration++;
     this.resetIndex();
     try {

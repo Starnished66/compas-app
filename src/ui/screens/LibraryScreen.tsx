@@ -49,6 +49,7 @@ import { useBackInterceptor } from '../useBackInterceptor';
 import { useTabActive } from '../tabActivity';
 import { SearchScreen } from './SearchScreen';
 import { BulkSelectionBar } from '../components/BulkSelectionBar';
+import { useBulkSelection } from '../library/useBulkSelection';
 import { BulkActionsSheet } from '../sheets/BulkActionsSheet';
 
 export interface LibraryScreenProps {
@@ -84,7 +85,8 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
+  const bulkSelection = useBulkSelection(selectedIds, onAction);
+  const bulkActionsOpen = bulkSelection.ids !== null;
   const exitSelection = useCallback(() => { setSelectionMode(false); setSelectedIds(new Set()); }, []);
   const tabActive = useTabActive();
   useEffect(() => {
@@ -365,7 +367,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
       items.push(nodeItem('placeholder', <LibraryPlaceholder {...placeholder} />));
     } else {
       if (selectionMode) {
-        items.push(nodeItem('selection', <BulkSelectionBar count={selectedCount} onActions={() => setBulkActionsOpen(true)} onCancel={exitSelection} />));
+        items.push(nodeItem('selection', <BulkSelectionBar count={selectedCount} onActions={bulkSelection.open} onCancel={exitSelection} />));
       }
       if (!albumDetail) {
         items.push(
@@ -388,7 +390,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
     searchActive, nested, albumDetail, step, nestedTitle, t, onAction, artistDetail, nativeCollectionPlayback,
     nativeGenrePlayback, nativeRootSongsPlayback, collectionBusy, shuffleActive, onLeadingLayout, chipsStuck, insetTop,
     supportedFeatures, category, connected, railGutter, albumEntries, libraryCountLabel,
-    inlineError, placeholder, selectionMode, selectedCount, exitSelection, entryCount, noun, ascending, localDirectionSort,
+    inlineError, placeholder, selectionMode, selectedCount, bulkSelection.open, exitSelection, entryCount, noun, ascending, localDirectionSort,
     showGrid, gridCapable, flip,
   ]);
 
@@ -412,10 +414,10 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
         <FlipGhostLayer />
         <BulkActionsSheet
           visible={bulkActionsOpen}
-          ids={[...selectedIds]}
+          ids={bulkSelection.ids ?? []}
           state={state}
           onAction={onAction}
-          onClose={() => { setBulkActionsOpen(false); exitSelection(); }}
+          onClose={() => { bulkSelection.close(); exitSelection(); }}
         />
       </View>
     </FlipContext.Provider>
@@ -434,7 +436,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
         selectedIds={selectedIds}
         onSelectEntry={selectEntry}
         onEntrySelectionLongPress={longPressEntry}
-        onOpenBulkActions={() => setBulkActionsOpen(true)}
+        onOpenBulkActions={bulkSelection.open}
         onCancelSelection={exitSelection}
       />,
     );

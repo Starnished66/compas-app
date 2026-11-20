@@ -6,6 +6,7 @@ import { songCount } from '../countLabels';
 import { Space } from '../tokens';
 import { sameSong } from '../trackKey';
 import { useUpNextQueue } from '../useUpNextQueue';
+import { VisibleQueueArtworkContext, useQueueArtworkViewability } from '../useQueueArtworkViewability';
 import { CardSection } from './CardSection';
 import { DragReorderCell } from './DragReorderCell';
 import { DragReorderCellContext } from './dragReorderCellContext';
@@ -45,6 +46,7 @@ export const UpNextList = forwardRef<FlatList<RemoteTrack>, UpNextListProps>(fun
   const { t } = useI18n();
   const queue = useUpNextQueue(state, onAction, editing, UP_NEXT_ROW_HEIGHT, onReorderActiveChange);
   const { rows, drag, canEditQueue, playTrack, removeTrack } = queue;
+  const { onViewableItemsChanged, visibleArtwork } = useQueueArtworkViewability(rows, onAction);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [footerHeight, setFooterHeight] = useState(0);
   const hasRows = rows.length > 0;
@@ -77,45 +79,48 @@ export const UpNextList = forwardRef<FlatList<RemoteTrack>, UpNextListProps>(fun
   );
 
   return (
-    <DragReorderCellContext.Provider value={drag.rowStyle}>
-      <ScrollLinkedFlatList
-        {...scrollProps}
-        ref={ref}
-        style={unclippedScroll}
-        data={rows}
-        keyExtractor={keyOf}
-        renderItem={renderItem}
-        strictMode
-        CellRendererComponent={DragReorderCell}
-        initialNumToRender={INITIAL_ROWS}
-        maxToRenderPerBatch={ROWS_PER_BATCH}
-        windowSize={RENDER_WINDOW}
-        ListHeaderComponent={
-          <CardSection
-            edge="top"
-            style={styles.header}
-            onLayout={(event) => setHeaderHeight(event.nativeEvent.layout.height)}
-          >
-            <SectionHeader
-              label={t('Up next')}
-              caption={hasRows || total > 0 ? localizedCountLabel(songCount(total), t) : undefined}
-              actionLabel={hasRows ? t(editing ? 'Done' : 'Edit') : undefined}
-              actionSelected={editing}
-              onAction={onToggleEditing}
+    <VisibleQueueArtworkContext.Provider value={visibleArtwork}>
+      <DragReorderCellContext.Provider value={drag.rowStyle}>
+        <ScrollLinkedFlatList
+          {...scrollProps}
+          ref={ref}
+          style={unclippedScroll}
+          data={rows}
+          keyExtractor={keyOf}
+          renderItem={renderItem}
+          onViewableItemsChanged={onViewableItemsChanged}
+          strictMode
+          CellRendererComponent={DragReorderCell}
+          initialNumToRender={INITIAL_ROWS}
+          maxToRenderPerBatch={ROWS_PER_BATCH}
+          windowSize={RENDER_WINDOW}
+          ListHeaderComponent={
+            <CardSection
+              edge="top"
+              style={styles.header}
+              onLayout={(event) => setHeaderHeight(event.nativeEvent.layout.height)}
+            >
+              <SectionHeader
+                label={t('Up next')}
+                caption={hasRows || total > 0 ? localizedCountLabel(songCount(total), t) : undefined}
+                actionLabel={hasRows ? t(editing ? 'Done' : 'Edit') : undefined}
+                actionSelected={editing}
+                onAction={onToggleEditing}
+              />
+            </CardSection>
+          }
+          ListFooterComponent={
+            <UpNextFooter
+              hasRows={hasRows}
+              status={state.queueStatus}
+              loadingMore={state.queueLoadingMore}
+              hasMore={state.queueHasMore}
+              onLayout={(event) => setFooterHeight(event.nativeEvent.layout.height)}
             />
-          </CardSection>
-        }
-        ListFooterComponent={
-          <UpNextFooter
-            hasRows={hasRows}
-            status={state.queueStatus}
-            loadingMore={state.queueLoadingMore}
-            hasMore={state.queueHasMore}
-            onLayout={(event) => setFooterHeight(event.nativeEvent.layout.height)}
-          />
-        }
-      />
-    </DragReorderCellContext.Provider>
+          }
+        />
+      </DragReorderCellContext.Provider>
+    </VisibleQueueArtworkContext.Provider>
   );
 });
 

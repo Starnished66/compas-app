@@ -1,8 +1,10 @@
 import { ArtworkDiskCache } from '../data/ArtworkDiskCache';
 import { ArtworkDestinationError } from '../data/HttpTransport';
+import { ArtworkReference, readArtwork } from '../data/MemoryArtworkCache';
 import { RemoteApi } from '../data/RemoteApi';
 import { CatalogIdentity, StoredCatalogCover } from '../data/SyncedCatalogStore';
 import { SyncedCoverStore } from '../data/SyncedCoverStore';
+import type { EntryTarget } from './LibraryEntryFactory';
 
 export interface ArtworkTarget {
   albumKey: string | null;
@@ -20,7 +22,27 @@ export interface ArtworkSources {
   isCurrent?: () => boolean;
 }
 
-async function syncedCoverUri(albumKey: string, sources: ArtworkSources): Promise<string | null> {
+export function artworkTarget(target: EntryTarget, playlistTarget: (key: string) => ArtworkTarget | undefined): ArtworkTarget {
+  if (target.type === 'Playlist') return playlistTarget(target.playlist.key) ?? { albumKey: null, songIndex: null };
+  const item = target.type === 'Song' ? target.song : target.type === 'Album' || target.type === 'Group' ? target.group : null;
+  return { albumKey: item?.albumKey ?? null, songIndex: item?.index ?? null };
+}
+
+function albumMemoryLookup(albumKey: string, sources: ArtworkSources): (() => string | null) | null {
+  const libraryId = sources.catalog?.libraryId;
+  const coverKey = sources.coversByAlbum.get(albumKey)?.coverKey;
+  const { coverStore } = sources;
+  return libraryId && coverKey ? () => coverStore.getMemoryUri(libraryId, coverKey) : null;
+}
+
+export function cachedAlbumArtwork(albumKey: string, sources: ArtworkSources): ArtworkReference | null {
+  const file = sources.coverUrisByAlbum.get(albumKey);
+  if (file) return file;
+  const read = albumMemoryLookup(albumKey, sources);
+  return read?.() ? read : null;
+}
+
+async function syncedCoverUri(albumKey: string, sources: ArtworkSources): Promise<ArtworkReference | null> {
   if (!sources.catalog || sources.isCurrent?.() === false) return null;
   const cached = sources.coverUrisByAlbum.get(albumKey);
   if (cached) return cached;
@@ -28,11 +50,15 @@ async function syncedCoverUri(albumKey: string, sources: ArtworkSources): Promis
   if (!cover) return null;
   const uri = await sources.coverStore.getUri(sources.catalog.libraryId, cover.coverKey);
   if (sources.isCurrent?.() === false) return null;
-  if (uri) sources.coverUrisByAlbum.set(albumKey, uri);
-  return uri;
+  if (!uri) return null;
+  if (uri.startsWith('file:')) {
+    sources.coverUrisByAlbum.set(albumKey, uri);
+    return uri;
+  }
+  return albumMemoryLookup(albumKey, sources);
 }
 
-async function songArtUri(songIndex: number, sources: ArtworkSources): Promise<string | null> {
+async function songArtUri(songIndex: number, sources: ArtworkSources): Promise<ArtworkReference | null> {
   // Song indexes are local to a player's library. Scope persistent art by the
   // catalog identity so another player reusing the same index cannot show it.
   const catalog = sources.catalog;
@@ -42,7 +68,9 @@ async function songArtUri(songIndex: number, sources: ArtworkSources): Promise<s
   const cacheKey = scope ? `${scope}song:${songIndex}` : null;
   const diskUri = cacheKey ? await sources.artCache.getUri(cacheKey) : null;
   if (sources.isCurrent?.() === false) return null;
-  if (diskUri || !sources.network) return diskUri;
+  if (diskUri) return diskUri;
+  const memory = cacheKey ? sources.coverStore.indexedArtwork(cacheKey) : null;
+  if (memory || !sources.network) return memory;
   const { network, artCache, isCurrent } = sources;
   const owns = isCurrent ?? (() => true);
   try {
@@ -67,17 +95,24 @@ async function songArtUri(songIndex: number, sources: ArtworkSources): Promise<s
       if (!owns()) return null;
       cached = await artCache.getUri(cacheKey);
     }
-    return owns() ? cached ?? `data:${art.contentType || 'image/jpeg'};base64,${art.base64}` : null;
+    if (!owns()) return null;
+    return cached ?? sources.coverStore.rememberIndexedArtwork(cacheKey, art.base64, art.contentType || 'image/jpeg');
   } catch {
     return null;
   }
 }
 
-export async function resolveArtworkUri({ albumKey, songIndex }: ArtworkTarget, sources: ArtworkSources): Promise<string | null> {
+export async function resolveArtworkReference({ albumKey, songIndex }: ArtworkTarget, sources: ArtworkSources): Promise<ArtworkReference | null> {
   const cover = albumKey ? await syncedCoverUri(albumKey, sources) : null;
   if (sources.isCurrent?.() === false) return null;
   if (cover) return cover;
   return songIndex != null ? await songArtUri(songIndex, sources) : null;
+}
+
+export async function resolveArtworkUri(target: ArtworkTarget, sources: ArtworkSources): Promise<string | null> {
+  const artwork = await resolveArtworkReference(target, sources);
+  if (sources.isCurrent?.() === false) return null;
+  return readArtwork(artwork) ?? null;
 }
 
 export async function fetchCatalogCover(
@@ -99,7 +134,9 @@ export async function fetchCatalogCover(
   }
   const art = await request(() => network.catalogArt(revision, representativeId, coverKey));
   if (!owns() || !art?.base64) return { uri: null, onDisk: false };
-  const uri = await store.put(libraryId, coverKey, art.base64, owns);
+  const uri = await store.put(libraryId, coverKey, art.base64, owns, art.contentType || 'image/jpeg');
   if (!owns()) return { uri: null, onDisk: false };
-  return { uri: uri ?? `data:${art.contentType || 'image/jpeg'};base64,${art.base64}`, onDisk: Boolean(uri) };
+  if (uri) return { uri, onDisk: true };
+  const fallback = store.getMemoryUri(libraryId, coverKey) ?? `data:${art.contentType || 'image/jpeg'};base64,${art.base64}`;
+  return { uri: fallback, onDisk: false };
 }

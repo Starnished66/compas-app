@@ -1,16 +1,17 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { boundedMemo } from './boundedMemo';
 import { bytesToBase64, base64ToBytes } from './cryptoUtils';
+import { MemoryArtworkCache } from './MemoryArtworkCache';
 import { legacyCoverDigest } from './sha256';
 
 const DIGEST_CACHE_LIMIT = 8192;
 const cachedDigest = boundedMemo(legacyCoverDigest, DIGEST_CACHE_LIMIT);
-const MEMORY_FALLBACK_LIMIT = 48;
 
 export class SyncedCoverStore {
   readonly root: string;
   // Covers whose disk write failed, kept for display this session only; oldest use is evicted first.
-  private memoryStore = new Map<string, string>();
+  private readonly memoryStore = new MemoryArtworkCache();
+  private unscopedArtworkId = 0;
   private activeTemporaries = new Set<string>();
 
   constructor(root?: string) {
@@ -28,12 +29,11 @@ export class SyncedCoverStore {
     return `${this.root}/${libHash}/${coverHash}.cover`;
   }
 
-  async getUri(libraryId: string, coverKey: string, mimeType: string = 'image/jpeg'): Promise<string | null> {
+  async getUri(libraryId: string, coverKey: string, mimeType?: string): Promise<string | null> {
     if (!libraryId.trim() || !coverKey.trim()) return null;
     const diskUri = await this.getDiskUri(libraryId, coverKey);
     if (diskUri) return diskUri;
-    const base64 = this.memoryGet(this.memoryKey(libraryId, coverKey));
-    return base64 ? `data:${mimeType};base64,${base64}` : null;
+    return this.getMemoryUri(libraryId, coverKey, mimeType);
   }
 
   async getDiskUri(libraryId: string, coverKey: string): Promise<string | null> {
@@ -57,21 +57,19 @@ export class SyncedCoverStore {
     return `${libraryId}\u0000${coverKey}`;
   }
 
-  private memoryGet(key: string): string | undefined {
-    const base64 = this.memoryStore.get(key);
-    if (base64 !== undefined) {
-      this.memoryStore.delete(key);
-      this.memoryStore.set(key, base64);
-    }
-    return base64;
+  getMemoryUri(libraryId: string, coverKey: string, mimeType?: string): string | null {
+    return this.memoryStore.uri(this.memoryKey(libraryId, coverKey), mimeType);
   }
 
-  private memorySet(key: string, base64: string): void {
-    this.memoryStore.delete(key);
-    if (this.memoryStore.size >= MEMORY_FALLBACK_LIMIT) {
-      this.memoryStore.delete(this.memoryStore.keys().next().value as string);
-    }
-    this.memoryStore.set(key, base64);
+  indexedArtwork(scope: string): (() => string | null) | null {
+    const key = `indexed:${scope}`;
+    return this.memoryStore.get(key) ? () => this.memoryStore.uri(key) : null;
+  }
+
+  rememberIndexedArtwork(scope: string | null, base64: string, mimeType: string): () => string | null {
+    const key = scope ? `indexed:${scope}` : `indexed:unscoped:${++this.unscopedArtworkId}`;
+    this.memoryStore.set(key, base64, mimeType);
+    return () => this.memoryStore.uri(key);
   }
 
   async get(libraryId: string, coverKey: string): Promise<string | null> {
@@ -87,7 +85,7 @@ export class SyncedCoverStore {
     } catch {
       // fallback
     }
-    return this.memoryGet(this.memoryKey(libraryId, coverKey)) || null;
+    return this.memoryStore.get(this.memoryKey(libraryId, coverKey))?.base64 ?? null;
   }
 
   async getBytes(libraryId: string, coverKey: string): Promise<Uint8Array | null> {
@@ -96,7 +94,11 @@ export class SyncedCoverStore {
   }
 
   async put(
-    libraryId: string, coverKey: string, data: Uint8Array | string, ownsWrite: () => boolean = () => true
+    libraryId: string,
+    coverKey: string,
+    data: Uint8Array | string,
+    ownsWrite: () => boolean = () => true,
+    mimeType = 'image/jpeg',
   ): Promise<string | null> {
     if (!ownsWrite()) return null;
     const base64 = typeof data === 'string' ? data : bytesToBase64(data);
@@ -109,7 +111,7 @@ export class SyncedCoverStore {
         return undefined;
       }
     }, ownsWrite);
-    if (uri === undefined && ownsWrite()) this.memorySet(this.memoryKey(libraryId, coverKey), base64);
+    if (uri === undefined && ownsWrite()) this.memoryStore.set(this.memoryKey(libraryId, coverKey), base64, mimeType);
     return uri ?? null;
   }
 
@@ -196,7 +198,8 @@ export class SyncedCoverStore {
     const keep = new Set(keepIds.map((id) => SyncedCoverStore.digest(id)));
     const keepMemory = new Set(keepIds);
     for (const key of Array.from(this.memoryStore.keys())) {
-      if (!keepMemory.has(key.substring(0, key.indexOf('\u0000')))) this.memoryStore.delete(key);
+      const separator = key.indexOf('\u0000');
+      if (separator >= 0 && !keepMemory.has(key.substring(0, separator))) this.memoryStore.delete(key);
     }
 
     return this.removeStaleEntries(this.root, ownsCleanup, (name) => !keep.has(name));

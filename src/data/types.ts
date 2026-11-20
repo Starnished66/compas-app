@@ -1,3 +1,4 @@
+import type { ArtworkReference } from './MemoryArtworkCache';
 import type { DacMode } from './dacMode';
 import type { LibrarySortMode, LibrarySortScope } from './librarySortModes';
 
@@ -276,6 +277,7 @@ export interface RemoteTrack {
   album: string;
   duration: string;
   artwork?: string | null;
+  artworkReference?: ArtworkReference;
   codec?: string | null;
   sourceBitDepth?: number | null;
   sourceSampleRateHz?: number | null;
@@ -289,6 +291,7 @@ export interface LibraryEntry {
   subtitle: string;
   subtitleTranslation?: { source: string; values?: Record<string, string | number> };
   artwork?: string | null;
+  artworkReference?: ArtworkReference;
   kind?: 'song' | 'other';
   favorite?: boolean;
   playlistKey?: string;
@@ -434,6 +437,7 @@ export type RemoteAction =
   | { type: 'SearchLibrary'; query: string }
   | { type: 'LoadMoreLibrary' }
   | { type: 'LoadMoreQueue' }
+  | { type: 'RetryQueueArtwork'; ids: string[] }
   | { type: 'LoadLibraryArtwork'; entryId: string }
   | { type: 'SelectLibraryEntry'; id: string }
   | { type: 'RemoveQueueTrack'; id: string }
@@ -457,6 +461,7 @@ export type RemoteAction =
   | { type: 'MovePlaylistTrack'; direction: -1 | 1 }
   | { type: 'ImportPlaylist'; name: string }
   | { type: 'LoadBulkPlaylists' }
+  | { type: 'CaptureBulkSelection' | 'ReleaseBulkSelection'; ids: string[] }
   | { type: 'RunBulkAction'; ids: string[]; action: 'queue' | 'random' | 'favorite' | 'playlist' | 'createPlaylist'; favorite?: boolean; key?: string; name?: string }
   | { type: 'CancelBulkAction' }
   | { type: 'RemoveQueueTracks'; ids: string[] };
