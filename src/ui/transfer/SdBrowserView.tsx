@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { FlatList, ScrollView, StyleSheet, View } from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
 import { WifiImportFileEntry } from '../../data/types';
 import { useI18n } from '../../i18n';
 import { formatBytes, sdBreadcrumb, sdParent } from '../../session/transferPlan';
@@ -54,9 +54,9 @@ export function SdBrowserView({ browser, canBrowse, canMutate, foldersOnly, onEn
     <View style={styles.flex}>
       <View style={styles.row}>
         <IconButton icon="chevronLeft" label={t('Up')} size="sm" disabled={parent === null || locked} onPress={() => parent !== null && void browser.load(parent)} />
-        <ScrollView horizontal style={styles.flex}>
-          <AppText variant="bodyStrong">{sdBreadcrumb(browser.path, t('Player SD card'))}</AppText>
-        </ScrollView>
+        <AppText variant="bodyStrong" numberOfLines={1} ellipsizeMode="head" style={styles.flex}>
+          {sdBreadcrumb(browser.path, t('Player SD card'))}
+        </AppText>
         <HiddenFilesButton title={t('Player SD card')} showHidden={browser.showHidden}
           disabled={locked} onPress={() => void browser.toggleHidden()} />
         {browser.loading ? <Spinner /> : null}

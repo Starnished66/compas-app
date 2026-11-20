@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { useI18n } from '../../i18n';
 import { ConnectionStatus, LibraryCategory, type LibraryEntry, type Playlist, type RemoteUiState } from '../../data/types';
-import { favoritesLabels } from '../library/libraryCategories';
+import { builtInPlaylistLabel } from '../library/libraryCategories';
 import { opensCollection, type LibraryEntryKind } from '../library/libraryEntryKind';
 import { entryItems, playlistTrackItems } from '../library/libraryItems';
 import { playlistDisplayName } from '../playlistName';
@@ -61,8 +61,8 @@ export function usePlaylistBrowsing(state: RemoteUiState, onAction: Action, edit
 
   const nested = state.libraryIsNested;
   const playlist = nested ? state.activePlaylist ?? null : null;
-  const { label: favoritesLabel } = favoritesLabels(state.supportedFeatures);
-  const playlistName = playlist?.key === '@favorites' ? t(favoritesLabel) : playlist ? playlistDisplayName(playlist.name) : '';
+  const playlistLabel = builtInPlaylistLabel(playlist?.key, state.supportedFeatures);
+  const playlistName = playlistLabel ? t(playlistLabel) : playlist ? playlistDisplayName(playlist.name) : '';
   const nestedTitle = state.libraryNestedTitle;
   const ratedAlbums = nested && !playlist && nestedTitle === TOP_RATED_ALBUMS_ROW.title;
   const { current: collection, rememberOpening } = useCollectionTrail(state.libraryEntries, nested && !playlist);
@@ -86,7 +86,7 @@ export function usePlaylistBrowsing(state: RemoteUiState, onAction: Action, edit
   });
 
   return {
-    rootNames, tileWidth, snackbar, nested, playlist, favoritesLabel, playlistName, nestedTitle, ratedAlbums,
+    rootNames, tileWidth, snackbar, nested, playlist, playlistName, nestedTitle, ratedAlbums,
     rememberOpening, album, canEditPlaylists, canImport, canEditTracks, editMode, songSwipe, scroll, levels,
   };
 }
@@ -118,7 +118,7 @@ export function usePlaylistEditing(
 export type Editing = ReturnType<typeof usePlaylistEditing>;
 
 export function usePlaylistRows(state: RemoteUiState, browse: Browse, { tracks }: Editing, t: Translate) {
-  const { rootNames, playlist, favoritesLabel, nested, ratedAlbums, nestedTitle, album } = browse;
+  const { rootNames, playlist, nested, ratedAlbums, nestedTitle, album } = browse;
   const playlistArtwork = usePlaylistArtwork(playlist?.key, state.libraryEntries);
 
   if (!nested) {
@@ -129,10 +129,11 @@ export function usePlaylistRows(state: RemoteUiState, browse: Browse, { tracks }
 
   const listedEntries = useMemo(() => {
     if (nested) return state.libraryEntries;
-    return state.libraryEntries.map((entry) =>
-      entry.playlistKey === '@favorites' ? { ...entry, title: t(favoritesLabel) } : entry
-    );
-  }, [nested, state.libraryEntries, t, favoritesLabel]);
+    return state.libraryEntries.map((entry) => {
+      const label = builtInPlaylistLabel(entry.playlistKey, state.supportedFeatures);
+      return label ? { ...entry, title: t(label) } : entry;
+    });
+  }, [nested, state.libraryEntries, t, state.supportedFeatures]);
   const showingPlaylist = playlist != null;
   const rowItems = useMemo(
     () =>

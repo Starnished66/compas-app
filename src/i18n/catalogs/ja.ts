@@ -12,6 +12,7 @@ export const ja: Record<string, TranslationValue> = {
   "No songs rated 3 stars or higher yet": "星3つ以上の曲はまだありません",
   "Top rated": "高評価の曲",
   "Top rated albums": "高評価のアルバム",
+  'Most played': 'よく再生された曲',
   "{count} top rated tracks": "高評価の曲{count}曲",
   "USB DAC": "USB DAC",
   "Bluetooth DAC": "Bluetooth DAC",

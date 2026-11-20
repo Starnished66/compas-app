@@ -11,6 +11,7 @@ export const ru: Record<string, TranslationValue> = {
   'No songs rated 3 stars or higher yet': 'Пока нет песен с оценкой 3 звезды или выше',
   'Top rated': 'С высокой оценкой',
   'Top rated albums': 'Альбомы с высокой оценкой',
+  'Most played': 'Часто воспроизводимые',
   '{count} top rated tracks': { one: '{count} трек с высокой оценкой', few: '{count} трека с высокой оценкой', many: '{count} треков с высокой оценкой', other: '{count} трека с высокой оценкой' },
   'USB DAC': 'USB DAC',
   'Bluetooth DAC': 'Bluetooth DAC',

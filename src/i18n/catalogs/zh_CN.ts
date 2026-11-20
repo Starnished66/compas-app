@@ -12,6 +12,7 @@ export const zh_CN: Record<string, TranslationValue> = {
   "No songs rated 3 stars or higher yet": "暂无获得 3 星或更高评分的歌曲",
   "Top rated": "高分歌曲",
   "Top rated albums": "高分专辑",
+  'Most played': '最常播放',
   "{count} top rated tracks": "{count} 首高分歌曲",
   "USB DAC": "USB DAC",
   "Bluetooth DAC": "Bluetooth DAC",

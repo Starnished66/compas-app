@@ -12,6 +12,7 @@ export const vi: Record<string, TranslationValue> = {
   "No songs rated 3 stars or higher yet": "Chưa có bài hát nào được đánh giá từ 3 sao trở lên",
   "Top rated": "Được đánh giá cao",
   "Top rated albums": "Album được đánh giá cao",
+  'Most played': 'Phát nhiều nhất',
   "{count} top rated tracks": "{count} bài hát được đánh giá cao",
   "USB DAC": "USB DAC",
   "Bluetooth DAC": "Bluetooth DAC",

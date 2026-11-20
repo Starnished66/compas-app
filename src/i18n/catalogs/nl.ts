@@ -12,6 +12,7 @@ export const nl: Record<string, TranslationValue> = {
   "No songs rated 3 stars or higher yet": "Nog geen nummers met 3 of meer sterren",
   "Top rated": "Best beoordeeld",
   "Top rated albums": "Best beoordeelde albums",
+  'Most played': 'Meest gespeeld',
   "{count} top rated tracks": { one: "{count} best beoordeeld nummer", other: "{count} best beoordeelde nummers" },
   "USB DAC": "USB DAC",
   "Bluetooth DAC": "Bluetooth DAC",

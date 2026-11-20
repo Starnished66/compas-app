@@ -11,6 +11,7 @@ export const en: Record<string, TranslationValue> = {
   'No songs rated 3 stars or higher yet': 'No songs rated 3 stars or higher yet',
   'Top rated': 'Top rated',
   'Top rated albums': 'Top rated albums',
+  'Most played': 'Most played',
   '{count} top rated tracks': { one: '{count} top rated track', other: '{count} top rated tracks' },
   'Repeat once': 'Repeat one',
   'Open on player': 'Open on player',

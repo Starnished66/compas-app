@@ -11,6 +11,7 @@ export const es: Record<string, TranslationValue> = {
   'No songs rated 3 stars or higher yet': 'Aún no hay canciones con 3 estrellas o más',
   'Top rated': 'Mejor valoradas',
   'Top rated albums': 'Álbumes mejor valorados',
+  'Most played': 'Más reproducidas',
   '{count} top rated tracks': { one: '{count} canción mejor valorada', other: '{count} canciones mejor valoradas' },
   'USB DAC': 'USB DAC',
   'Bluetooth DAC': 'Bluetooth DAC',

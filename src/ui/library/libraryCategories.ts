@@ -25,6 +25,16 @@ export function favoritesLabels(features: Iterable<string>) {
   return favorites;
 }
 
+const BUILT_IN_PLAYLIST_LABELS: Record<string, string> = {
+  '@most_played': 'Most played',
+  '@recently_played': 'Recently played',
+};
+
+// The player names its own playlists in English; show them in the app's language.
+export function builtInPlaylistLabel(key: string | undefined, features: Iterable<string>): string | undefined {
+  return key === '@favorites' ? favoritesLabels(features).label : key ? BUILT_IN_PLAYLIST_LABELS[key] : undefined;
+}
+
 export const LIBRARY_CATEGORY_OPTIONS: LibraryCategoryOption[] = [
   { value: LibraryCategory.Albums, label: 'Albums', noun: 'albums' },
   { value: LibraryCategory.Artists, label: 'Artists', noun: 'artists' },
