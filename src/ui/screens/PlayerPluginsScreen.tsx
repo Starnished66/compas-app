@@ -33,7 +33,12 @@ export interface PlayerPluginsScreenProps {
   active: boolean;
 }
 
-export function PlayerPluginsScreen({ state, pluginsApi, onClose, active }: PlayerPluginsScreenProps) {
+export function PlayerPluginsScreen(props: PlayerPluginsScreenProps) {
+  const screen = usePlayerPluginsScreen(props);
+  return renderPlayerPluginsScreen(props, screen);
+}
+
+function usePlayerPluginsScreen({ state, pluginsApi, onClose, active }: PlayerPluginsScreenProps) {
   const { t } = useI18n();
   const palette = usePalette();
   const insets = useScreenInsets();
@@ -67,6 +72,26 @@ export function PlayerPluginsScreen({ state, pluginsApi, onClose, active }: Play
     if (detailId && plugins.store && !plugins.loading && !plugins.store.plugins.some((item) => item.id === detailId)) setDetailId(null);
   }, [detailId, plugins.loading, plugins.store]);
 
+  const actions = createPluginActions(pluginsApi, plugins, confirmation, setConfirmation);
+
+  const categories = [...new Set(catalog.map((item) => item.category).filter(Boolean))].sort();
+  const filtered = catalog.filter((plugin) =>
+    (!category || plugin.category === category) &&
+    `${plugin.name} ${plugin.id} ${plugin.description} ${plugin.author}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const reviewNeeded = catalog.filter((item) => item.needs_confirmation);
+
+  return {
+    t, palette, insets, hasStore, hasManagement, hasLayouts, plugins, tabs, tab, setTab, query, setQuery, category,
+    setCategory, setDetailId, detail, catalog, confirmation, setConfirmation, busy, categories, filtered, reviewNeeded, actions,
+  };
+}
+
+type PluginsScreen = ReturnType<typeof usePlayerPluginsScreen>;
+
+function createPluginActions(
+  pluginsApi: PluginsApi | null, plugins: ReturnType<typeof usePlayerPlugins>,
+  confirmation: Confirmation, setConfirmation: (next: Confirmation) => void,
+) {
   const confirmPlugin = (plugin: StorePlugin, action: ConfirmationAction) => {
     if (!plugin || !action) return;
     setConfirmation({ plugin, action });
@@ -91,12 +116,12 @@ export function PlayerPluginsScreen({ state, pluginsApi, onClose, active }: Play
         : pluginsApi!.uninstall(pending.plugin.id));
   };
 
-  const categories = [...new Set(catalog.map((item) => item.category).filter(Boolean))].sort();
-  const filtered = catalog.filter((plugin) =>
-    (!category || plugin.category === category) &&
-    `${plugin.name} ${plugin.id} ${plugin.description} ${plugin.author}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
-  const reviewNeeded = catalog.filter((item) => item.needs_confirmation);
+  return { install, update, uninstall, acceptConfirmation };
+}
 
+function renderPlayerPluginsScreen({ pluginsApi, onClose, active }: PlayerPluginsScreenProps, screen: PluginsScreen) {
+  const { t, insets, plugins, tabs, tab, setTab, setDetailId, detail, confirmation, setConfirmation } = screen;
+  const { acceptConfirmation } = screen.actions;
   return <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
     <ScreenTitleBar title={detail ? detail.name : t('Plugins')} onBack={detail ? () => setDetailId(null) : onClose} />
     {tabs.length > 1 ? <SegmentedControl options={tabs} value={tab} onChange={(next) => { setTab(next); setDetailId(null); }} style={styles.tabs} /> : null}
@@ -111,45 +136,9 @@ export function PlayerPluginsScreen({ state, pluginsApi, onClose, active }: Play
         onAction={() => void plugins.statusCheck()}
       /> : null}
 
-      {!detail && tab === 'store' && hasStore ? <>
-        <View style={styles.row}>
-          <Button label={t('Refresh store')} icon="refresh" variant="raised" disabled={busy} busy={plugins.store?.state === 'refreshing'} onPress={() => void plugins.mutate(() => pluginsApi!.refreshStore())} />
-          <Button label={t('Update all')} icon="refresh" variant="container" disabled={busy || !catalog.some((item) => item.state === 'update')} busy={plugins.store?.state === 'updating_all'} onPress={() => void plugins.mutate(() => pluginsApi!.updateAll())} />
-        </View>
-        <TextInput value={query} onChangeText={setQuery} placeholder={t('Search plugins')} placeholderTextColor={palette.inkMuted} style={[styles.search, { backgroundColor: palette.surfaceRaised, color: palette.ink }]} accessibilityLabel={t('Search plugins')} />
-        {categories.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
-          <Button label={t('All categories')} size="sm" variant={category ? 'raised' : 'container'} onPress={() => setCategory('')} />
-          {categories.map((item) => <Button key={item} label={item} size="sm" variant={category === item ? 'container' : 'raised'} onPress={() => setCategory(item)} />)}
-        </ScrollView> : null}
-        {plugins.store?.state === 'failed' ? <MessageCard variant="surface" title={t('Plugin action failed')} body={t('The plugin operation failed. Check the player status before trying again.')} actionLabel={t('Check status')} actionBusy={plugins.loading} onAction={() => void plugins.statusCheck()} /> : null}
-        {plugins.store && ['refreshing', 'installing', 'updating', 'updating_all', 'uninstalling'].includes(plugins.store.state) ? <AppText variant="caption" tone="inkMuted">{t('Working…')} {plugins.store.percent}% {plugins.store.current_plugin}</AppText> : null}
-        {plugins.store && plugins.store.total > catalog.length ? <AppText variant="caption" tone="inkMuted">{t('Showing the first {count} store plugins.', { count: catalog.length })}</AppText> : null}
-        {plugins.store?.refresh_required ? <MessageCard variant="surface" title={t('Player refresh required')} body={t('Plugin files changed. Refresh plugins on the player to apply the changes.')}
-          actionLabel={t('Refresh plugins')} actionBusy={plugins.busy} onAction={() => void plugins.mutate(() => pluginsApi!.refreshPlugins())} /> : null}
-        {plugins.store?.confirmation_required || plugins.store?.state === 'needs_confirm' ? <MessageCard variant="surface" title={t('Confirmation required')} body={t('The player needs confirmation before this plugin action can continue.')} /> : null}
-        {reviewNeeded.length ? <MessageCard variant="surface" title={t('Review file replacement')} body={t('{count} plugins need your confirmation before their files can be replaced.', { count: reviewNeeded.length })} /> : null}
-        {plugins.loading && !plugins.store ? <View style={styles.center}><Spinner /><AppText variant="body" tone="inkMuted">{t('Loading plugins…')}</AppText></View> : null}
-        {plugins.store && !filtered.length ? <AppText variant="body" tone="inkMuted">{catalog.length ? t('No plugins match your search.') : t('No plugins found.')}</AppText> : null}
-        {filtered.map((plugin) => <PluginCard key={plugin.id} plugin={plugin} onOpen={() => setDetailId(plugin.id)} onInstall={() => install(plugin)} onUpdate={() => update(plugin)} onUninstall={() => uninstall(plugin)} disabled={busy || plugin.incompatible} t={t} />)}
-      </> : null}
+      {renderPluginStore(pluginsApi, screen)}
 
-      {detail && tab === 'store' ? <PluginDetails plugin={detail} onInstall={() => install(detail)} onUpdate={() => update(detail)} onUninstall={() => uninstall(detail)} disabled={busy || detail.incompatible} api={pluginsApi} active={active} /> : null}
-
-      {!detail && tab === 'installed' && hasManagement ? <>
-        {plugins.refreshPending ? <MessageCard variant="surface" title={t('Player refresh required')} body={t('Plugin changes are waiting for a player refresh.')} /> : null}
-        {plugins.loading && !plugins.installed ? <View style={styles.center}><Spinner /></View> : null}
-        {plugins.installed?.plugins.map((plugin) => <InstalledCard key={plugin.id} plugin={plugin} onToggle={(enabled) => void plugins.mutate(() => pluginsApi!.setEnabled(plugin.id, enabled))} onOpenSettings={() => void plugins.mutate(() => pluginsApi!.openSettings(plugin.id))} disabled={busy} t={t} />)}
-        {plugins.installed && !plugins.installed.plugins.length ? <AppText variant="body" tone="inkMuted">{t('No installed plugins.')}</AppText> : null}
-        {plugins.installed?.truncated ? <AppText variant="caption" tone="inkMuted">{t('The player only returned the first {count} installed plugins.', { count: plugins.installed.plugins.length })}</AppText> : null}
-      </> : null}
-
-      {!detail && tab === 'layouts' && hasLayouts ? <>
-        <AppText variant="body" tone="inkMuted">{t('Choose a layout for the player display.')}</AppText>
-        {plugins.loading && !plugins.layouts ? <View style={styles.center}><Spinner /></View> : null}
-        {plugins.layouts?.layouts.map((layout, index) => <LayoutCard key={layout.id} layout={layout} selected={plugins.layouts!.current === layout.id} onSelect={() => void plugins.mutate(() => pluginsApi!.selectLayout(layout.id))} disabled={busy} t={t} api={pluginsApi} screenActive={active && tab === 'layouts'} autoPreview={index < 12} />)}
-        {plugins.layouts && !plugins.layouts.layouts.length ? <AppText variant="body" tone="inkMuted">{t('No layouts found.')}</AppText> : null}
-        {plugins.layouts && plugins.layouts.total > plugins.layouts.layouts.length ? <AppText variant="caption" tone="inkMuted">{t('Showing the first {count} layouts.', { count: plugins.layouts.layouts.length })}</AppText> : null}
-      </> : null}
+      {renderPluginPages(pluginsApi, active, screen)}
     </ScrollView>
     <ConfirmDialog
       visible={confirmation != null}
@@ -163,6 +152,63 @@ export function PlayerPluginsScreen({ state, pluginsApi, onClose, active }: Play
       onConfirm={acceptConfirmation}
     />
   </View>;
+}
+
+function renderPluginStore(pluginsApi: PluginsApi | null, screen: PluginsScreen) {
+  const { detail, tab, hasStore, t, palette, plugins, busy, catalog, query, setQuery, categories, category, setCategory,
+    reviewNeeded, filtered, setDetailId } = screen;
+  const { install, update, uninstall } = screen.actions;
+  return (
+    <>
+    {!detail && tab === 'store' && hasStore ? <>
+      <View style={styles.row}>
+        <Button label={t('Refresh store')} icon="refresh" variant="raised" disabled={busy} busy={plugins.store?.state === 'refreshing'} onPress={() => void plugins.mutate(() => pluginsApi!.refreshStore())} />
+        <Button label={t('Update all')} icon="refresh" variant="container" disabled={busy || !catalog.some((item) => item.state === 'update')} busy={plugins.store?.state === 'updating_all'} onPress={() => void plugins.mutate(() => pluginsApi!.updateAll())} />
+      </View>
+      <TextInput value={query} onChangeText={setQuery} placeholder={t('Search plugins')} placeholderTextColor={palette.inkMuted} style={[styles.search, { backgroundColor: palette.surfaceRaised, color: palette.ink }]} accessibilityLabel={t('Search plugins')} />
+      {categories.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+        <Button label={t('All categories')} size="sm" variant={category ? 'raised' : 'container'} onPress={() => setCategory('')} />
+        {categories.map((item) => <Button key={item} label={item} size="sm" variant={category === item ? 'container' : 'raised'} onPress={() => setCategory(item)} />)}
+      </ScrollView> : null}
+      {plugins.store?.state === 'failed' ? <MessageCard variant="surface" title={t('Plugin action failed')} body={t('The plugin operation failed. Check the player status before trying again.')} actionLabel={t('Check status')} actionBusy={plugins.loading} onAction={() => void plugins.statusCheck()} /> : null}
+      {plugins.store && ['refreshing', 'installing', 'updating', 'updating_all', 'uninstalling'].includes(plugins.store.state) ? <AppText variant="caption" tone="inkMuted">{t('Working…')} {plugins.store.percent}% {plugins.store.current_plugin}</AppText> : null}
+      {plugins.store && plugins.store.total > catalog.length ? <AppText variant="caption" tone="inkMuted">{t('Showing the first {count} store plugins.', { count: catalog.length })}</AppText> : null}
+      {plugins.store?.refresh_required ? <MessageCard variant="surface" title={t('Player refresh required')} body={t('Plugin files changed. Refresh plugins on the player to apply the changes.')}
+        actionLabel={t('Refresh plugins')} actionBusy={plugins.busy} onAction={() => void plugins.mutate(() => pluginsApi!.refreshPlugins())} /> : null}
+      {plugins.store?.confirmation_required || plugins.store?.state === 'needs_confirm' ? <MessageCard variant="surface" title={t('Confirmation required')} body={t('The player needs confirmation before this plugin action can continue.')} /> : null}
+      {reviewNeeded.length ? <MessageCard variant="surface" title={t('Review file replacement')} body={t('{count} plugins need your confirmation before their files can be replaced.', { count: reviewNeeded.length })} /> : null}
+      {plugins.loading && !plugins.store ? <View style={styles.center}><Spinner /><AppText variant="body" tone="inkMuted">{t('Loading plugins…')}</AppText></View> : null}
+      {plugins.store && !filtered.length ? <AppText variant="body" tone="inkMuted">{catalog.length ? t('No plugins match your search.') : t('No plugins found.')}</AppText> : null}
+      {filtered.map((plugin) => <PluginCard key={plugin.id} plugin={plugin} onOpen={() => setDetailId(plugin.id)} onInstall={() => install(plugin)} onUpdate={() => update(plugin)} onUninstall={() => uninstall(plugin)} disabled={busy || plugin.incompatible} t={t} />)}
+    </> : null}
+    </>
+  );
+}
+
+function renderPluginPages(pluginsApi: PluginsApi | null, active: boolean, screen: PluginsScreen) {
+  const { detail, tab, hasManagement, hasLayouts, plugins, busy, t } = screen;
+  const { install, update, uninstall } = screen.actions;
+  return (
+    <>
+    {detail && tab === 'store' ? <PluginDetails plugin={detail} onInstall={() => install(detail)} onUpdate={() => update(detail)} onUninstall={() => uninstall(detail)} disabled={busy || detail.incompatible} api={pluginsApi} active={active} /> : null}
+
+    {!detail && tab === 'installed' && hasManagement ? <>
+      {plugins.refreshPending ? <MessageCard variant="surface" title={t('Player refresh required')} body={t('Plugin changes are waiting for a player refresh.')} /> : null}
+      {plugins.loading && !plugins.installed ? <View style={styles.center}><Spinner /></View> : null}
+      {plugins.installed?.plugins.map((plugin) => <InstalledCard key={plugin.id} plugin={plugin} onToggle={(enabled) => void plugins.mutate(() => pluginsApi!.setEnabled(plugin.id, enabled))} onOpenSettings={() => void plugins.mutate(() => pluginsApi!.openSettings(plugin.id))} disabled={busy} t={t} />)}
+      {plugins.installed && !plugins.installed.plugins.length ? <AppText variant="body" tone="inkMuted">{t('No installed plugins.')}</AppText> : null}
+      {plugins.installed?.truncated ? <AppText variant="caption" tone="inkMuted">{t('The player only returned the first {count} installed plugins.', { count: plugins.installed.plugins.length })}</AppText> : null}
+    </> : null}
+
+    {!detail && tab === 'layouts' && hasLayouts ? <>
+      <AppText variant="body" tone="inkMuted">{t('Choose a layout for the player display.')}</AppText>
+      {plugins.loading && !plugins.layouts ? <View style={styles.center}><Spinner /></View> : null}
+      {plugins.layouts?.layouts.map((layout, index) => <LayoutCard key={layout.id} layout={layout} selected={plugins.layouts!.current === layout.id} onSelect={() => void plugins.mutate(() => pluginsApi!.selectLayout(layout.id))} disabled={busy} t={t} api={pluginsApi} screenActive={active && tab === 'layouts'} autoPreview={index < 12} />)}
+      {plugins.layouts && !plugins.layouts.layouts.length ? <AppText variant="body" tone="inkMuted">{t('No layouts found.')}</AppText> : null}
+      {plugins.layouts && plugins.layouts.total > plugins.layouts.layouts.length ? <AppText variant="caption" tone="inkMuted">{t('Showing the first {count} layouts.', { count: plugins.layouts.layouts.length })}</AppText> : null}
+    </> : null}
+    </>
+  );
 }
 
 function PluginCard({ plugin, onOpen, onInstall, onUpdate, onUninstall, disabled, t }: { plugin: StorePlugin; onOpen: () => void; onInstall: () => void; onUpdate: () => void; onUninstall: () => void; disabled: boolean; t: (key: string, params?: Record<string, string | number>) => string }) {

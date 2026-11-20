@@ -227,6 +227,46 @@ async function searchList(context: CategoryLoadContext, term: string): Promise<L
   };
 }
 
+async function loadFolderList(context: CategoryLoadContext): Promise<LibraryList> {
+  const { api, entries: factory } = context;
+  requireFeature(context, 'folder_browse', 'Folder browsing requires a newer player build');
+  const roots = await api.folderRoots();
+  const root = roots.find((item) => item.id === 'sd');
+  if (!root?.available) throw new Error('The player SD card is unavailable');
+  const page = await api.folder('', 0, root.id);
+  return list(factory.folderItems(page.entries, root.id, ''), page.total, `${page.total} items · ${root.name}`, {
+    kind: 'folder',
+    root: root.id,
+    path: '',
+    nextOffset: page.nextOffset,
+    total: page.total,
+  });
+}
+
+async function loadRecentList(context: CategoryLoadContext): Promise<LibraryList> {
+  const { api, entries: factory } = context;
+  requireFeature(context, 'recently_played', 'Recently played requires a newer player build');
+  const page = await readNetworkSongPage(api, () => api.recent());
+  return list(factory.songs(page.songs, { playlist: '@recently_played' }, page), page.total, `${page.total} recently played tracks`, {
+    kind: 'recent',
+    nextOffset: page.nextOffset,
+    total: page.total,
+  });
+}
+
+async function loadFavoritesList(context: CategoryLoadContext): Promise<LibraryList> {
+  const { api, entries: factory } = context;
+  requireFeature(context, 'favorites_edit', 'Favorites requires a newer player build');
+  const page = await readNetworkSongPage(api, () => api.playlistPage('@favorites'));
+  const { noun } = favoritesLabels(context.features);
+  return list(factory.songs(page.songs, { playlist: '@favorites' }, page), page.total, `${page.total} ${noun}`, {
+    kind: 'playlist',
+    key: '@favorites',
+    nextOffset: page.nextOffset,
+    total: page.total,
+  });
+}
+
 export async function loadCategoryList(
   category: LibraryCategory,
   query: string | null,
@@ -247,40 +287,12 @@ export async function loadCategoryList(
   }
 
   switch (category) {
-    case LibraryCategory.Folders: {
-      requireFeature(context, 'folder_browse', 'Folder browsing requires a newer player build');
-      const roots = await api.folderRoots();
-      const root = roots.find((item) => item.id === 'sd');
-      if (!root?.available) throw new Error('The player SD card is unavailable');
-      const page = await api.folder('', 0, root.id);
-      return list(factory.folderItems(page.entries, root.id, ''), page.total, `${page.total} items · ${root.name}`, {
-        kind: 'folder',
-        root: root.id,
-        path: '',
-        nextOffset: page.nextOffset,
-        total: page.total,
-      });
-    }
-    case LibraryCategory.Recent: {
-      requireFeature(context, 'recently_played', 'Recently played requires a newer player build');
-      const page = await readNetworkSongPage(api, () => api.recent());
-      return list(factory.songs(page.songs, { playlist: '@recently_played' }, page), page.total, `${page.total} recently played tracks`, {
-        kind: 'recent',
-        nextOffset: page.nextOffset,
-        total: page.total,
-      });
-    }
-    case LibraryCategory.Favorites: {
-      requireFeature(context, 'favorites_edit', 'Favorites requires a newer player build');
-      const page = await readNetworkSongPage(api, () => api.playlistPage('@favorites'));
-      const { noun } = favoritesLabels(context.features);
-      return list(factory.songs(page.songs, { playlist: '@favorites' }, page), page.total, `${page.total} ${noun}`, {
-        kind: 'playlist',
-        key: '@favorites',
-        nextOffset: page.nextOffset,
-        total: page.total,
-      });
-    }
+    case LibraryCategory.Folders:
+      return loadFolderList(context);
+    case LibraryCategory.Recent:
+      return loadRecentList(context);
+    case LibraryCategory.Favorites:
+      return loadFavoritesList(context);
     case LibraryCategory.Playlists: {
       const playlists = await api.playlists();
       const entries = factory.playlists(playlists);

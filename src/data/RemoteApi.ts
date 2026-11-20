@@ -1,264 +1,55 @@
-import { refuseRedirect } from './redirectGuard';
-import {
+import type {
   ArtImage,
-  Capabilities,
-  CatalogCover,
   CatalogCoversPage,
   CatalogPage,
-  CatalogSong,
   LibraryFilter,
   LibraryGroup,
   LibraryPage,
   FolderPage,
   PlaylistPage,
   PlayContext,
-  PlaybackStatus,
   Playlist,
   QueuePage,
   Song,
   LibrarySortScope,
   LibrarySortMode,
   LibrarySortingSnapshot,
-  LibrarySortSnapshot,
   CollectionPlayRequest,
   WifiImportStatus,
   WifiImportDirectoryPage,
-  WifiImportFileEntry,
   WifiImportUploadResult,
 } from './types';
-import { parseDacMode } from './dacMode';
-import { isLibrarySortMode, isLibrarySortScope, LIBRARY_SORT_SECTIONS } from './librarySortModes';
 import type { NativeUploadProgress } from './nativeFileUpload';
-import { SettingsApi } from './SettingsApi';
-import { PluginsApi } from './PluginsApi';
-import {
-  HttpTransport,
-  HttpRequest,
-  HttpResponse,
-  isArtworkPreemptibleTransport,
-  isFileDownloadTransport,
-} from './HttpTransport';
+import { assertIntegerArgument, RemoteApiException } from './remoteApiProtocol';
+import { RemoteApiConnection } from './RemoteApiConnection';
+import { WifiImportApi } from './WifiImportApi';
+import { LibrarySortingApi } from './LibrarySortingApi';
+import { PlaylistApi, readPlaylistSongs, validatePlaylistName } from './PlaylistApi';
+import { CatalogApi } from './CatalogApi';
+import { SongStateApi } from './SongStateApi';
 
-export class RemoteApiException extends Error {
-  readonly statusCode: number;
-  readonly responseBody: string;
+export { RemoteApiException } from './remoteApiProtocol';
 
-  constructor(statusCode: number, responseBody: string) {
-    super(`Remote API returned HTTP ${statusCode}${responseBody.trim() ? `: ${responseBody}` : ''}`);
-    this.name = 'RemoteApiException';
-    this.statusCode = statusCode;
-    this.responseBody = responseBody;
+export class RemoteApi extends RemoteApiConnection {
+  private readonly wifiImportApi = new WifiImportApi(this.requests);
+
+  importStatus(): Promise<WifiImportStatus> {
+    return this.wifiImportApi.importStatus();
   }
 
-  get pinRequired(): boolean {
-    if (this.statusCode !== 401) return false;
-    try {
-      const json = JSON.parse(this.responseBody);
-      return json.code === 'pin_required';
-    } catch {
-      return false;
-    }
+  startImport(): Promise<void> {
+    return this.wifiImportApi.startImport();
   }
 
-  get pinRateLimited(): boolean {
-    if (this.statusCode !== 429) return false;
-    try {
-      const json = JSON.parse(this.responseBody);
-      return json.code === 'pin_rate_limited';
-    } catch {
-      return false;
-    }
+  stopImport(): Promise<void> {
+    return this.wifiImportApi.stopImport();
   }
 
-  get retryAfterSeconds(): number {
-    try {
-      const json = JSON.parse(this.responseBody);
-      const val = parseInt(json.retryAfterSeconds, 10);
-      if (!isNaN(val)) {
-        return Math.max(1, Math.min(val, 3600));
-      }
-    } catch {
-      // ignore
-    }
-    return 60;
-  }
-}
-
-import { bytesToBase64 } from './cryptoUtils';
-
-function jsonBoolean(value: unknown): boolean {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') {
-    if (value.toLowerCase() === 'true') return true;
-    if (value.toLowerCase() === 'false') return false;
-  }
-  return false;
-}
-
-function nullableJsonBoolean(value: unknown, field: string): boolean | null {
-  if (value == null) return null;
-  if (typeof value !== 'boolean') throw new Error(`Field '${field}' is invalid`);
-  return value;
-}
-
-function requiredInteger(value: unknown, field: string, min: number): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min) {
-    throw new Error(`Field '${field}' is missing or invalid`);
-  }
-  return value;
-}
-
-function nullablePositiveInteger(value: unknown, field: string): number | null {
-  if (value == null) return null;
-  return requiredInteger(value, field, 1);
-}
-
-function assertIntegerArgument(value: number, field: string, min: number, max: number = Number.MAX_SAFE_INTEGER): void {
-  if (!Number.isSafeInteger(value) || value < min || value > max) {
-    throw new Error(`${field} must be an integer between ${min} and ${max}`);
-  }
-}
-
-function parseRating(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 5 ? value : null;
-}
-
-function requiredString(value: unknown, field: string): string {
-  if (typeof value !== 'string') throw new Error(`Field '${field}' is missing or invalid`);
-  return value;
-}
-
-function nullableString(value: unknown, field: string): string | null {
-  if (value == null) return null;
-  const result = requiredString(value, field);
-  return result.trim() ? result : null;
-}
-
-function validateImportPath(path: string, allowRoot: boolean): string {
-  if (typeof path !== 'string' || path.includes('\\') || path.startsWith('/') || /[\u0000-\u001f]/.test(path)) {
-    throw new Error('Invalid SD card path');
-  }
-  const normalized = path.replace(/\/$/, '');
-  if ((!allowRoot && !normalized) || (normalized && normalized.split('/').some((part) => part === '.' || part === '..' || part === ''))) {
-    throw new Error('Invalid SD card path');
-  }
-  return normalized;
-}
-
-function validateImportName(name: string): string {
-  if (typeof name !== 'string' || !name.trim() || name === '.' || name === '..' ||
-      /[\\/\u0000-\u001f]/.test(name) || name.trim() !== name) {
-    throw new Error('Enter a valid file name');
-  }
-  return name;
-}
-
-let commandsSent = 0;
-
-export class RemoteApi {
-  static readonly PIN_HEADER = 'X-Compas-PIN';
-  static readonly CATALOG_SYNC_FEATURE = 'catalog_sync_v1';
-  static readonly CATALOG_PAGE_LIMIT = 100;
-
-  private transport: HttpTransport;
-  private pin: string | null;
-  private prefix = '/api/v1';
-  private lastCatalogRevision: string | null = null;
-
-  constructor(transport: HttpTransport, pin?: string | null) {
-    if (pin != null && !/^[0-9]{4,12}$/.test(pin)) {
-      throw new Error('PIN must contain 4 to 12 digits');
-    }
-    this.transport = transport;
-    this.pin = pin || null;
+  importFiles(path?: string, offset?: number, limit?: number, showHidden?: boolean): Promise<WifiImportDirectoryPage> {
+    return this.wifiImportApi.importFiles(path, offset, limit, showHidden);
   }
 
-  setPin(pin: string | null): void {
-    if (pin != null && !/^[0-9]{4,12}$/.test(pin)) {
-      throw new Error('PIN must contain 4 to 12 digits');
-    }
-    this.pin = pin || null;
-  }
-
-  private settingsClient: SettingsApi | null = null;
-  private pluginsClient: PluginsApi | null = null;
-
-  /** Client for the player's remote settings; shares this connection's transport and follows PIN changes. */
-  settings(): SettingsApi {
-    return (this.settingsClient ??= new SettingsApi(this.transport, () => this.pin));
-  }
-
-  /** Client for plugin management; shares the connection transport and follows PIN changes. */
-  plugins(): PluginsApi {
-    return (this.pluginsClient ??= new PluginsApi(this.transport, () => this.pin));
-  }
-
-  preemptArtworkRequest(index?: number): void {
-    if (index != null) assertIntegerArgument(index, 'Index', 0);
-    if (isArtworkPreemptibleTransport(this.transport)) {
-      this.transport.preemptArtworkRequest(index);
-    }
-  }
-
-  async capabilities(options: { omitPin?: boolean } = {}): Promise<Capabilities> {
-    let json: any;
-    if (options.omitPin) {
-      const response = await this.transport.execute(this.request('GET', `${this.prefix}/capabilities`, [], undefined, true));
-      this.ensureSuccess(response);
-      json = JSON.parse(response.text());
-    } else {
-      json = await this.jsonGet(`${this.prefix}/capabilities`);
-    }
-    return {
-      version: json.version != null ? json.version : 1,
-      transports: Array.isArray(json.transports) ? json.transports : [],
-      features: Array.isArray(json.features) ? json.features : [],
-      libraryId: typeof json.libraryId === 'string' && json.libraryId.trim() ? json.libraryId : null,
-    };
-  }
-
-  async importStatus(): Promise<WifiImportStatus> {
-    const json = await this.jsonGet(`${this.prefix}/import`);
-    const states = ['stopped', 'starting', 'ready', 'stopping', 'error'];
-    if (!states.includes(json.state) || (json.error != null && typeof json.error !== 'string')) {
-      throw new Error('Invalid Wi-Fi import status response');
-    }
-    return { state: json.state, error: json.error ?? null };
-  }
-
-  async startImport(): Promise<void> {
-    const response = await this.send('POST', `${this.prefix}/import/start`);
-    if (response.statusCode !== 202) throw new RemoteApiException(response.statusCode, response.text());
-  }
-
-  async stopImport(): Promise<void> {
-    const response = await this.send('POST', `${this.prefix}/import/stop`);
-    if (response.statusCode !== 202) throw new RemoteApiException(response.statusCode, response.text());
-  }
-
-  async importFiles(path: string = '', offset: number = 0, limit: number = 50, showHidden = false): Promise<WifiImportDirectoryPage> {
-    assertIntegerArgument(offset, 'Offset', 0);
-    assertIntegerArgument(limit, 'Limit', 1, 100);
-    const json = await this.jsonGet(`${this.prefix}/import/files`, [
-      ['path', validateImportPath(path, true)], ['offset', String(offset)], ['limit', String(limit)],
-      ...(showHidden ? [['show_hidden', '1'] as [string, string]] : []),
-    ]);
-    if (!Array.isArray(json.entries) || typeof json.path !== 'string' ||
-        !Number.isSafeInteger(json.offset) || !Number.isSafeInteger(json.total) ||
-        (json.next_offset !== null && !Number.isSafeInteger(json.next_offset))) {
-      throw new Error('Invalid Wi-Fi import directory response');
-    }
-    const entries: WifiImportFileEntry[] = json.entries.map((entry: any) => {
-      if (!entry || typeof entry.name !== 'string' || typeof entry.path !== 'string' ||
-          typeof entry.isDirectory !== 'boolean' || !Number.isSafeInteger(entry.size) || entry.size < 0) {
-        throw new Error('Invalid Wi-Fi import directory entry');
-      }
-      return { name: entry.name, path: entry.path, isDirectory: entry.isDirectory, size: entry.size };
-    });
-    return { path: json.path, entries, offset: json.offset, nextOffset: json.next_offset, total: json.total };
-  }
-
-  async uploadImportFile(
+  uploadImportFile(
     endpoint: string,
     fileUri: string,
     path: string,
@@ -266,115 +57,165 @@ export class RemoteApi {
     onProgress: (progress: NativeUploadProgress) => void,
     signal?: AbortSignal,
   ): Promise<WifiImportUploadResult> {
-    const { uploadFileNative } = await import('./nativeFileUpload');
-    const relativePath = validateImportPath(path, true);
-    const leaf = validateImportName(name);
-    const params = `path=${RemoteApi.encode(relativePath)}&name=${RemoteApi.encode(leaf)}`;
-    const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' };
-    if (this.pin) headers[RemoteApi.PIN_HEADER] = this.pin;
-    const response = await uploadFileNative(`${endpoint.replace(/\/+$/, '')}${this.prefix}/import/files/upload?${params}`, fileUri, headers, onProgress, signal);
-    refuseRedirect(response.status);
-    if (response.status !== 201) throw new RemoteApiException(response.status, response.body);
-    const json = JSON.parse(response.body);
-    if (json.ok !== true || typeof json.path !== 'string' || typeof json.name !== 'string' ||
-        !Number.isSafeInteger(json.bytes) || json.bytes < 0) throw new Error('Invalid Wi-Fi import upload response');
-    return { ok: true, path: json.path, name: json.name, bytes: json.bytes };
+    return this.wifiImportApi.uploadImportFile(endpoint, fileUri, path, name, onProgress, signal);
   }
 
-  async renameImportFile(path: string, name: string): Promise<void> {
-    const response = await this.send('POST', `${this.prefix}/import/files/rename`, [
-      ['path', validateImportPath(path, false)], ['name', validateImportName(name)],
-    ]);
-    if (response.statusCode !== 200) throw new RemoteApiException(response.statusCode, response.text());
+  renameImportFile(path: string, name: string): Promise<void> {
+    return this.wifiImportApi.renameImportFile(path, name);
   }
 
-  async deleteImportFile(path: string): Promise<void> {
-    const response = await this.send('POST', `${this.prefix}/import/files/delete`, [
-      ['path', validateImportPath(path, false)],
-    ]);
-    if (response.statusCode !== 200) throw new RemoteApiException(response.statusCode, response.text());
+  deleteImportFile(path: string): Promise<void> {
+    return this.wifiImportApi.deleteImportFile(path);
   }
 
-  async createImportDirectory(path: string, name: string): Promise<void> {
-    const response = await this.send('POST', `${this.prefix}/import/files/mkdir`, [
-      ['path', validateImportPath(path, true)], ['name', validateImportName(name)],
-    ]);
-    if (response.statusCode !== 201) throw new RemoteApiException(response.statusCode, response.text());
+  createImportDirectory(path: string, name: string): Promise<void> {
+    return this.wifiImportApi.createImportDirectory(path, name);
   }
 
-  async status(): Promise<PlaybackStatus> {
-    const json = await this.jsonGet(`${this.prefix}/status`);
-    const dacMode = parseDacMode(json.dac_mode, json.bluetooth_dac_mode);
-    const status: PlaybackStatus = {
-      dacMode,
-      playing: jsonBoolean(json.playing),
-      paused: jsonBoolean(json.paused),
-      title: String(json.title || ''),
-      artist: String(json.artist || ''),
-      album: String(json.album || ''),
-      positionSeconds: Number(json.position_seconds || 0),
-      durationSeconds: Number(json.duration_seconds || 0),
-      volume: Number(json.volume || 0),
-      playMode: Number(json.play_mode || 0),
-      codec: json.codec ? String(json.codec) : '',
-      sourceBitDepth: Number(json.source_bit_depth || 0),
-      sourceSampleRateHz: Number(json.source_sample_rate || 0),
-      bluetoothAudioOutput: nullableJsonBoolean(json.bluetooth_audio_output, 'bluetooth_audio_output'),
-      favorite: json.favorite == null ? null : jsonBoolean(json.favorite),
-      rating: parseRating(json.rating),
-      accentColor: typeof json.accent_color === 'string' && /^#[0-9a-fA-F]{6}$/.test(json.accent_color)
-        ? json.accent_color.toUpperCase()
-        : null,
-      deviceModel: typeof json.device_model === 'string' && json.device_model.trim() ? json.device_model.trim() : null,
-      playerVersion: typeof json.player_version === 'string' && json.player_version.trim() ? json.player_version.trim() : null,
-      settingsRevision: Number.isSafeInteger(json.settingsRevision) ? json.settingsRevision : null,
-      settingsEpoch: Number.isSafeInteger(json.settingsEpoch) ? json.settingsEpoch : null,
-      collectionJob: json.collection_job && Number.isSafeInteger(json.collection_job.id) &&
-        ['idle', 'pending', 'done', 'error'].includes(json.collection_job.state)
-        ? { id: json.collection_job.id, state: json.collection_job.state, error: typeof json.collection_job.error === 'string' ? json.collection_job.error : null }
-        : null,
-    };
-    this.lastCatalogRevision = typeof json.catalog_revision === 'string' && json.catalog_revision.trim()
-      ? json.catalog_revision : null;
-    return status;
+  private readonly librarySortingApi = new LibrarySortingApi(this.requests);
+
+  librarySorting(): Promise<LibrarySortingSnapshot> {
+    return this.librarySortingApi.librarySorting();
   }
 
-  async art(index?: number | null): Promise<ArtImage | null> {
-    return this.readArt(`${this.prefix}/art`, this.artParams(index));
+  setLibrarySorting(scope: LibrarySortScope, mode: LibrarySortMode): Promise<void> {
+    return this.librarySortingApi.setLibrarySorting(scope, mode);
   }
 
-  get commandGeneration(): number {
-    return commandsSent;
+  libraryAlbumGroups(options: { scope: LibrarySortScope; artist?: string | null; albumArtist?: string | null; offset?: number; limit?: number }): Promise<{ total: number; offset: number; nextOffset: number; revision: string; groups: LibraryGroup[] }> {
+    return this.librarySortingApi.libraryAlbumGroups(options);
   }
 
-  get canDownloadArt(): boolean {
-    return isFileDownloadTransport(this.transport);
+  private readonly playlistApi = new PlaylistApi(this.requests);
+
+  playlists(): Promise<Playlist[]> {
+    return this.playlistApi.playlists();
   }
 
-  get canDownloadLibraryArt(): boolean {
-    return isFileDownloadTransport(this.transport) && this.transport.downloadRejectsRedirects === true;
+  playlistPage(key: string, offset?: number): Promise<PlaylistPage> {
+    return this.playlistApi.playlistPage(key, offset);
   }
 
-  get catalogRevision(): string | null {
-    return this.lastCatalogRevision;
+  createEmptyPlaylist(name: string): Promise<void> {
+    return this.playlistApi.createEmptyPlaylist(name);
   }
 
-  async downloadArt(fileUri: string, index?: number | null): Promise<boolean> {
-    return this.downloadArtRequest(fileUri, `${this.prefix}/art`, this.artParams(index));
+  renamePlaylist(key: string, newName: string): Promise<string> {
+    return this.playlistApi.renamePlaylist(key, newName);
   }
 
-  private artParams(index?: number | null): [string, string][] {
-    if (index == null) return [];
-    assertIntegerArgument(index, 'Index', 0);
-    return [['index', index.toString()]];
+  deletePlaylist(key: string): Promise<void> {
+    return this.playlistApi.deletePlaylist(key);
   }
 
-  private async downloadArtRequest(fileUri: string, path: string, params: [string, string][]): Promise<boolean> {
-    if (!isFileDownloadTransport(this.transport)) throw new Error('Transport cannot download files');
-    const response = await this.transport.download(this.request('GET', path, params), fileUri);
-    if (response.statusCode === 404) return false;
-    this.ensureSuccess(response);
-    return true;
+  removePlaylistTrack(key: string, position: number, revision: string): Promise<string | null> {
+    return this.playlistApi.removePlaylistTrack(key, position, revision);
+  }
+
+  movePlaylistTrack(key: string, from: number, to: number, revision: string): Promise<string | null> {
+    return this.playlistApi.movePlaylistTrack(key, from, to, revision);
+  }
+
+  importPlaylist(name: string, body: Uint8Array): Promise<{ entries: number; matched: number }> {
+    return this.playlistApi.importPlaylist(name, body);
+  }
+
+  createPlaylist(name: string, index: number): Promise<void> {
+    return this.playlistApi.createPlaylist(name, index);
+  }
+
+  addToPlaylist(name: string, index: number): Promise<void> {
+    return this.playlistApi.addToPlaylist(name, index);
+  }
+
+  private readonly catalogApi = new CatalogApi(this.requests);
+
+  library(
+    offset?: number,
+    limit?: number,
+    query?: string | null,
+    filter?: LibraryFilter,
+    signal?: AbortSignal,
+  ): Promise<LibraryPage> {
+    return this.catalogApi.library(offset, limit, query, filter, signal);
+  }
+
+  catalog(
+    offset?: number,
+    limit?: number,
+    revision?: string | null
+  ): Promise<CatalogPage> {
+    return this.catalogApi.catalog(offset, limit, revision);
+  }
+
+  catalogCovers(
+    offset?: number,
+    limit?: number,
+    revision?: string
+  ): Promise<CatalogCoversPage> {
+    return this.catalogApi.catalogCovers(offset, limit, revision);
+  }
+
+  catalogArt(revision: string, representativeId: number, coverKey: string): Promise<ArtImage | null> {
+    return this.catalogApi.catalogArt(revision, representativeId, coverKey);
+  }
+
+  downloadCatalogArt(fileUri: string, revision: string, representativeId: number, coverKey: string): Promise<boolean> {
+    return this.catalogApi.downloadCatalogArt(fileUri, revision, representativeId, coverKey);
+  }
+
+  artists(signal?: AbortSignal): Promise<LibraryGroup[]> {
+    return this.catalogApi.artists(signal);
+  }
+
+  albumArtists(): Promise<LibraryGroup[]> {
+    return this.catalogApi.albumArtists();
+  }
+
+  genres(signal?: AbortSignal): Promise<LibraryGroup[]> {
+    return this.catalogApi.genres(signal);
+  }
+
+  albums(filter?: LibraryFilter, signal?: AbortSignal): Promise<LibraryGroup[]> {
+    return this.catalogApi.albums(filter, signal);
+  }
+
+  topRatedAlbums(): Promise<LibraryGroup[]> {
+    return this.catalogApi.topRatedAlbums();
+  }
+
+  folderRoots(): Promise<Array<{ id: string; name: string; available: boolean }>> {
+    return this.catalogApi.folderRoots();
+  }
+
+  folder(path?: string, offset?: number, root?: string): Promise<FolderPage> {
+    return this.catalogApi.folder(path, offset, root);
+  }
+
+  playFolderTrack(path: string, root?: string): Promise<void> {
+    return this.catalogApi.playFolderTrack(path, root);
+  }
+
+  recent(offset?: number): Promise<{ songs: Song[]; total: number; nextOffset: number }> {
+    return this.catalogApi.recent(offset);
+  }
+
+  private readonly songStateApi = new SongStateApi(this.requests);
+
+  favoriteStates(ids: number[]): Promise<Map<number, boolean>> {
+    return this.songStateApi.favoriteStates(ids);
+  }
+
+  ratingStates(ids: number[]): Promise<Map<number, number>> {
+    return this.songStateApi.ratingStates(ids);
+  }
+
+  setFavorite(favorite: boolean, index?: number, catalogRevision?: string | null, signal?: AbortSignal): Promise<boolean> {
+    return this.songStateApi.setFavorite(favorite, index, catalogRevision, signal);
+  }
+
+  setRating(index: number | undefined, stars: number, catalogRevision?: string | null, signal?: AbortSignal): Promise<number> {
+    return this.songStateApi.setRating(index, stars, catalogRevision, signal);
   }
 
   async togglePlayback(): Promise<void> {
@@ -493,323 +334,6 @@ export class RemoteApi {
     await this.command('/queue/play', [['offset', String(offset)], ['revision', String(revision)]]);
   }
 
-  async folderRoots(): Promise<Array<{ id: string; name: string; available: boolean }>> {
-    const json = await this.jsonGet(`${this.prefix}/folders/roots`);
-    return (Array.isArray(json.roots) ? json.roots : []).map((root: any) => ({
-      id: String(root.id || ''), name: String(root.name || ''), available: jsonBoolean(root.available),
-    }));
-  }
-
-  async folder(path: string = '', offset: number = 0, root: string = 'sd'): Promise<FolderPage> {
-    assertIntegerArgument(offset, 'Offset', 0);
-    const json = await this.jsonGet(`${this.prefix}/folders`, [
-      ['root', root], ['path', path], ['offset', String(offset)], ['limit', '50'],
-    ]);
-    return {
-      root: String(json.root || root), path: String(json.path || ''),
-      parent: json.parent == null ? null : String(json.parent),
-      total: Number(json.total || 0), folderCount: Number(json.folder_count || 0),
-      offset: Number(json.offset || 0), nextOffset: Number(json.next_offset || 0),
-      entries: (Array.isArray(json.entries) ? json.entries : []).map((item: any) => ({
-        type: item.type, name: String(item.name || ''),
-        index: item.index == null ? undefined : Number(item.index),
-        title: item.title == null ? undefined : String(item.title),
-        artist: item.artist == null ? undefined : String(item.artist),
-      })),
-    };
-  }
-
-  async playFolderTrack(path: string, root: string = 'sd'): Promise<void> {
-    await this.command('/folders/play', [['root', root], ['path', path]]);
-  }
-
-  async recent(offset: number = 0): Promise<{ songs: Song[]; total: number; nextOffset: number }> {
-    assertIntegerArgument(offset, 'Offset', 0);
-    const json = await this.jsonGet(`${this.prefix}/recent`, [['offset', String(offset)], ['limit', '50']]);
-    return {
-      total: Number(json.total || 0), nextOffset: Number(json.next_offset || 0),
-      songs: (Array.isArray(json.songs) ? json.songs : []).map((song: any) => ({
-        index: Number(song.index), title: String(song.title || ''),
-        artist: String(song.artist || ''), album: String(song.album || ''),
-        lastPlayed: Number(song.last_played || 0),
-      })),
-    };
-  }
-
-  async favoriteStates(ids: number[]): Promise<Map<number, boolean>> {
-    return this.songStates(ids, 'favorites', (item) => jsonBoolean(item.favorite));
-  }
-
-  async ratingStates(ids: number[]): Promise<Map<number, number>> {
-    return this.songStates(ids, 'ratings', (item) => parseRating(item.rating));
-  }
-
-  private async songStates<T>(ids: number[], family: 'favorites' | 'ratings', read: (item: any) => T | null): Promise<Map<number, T>> {
-    if (!ids.length || ids.length > 100) throw new Error('Song state batch must contain 1 to 100 songs');
-    ids.forEach((id) => assertIntegerArgument(id, 'Song ID', 1));
-    const json = await this.jsonGet(`${this.prefix}/${family}/state`, [['ids', ids.join(',')]]);
-    const states = new Map<number, T>();
-    for (const item of Array.isArray(json.songs) ? json.songs : []) {
-      if (!item?.found) continue;
-      const value = read(item);
-      if (value !== null) states.set(Number(item.index), value);
-    }
-    return states;
-  }
-
-  async setFavorite(favorite: boolean, index?: number, catalogRevision?: string | null, signal?: AbortSignal): Promise<boolean> {
-    const result = await this.writeSongRating(`favorites/${favorite ? 'add' : 'remove'}`, [], index, catalogRevision, signal);
-    return jsonBoolean(result.favorite);
-  }
-
-  async setRating(index: number | undefined, stars: number, catalogRevision?: string | null, signal?: AbortSignal): Promise<number> {
-    assertIntegerArgument(stars, 'Rating', 0, 5);
-    const result = await this.writeSongRating('ratings/set', [['rating', String(stars)]], index, catalogRevision, signal);
-    const rating = parseRating(result?.rating);
-    if (rating == null) throw new Error('Could not update rating');
-    return rating;
-  }
-
-  private async writeSongRating(
-    path: string, params: [string, string][], index?: number, catalogRevision?: string | null, queueSignal?: AbortSignal,
-  ) {
-    if (index == null) {
-      params.push(['current', '1']);
-    } else {
-      assertIntegerArgument(index, 'Song ID', 1);
-      params.push(['index', String(index)]);
-      if (catalogRevision) params.push(['catalog_revision', catalogRevision]);
-    }
-    const request = this.request('POST', `${this.prefix}/${path}`, params);
-    const res = await this.transport.execute(queueSignal ? { ...request, queueSignal } : request);
-    this.ensureSuccess(res);
-    return JSON.parse(res.text());
-  }
-
-  async library(
-    offset: number = 0,
-    limit: number = 50,
-    query?: string | null,
-    filter: LibraryFilter = {},
-    signal?: AbortSignal,
-  ): Promise<LibraryPage> {
-    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
-      throw new Error('Invalid library offset or limit');
-    }
-    if (filter.artist != null && filter.albumArtist != null) {
-      throw new Error('Use artist or albumArtist, not both');
-    }
-    const params: [string, string][] = [
-      ['offset', offset.toString()],
-      ['limit', limit.toString()],
-    ];
-    if (query != null) params.push(['q', query]);
-    if (filter.artist != null) params.push(['artist', filter.artist]);
-    if (filter.albumArtist != null) params.push(['album_artist', filter.albumArtist]);
-    if (filter.album != null) params.push(['album', filter.album]);
-    if (filter.genre != null) params.push(['genre', filter.genre]);
-
-    const json = await this.jsonGet(`${this.prefix}/library`, params, signal);
-    const songs: Song[] = (Array.isArray(json.songs) ? json.songs : []).map((s: any) => ({
-      index: Number(s.index != null ? s.index : -1),
-      title: String(s.title || ''),
-      artist: String(s.artist || ''),
-      album: String(s.album || ''),
-      offset: s.offset !== undefined ? Number(s.offset) : null,
-      albumArtist: s.album_artist ? String(s.album_artist) : '',
-      genre: s.genre ? String(s.genre) : '',
-      trackNumber: s.track_number !== undefined ? Number(s.track_number) : null,
-      discNumber: s.disc_number !== undefined ? Number(s.disc_number) : null,
-      albumKey: s.album_key ? String(s.album_key) : null,
-    }));
-    return {
-      total: Number(json.total || 0),
-      songs,
-    };
-  }
-
-  async catalog(
-    offset: number = 0,
-    limit: number = RemoteApi.CATALOG_PAGE_LIMIT,
-    revision?: string | null
-  ): Promise<CatalogPage> {
-    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > RemoteApi.CATALOG_PAGE_LIMIT) {
-      throw new Error('Invalid catalog offset or limit');
-    }
-    if (revision != null && !revision.trim()) {
-      throw new Error('Revision cannot be blank');
-    }
-    const params: [string, string][] = [
-      ['offset', offset.toString()],
-      ['limit', limit.toString()],
-    ];
-    if (revision) params.push(['revision', revision]);
-
-    const json = await this.jsonGet(`${this.prefix}/catalog`, params);
-    const songs: CatalogSong[] = (Array.isArray(json.songs) ? json.songs : []).map((v: any) => {
-      let artists: string[] = [];
-      if (Array.isArray(v.artists)) {
-        if (v.artists.some((artist: unknown) => typeof artist !== 'string')) {
-          throw new Error("Catalog field 'artists' is invalid");
-        }
-        artists = v.artists.filter((s: string) => s.trim().length > 0);
-      } else if (v.artist && String(v.artist).trim()) {
-        artists = [String(v.artist).trim()];
-      } else if (v.artists != null) {
-        throw new Error("Catalog field 'artists' is invalid");
-      }
-      return {
-        id: requiredInteger(v.id, 'id', 1),
-        title: String(v.title || ''),
-        artist: String(v.artist || ''),
-        album: String(v.album || ''),
-        albumArtist: String(v.album_artist || ''),
-        genre: String(v.genre || ''),
-        trackNumber: nullablePositiveInteger(v.track_number, 'track_number'),
-        discNumber: nullablePositiveInteger(v.disc_number, 'disc_number'),
-        albumKey: nullableString(v.album_key, 'album_key'),
-        artists,
-      };
-    });
-
-    const page: CatalogPage = {
-      libraryId: requiredString(json.library_id, 'library_id'),
-      revision: requiredString(json.revision, 'revision'),
-      total: requiredInteger(json.total, 'total', 0),
-      offset: requiredInteger(json.offset, 'offset', 0),
-      nextOffset: requiredInteger(json.next_offset, 'next_offset', 0),
-      songs,
-    };
-
-    if (!page.libraryId || !page.revision) {
-      throw new Error('Catalog identity is missing');
-    }
-    if (page.offset !== offset || page.nextOffset < page.offset || page.nextOffset > page.total) {
-      throw new Error('Invalid catalog page range');
-    }
-    if (page.nextOffset - page.offset !== page.songs.length) {
-      throw new Error('Catalog page size does not match its range');
-    }
-
-    return page;
-  }
-
-  async catalogCovers(
-    offset: number = 0,
-    limit: number = RemoteApi.CATALOG_PAGE_LIMIT,
-    revision: string = ''
-  ): Promise<CatalogCoversPage> {
-    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > RemoteApi.CATALOG_PAGE_LIMIT || !revision.trim()) {
-      throw new Error('Invalid catalog covers parameters');
-    }
-    const json = await this.jsonGet(`${this.prefix}/catalog/covers`, [
-      ['revision', revision],
-      ['offset', offset.toString()],
-      ['limit', limit.toString()],
-    ]);
-
-    const covers: CatalogCover[] = (Array.isArray(json.covers) ? json.covers : []).map((v: any) => ({
-      albumKey: requiredString(v.album_key, 'album_key'),
-      representativeId: requiredInteger(v.representative_id, 'representative_id', 1),
-      coverKey: requiredString(v.cover_key, 'cover_key'),
-      available: nullableJsonBoolean(v.available, 'available'),
-    }));
-
-    const page: CatalogCoversPage = {
-      libraryId: requiredString(json.library_id, 'library_id'),
-      revision: requiredString(json.revision, 'revision'),
-      total: requiredInteger(json.total, 'total', 0),
-      offset: requiredInteger(json.offset, 'offset', 0),
-      nextOffset: requiredInteger(json.next_offset, 'next_offset', 0),
-      covers,
-    };
-
-    if (!page.libraryId || page.revision !== revision) {
-      throw new Error('Catalog cover identity does not match');
-    }
-    if (page.offset !== offset || page.nextOffset < page.offset || page.nextOffset > page.total) {
-      throw new Error('Invalid catalog cover page range');
-    }
-    if (page.nextOffset - page.offset !== page.covers.length) {
-      throw new Error('Catalog cover page size does not match its range');
-    }
-    if (page.covers.some((c) => !c.albumKey || !c.coverKey)) {
-      throw new Error('Catalog cover key is missing');
-    }
-
-    return page;
-  }
-
-  async catalogArt(revision: string, representativeId: number, coverKey: string): Promise<ArtImage | null> {
-    return this.readArt(`${this.prefix}/catalog/art`, this.catalogArtParams(revision, representativeId, coverKey));
-  }
-
-  async downloadCatalogArt(fileUri: string, revision: string, representativeId: number, coverKey: string): Promise<boolean> {
-    return this.downloadArtRequest(fileUri, `${this.prefix}/catalog/art`, this.catalogArtParams(revision, representativeId, coverKey));
-  }
-
-  private catalogArtParams(revision: string, representativeId: number, coverKey: string): [string, string][] {
-    if (!revision.trim() || !Number.isSafeInteger(representativeId) || representativeId <= 0 || !coverKey.trim()) {
-      throw new Error('Invalid catalog art parameters');
-    }
-    return [
-      ['revision', revision],
-      ['representative_id', representativeId.toString()],
-      ['cover_key', coverKey],
-    ];
-  }
-
-  private async readArt(path: string, params: [string, string][]): Promise<ArtImage | null> {
-    const response = await this.send('GET', path, params);
-    if (response.statusCode === 404) return null;
-    this.ensureSuccess(response);
-    return {
-      contentType: response.header('content-type'),
-      base64: response.bodyBase64 ?? bytesToBase64(response.body),
-    };
-  }
-
-  async artists(signal?: AbortSignal): Promise<LibraryGroup[]> {
-    return this.groups(`${this.prefix}/library/artists`, [], 'artists', signal);
-  }
-
-  async librarySorting(): Promise<LibrarySortingSnapshot> {
-    const json = await this.jsonGet(`${this.prefix}/library/sorting`);
-    const parse = (scope: LibrarySortScope): LibrarySortSnapshot => {
-      const { configured, effective, available, reverse } = json?.[scope] ?? {};
-      const { slots } = LIBRARY_SORT_SECTIONS[scope];
-      if (!Array.isArray(available) || !slots.some((count) => count === available.length) ||
-        available.some((slot) => typeof slot !== 'boolean') ||
-        !isLibrarySortMode(scope, configured, available.length) ||
-        !isLibrarySortMode(scope, effective, available.length) ||
-        (reverse !== undefined && typeof reverse !== 'boolean')) {
-        throw new Error('Invalid library sorting response');
-      }
-      return { configured, effective, available, reverse: reverse === true };
-    };
-    return { albums: parse('albums'), artists: parse('artists'), albumArtists: parse('album_artists') };
-  }
-
-  async setLibrarySorting(scope: LibrarySortScope, mode: LibrarySortMode): Promise<void> {
-    if (!isLibrarySortScope(scope)) throw new Error('Invalid sorting scope');
-    if (!isLibrarySortMode(scope, mode)) throw new Error('Invalid sort mode for scope');
-    await this.command('/library/sorting', [['scope', scope], ['mode', String(mode)]]);
-  }
-
-  async libraryAlbumGroups(options: { scope: LibrarySortScope; artist?: string | null; albumArtist?: string | null; offset?: number; limit?: number }): Promise<{ total: number; offset: number; nextOffset: number; revision: string; groups: LibraryGroup[] }> {
-    assertIntegerArgument(options.offset ?? 0, 'Offset', 0);
-    assertIntegerArgument(options.limit ?? 100, 'Limit', 1, 100);
-    const params: [string, string][] = [['scope', options.scope], ['offset', String(options.offset ?? 0)], ['limit', String(options.limit ?? 100)]];
-    if (options.artist != null) params.push(['artist', options.artist]);
-    if (options.albumArtist != null) params.push(['album_artist', options.albumArtist]);
-    const json = await this.jsonGet(`${this.prefix}/library/albums`, params);
-    if (![json.total, json.offset, json.next_offset].every((v) => Number.isSafeInteger(v) && v >= 0) || !Array.isArray(json.groups) || typeof json.revision !== 'string' || !json.revision) throw new Error('Invalid album page');
-    return { total: json.total, offset: json.offset, nextOffset: json.next_offset, revision: json.revision, groups: json.groups.map((g: any) => ({
-      name: String(g.name || ''), count: Number(g.count || 0), index: Number(g.index || 0),
-      albumArtist: String(g.album_artist || ''), albumKey: typeof g.album_key === 'string' ? g.album_key : null,
-    })) };
-  }
-
   async playCollection(request: CollectionPlayRequest): Promise<number> {
     assertIntegerArgument(request.mode, 'Play mode', 0, 4);
     const params: [string, string][] = [['scope', request.scope], ['mode', String(request.mode)]];
@@ -817,228 +341,18 @@ export class RemoteApi {
     if (request.artist != null) params.push(['artist', request.artist]);
     if (request.albumArtist != null) params.push(['album_artist', request.albumArtist]);
     if (request.catalogRevision) params.push(['catalog_revision', request.catalogRevision]);
-    this.preemptArtworkRequest();
-    commandsSent++;
-    const response = await this.send('POST', `${this.prefix}/playback/collection`, params);
+    const response = await this.sendPlayerCommand('/playback/collection', params);
     if (response.statusCode < 200 || response.statusCode >= 300) throw new RemoteApiException(response.statusCode, response.text());
     const json = JSON.parse(response.text());
     if (!Number.isSafeInteger(json.id) || json.id < 1) throw new Error('Invalid collection job');
     return json.id;
   }
 
-  async albumArtists(): Promise<LibraryGroup[]> {
-    return this.groups(`${this.prefix}/library/album_artists`, [], 'artists');
-  }
-
-  async genres(signal?: AbortSignal): Promise<LibraryGroup[]> {
-    return this.groups(`${this.prefix}/library/genres`, [], 'genres', signal);
-  }
-
-  async albums(filter: LibraryFilter = {}, signal?: AbortSignal): Promise<LibraryGroup[]> {
-    if (filter.artist != null && filter.albumArtist != null) {
-      throw new Error('Use artist or albumArtist, not both');
-    }
-    if (filter.album != null) {
-      throw new Error('Album lookup accepts only an artist grouping filter');
-    }
-    if (filter.genre != null) {
-      throw new Error('Album lookup does not accept a genre filter');
-    }
-    const params: [string, string][] = [];
-    if (filter.artist) params.push(['artist', filter.artist]);
-    if (filter.albumArtist) params.push(['album_artist', filter.albumArtist]);
-
-    return this.groups(`${this.prefix}/library/albums`, params, 'albums', signal);
-  }
-
-  async topRatedAlbums(): Promise<LibraryGroup[]> {
-    return this.groups(`${this.prefix}/library/top_rated_albums`, [], 'albums');
-  }
-
-  async playlists(): Promise<Playlist[]> {
-    const json = await this.jsonGet(`${this.prefix}/playlists`);
-    const playlists = Array.isArray(json.playlists) ? json.playlists : [];
-    return playlists.map((p: any) => {
-      const name = String(p.name || '');
-      const internal = jsonBoolean(p.internal);
-      let key = String(p.key || '');
-      if (!key) {
-        key = internal ? name : name.endsWith('.m3u') ? name.slice(0, -4) : name;
-      }
-      return {
-        name,
-        key,
-        internal,
-        writable: jsonBoolean(p.writable),
-      };
-    });
-  }
-
-  async playlistSongs(key: string): Promise<Song[]> {
-    const first = await this.playlistPage(key);
-    const songs = [...first.songs];
-    let nextOffset = first.nextOffset;
-    while (nextOffset > 0 && nextOffset < first.total) {
-      const page = await this.playlistPage(key, nextOffset);
-      if (page.nextOffset <= nextOffset) break;
-      songs.push(...page.songs);
-      nextOffset = page.nextOffset;
-    }
-    return songs;
-  }
-
-  async playlistPage(key: string, offset: number = 0): Promise<PlaylistPage> {
-    assertIntegerArgument(offset, 'Offset', 0);
-    const json = await this.jsonGet(`${this.prefix}/playlists/songs`, [['name', key], ['offset', String(offset)]]);
-    const songs: Song[] = (Array.isArray(json.songs) ? json.songs : []).map((s: any) => ({
-      index: Number(s.index != null ? s.index : -1), title: String(s.title || ''),
-      artist: String(s.artist || ''), album: String(s.album || ''),
-      position: s.position == null ? null : Number(s.position),
-    }));
-    return {
-      songs, total: json.total == null ? songs.length : Number(json.total),
-      nextOffset: json.next_offset == null ? songs.length : Number(json.next_offset),
-      revision: json.revision == null ? null : String(json.revision),
-      writable: jsonBoolean(json.writable),
-    };
-  }
-
-  async createEmptyPlaylist(name: string): Promise<void> {
-    RemoteApi.validatePlaylistName(name);
-    await this.command('/playlists/create', [['name', name]]);
-  }
-
-  async renamePlaylist(key: string, newName: string): Promise<string> {
-    RemoteApi.validatePlaylistName(newName);
-    const res = await this.send('POST', `${this.prefix}/playlists/rename`, [['name', key], ['new_name', newName]]);
-    this.ensureSuccess(res);
-    return String(JSON.parse(res.text()).key || newName);
-  }
-
-  async deletePlaylist(key: string): Promise<void> {
-    await this.command('/playlists/delete', [['name', key]]);
-  }
-
-  async removePlaylistTrack(key: string, position: number, revision: string): Promise<string | null> {
-    assertIntegerArgument(position, 'Position', 0);
-    const res = await this.send('POST', `${this.prefix}/playlists/remove`, [
-      ['name', key], ['position', String(position)], ['revision', revision],
-    ]);
-    this.ensureSuccess(res);
-    return JSON.parse(res.text()).revision ?? null;
-  }
-
-  async movePlaylistTrack(key: string, from: number, to: number, revision: string): Promise<string | null> {
-    assertIntegerArgument(from, 'From', 0);
-    assertIntegerArgument(to, 'To', 0);
-    const res = await this.send('POST', `${this.prefix}/playlists/move`, [
-      ['name', key], ['from', String(from)], ['to', String(to)], ['revision', revision],
-    ]);
-    this.ensureSuccess(res);
-    return JSON.parse(res.text()).revision ?? null;
-  }
-
-  async importPlaylist(name: string, body: Uint8Array): Promise<{ entries: number; matched: number }> {
-    RemoteApi.validatePlaylistName(name);
-    if (!body.length || body.length > 256 * 1024) throw new Error('Playlist file must be 1–256 KiB');
-    const res = await this.send('POST', `${this.prefix}/playlists/import`, [['name', name]], body);
-    this.ensureSuccess(res);
-    const json = JSON.parse(res.text());
-    return { entries: Number(json.entries || 0), matched: Number(json.matched || 0) };
-  }
-
-  async createPlaylist(name: string, index: number): Promise<void> {
-    RemoteApi.validatePlaylistName(name);
-    assertIntegerArgument(index, 'Index', 0);
-    await this.command('/playlists', [
-      ['name', name],
-      ['index', index.toString()],
-    ]);
-  }
-
-  async addToPlaylist(name: string, index: number): Promise<void> {
-    RemoteApi.validatePlaylistName(name);
-    assertIntegerArgument(index, 'Index', 0);
-    await this.command('/playlists/add', [
-      ['name', name],
-      ['index', index.toString()],
-    ]);
+  playlistSongs(key: string): Promise<Song[]> {
+    return readPlaylistSongs((name, offset) => this.playlistPage(name, offset), key);
   }
 
   static validatePlaylistName(name: string): void {
-    const bytes = new TextEncoder().encode(name).length;
-    if (bytes < 1 || bytes > 127 || name.startsWith('.') || name.startsWith('@') ||
-        /[\x00-\x1f\x7f/\\:*?"<>|]/.test(name) || name.includes('..') ||
-        /[ .]$/.test(name) || /\.m3u8?$/i.test(name) ||
-        /^(Favorites|Most Played)$/i.test(name)) {
-      throw new Error('Invalid playlist name. Use 1–127 UTF-8 bytes without reserved characters or an M3U extension.');
-    }
-  }
-
-  /** Matches java.net.URLEncoder used by the Android client for query parameters. */
-  static encode(value: string): string {
-    return encodeURIComponent(value)
-      .replace(/[!'()~]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
-      .replace(/%20/g, '+');
-  }
-
-  private async groups(
-    path: string,
-    params: [string, string][],
-    key: 'albums' | 'genres' | 'artists',
-    signal?: AbortSignal,
-  ): Promise<LibraryGroup[]> {
-    const json = await this.jsonGet(path, params, signal);
-    const arr = Array.isArray(json[key]) ? json[key] : [];
-    return arr.map((g: any) => ({
-      ...(parseRating(g.stars) ? { stars: g.stars } : {}),
-      name: String(g.name || ''),
-      count: Number(g.count || 0),
-      index: Number(g.index || 0),
-      albumArtist: String(g.album_artist || ''),
-      albumKey: g.album_key ? String(g.album_key) : null,
-    }));
-  }
-
-  private async command(path: string, params: [string, string][] = []): Promise<void> {
-    // Match the native backend: player commands release the socket from optional artwork reads.
-    this.preemptArtworkRequest();
-    commandsSent++;
-    const res = await this.send('POST', `${this.prefix}${path}`, params);
-    this.ensureSuccess(res);
-  }
-
-  private async jsonGet(path: string, params: [string, string][] = [], signal?: AbortSignal): Promise<any> {
-    const request = this.request('GET', path, params);
-    const res = await this.transport.execute(signal ? { ...request, queueSignal: signal } : request);
-    this.ensureSuccess(res);
-    return JSON.parse(res.text());
-  }
-
-  private async send(method: 'GET' | 'POST', path: string, params: [string, string][] = [], body?: Uint8Array): Promise<HttpResponse> {
-    return this.transport.execute(this.request(method, path, params, body));
-  }
-
-  private request(method: 'GET' | 'POST', path: string, params: [string, string][] = [], body?: Uint8Array, omitPin = false): HttpRequest {
-    if (!path.startsWith('/') || path.includes('?')) {
-      throw new Error('Invalid path format');
-    }
-    const query = params.map(([k, v]) => `${RemoteApi.encode(k)}=${RemoteApi.encode(v)}`).join('&');
-    const target = `${path}${query ? `?${query}` : ''}`;
-    const headers: Record<string, string> = {};
-    if (this.pin && !omitPin) {
-      headers[RemoteApi.PIN_HEADER] = this.pin;
-    }
-    if (body) {
-      headers['Content-Type'] = 'audio/x-mpegurl';
-      headers['Content-Length'] = String(body.length);
-    }
-    return { method, target, headers, body };
-  }
-
-  private ensureSuccess(response: HttpResponse): void {
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw new RemoteApiException(response.statusCode, response.text());
-    }
+    validatePlaylistName(name);
   }
 }

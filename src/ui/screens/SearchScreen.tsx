@@ -41,7 +41,11 @@ function isSearchScreen(state: RemoteUiState): boolean {
   return state.screen.type === 'Library' && state.screen.category === LibraryCategory.Search;
 }
 
-export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBottomInset, scroll, selectionMode = false, selectedIds, onSelectEntry, onEntrySelectionLongPress, onOpenBulkActions, onCancelSelection }: SearchScreenProps) {
+export function SearchScreen(props: SearchScreenProps) {
+  return renderSearchScreen(props, useSearchScreen(props));
+}
+
+function useSearchScreen({ state, onAction, scroll }: SearchScreenProps) {
   const { t } = useI18n();
   const songSwipe = useSongSwipe(onAction, state.connectionMessage, state.queueStatus, state.connectionStatus === ConnectionStatus.Connected);
   const [query, setQuery] = useState(state.libraryQuery);
@@ -88,6 +92,14 @@ export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBot
     onAction({ type: 'SearchLibrary', query: value });
   };
 
+  return { t, songSwipe, query, inputRef, filter, setFilter, tileWidth, term, showingResults, sections, sectionItems, changeQuery };
+}
+
+type SearchView = ReturnType<typeof useSearchScreen>;
+
+function searchResultItems(props: SearchScreenProps, search: SearchView) {
+  const { state, onAction, selectionMode, selectedIds, onOpenBulkActions, onCancelSelection } = props;
+  const { showingResults, sectionItems, sections, term, t } = search;
   const items: LibraryItem[] = [];
   const inlineError = showingResults ? inlineLibraryError(state) : null;
   if (inlineError) {
@@ -112,6 +124,14 @@ export function SearchScreen({ state, onAction, onOpenEntry, onClose, contentBot
         });
   if (placeholder) items.push(nodeItem('placeholder', <LibraryPlaceholder {...placeholder} />));
 
+  return items;
+}
+
+function renderSearchScreen(props: SearchScreenProps, search: SearchView) {
+  const { state, onAction, onOpenEntry, onClose, contentBottomInset, scroll, selectionMode = false,
+    selectedIds, onSelectEntry, onEntrySelectionLongPress } = props;
+  const { t, songSwipe, query, changeQuery, inputRef, filter, setFilter, showingResults, tileWidth } = search;
+  const items = searchResultItems(props, search);
   return (
     <View style={styles.screen}>
       <View style={styles.header}>

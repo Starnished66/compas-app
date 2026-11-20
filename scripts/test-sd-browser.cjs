@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
+const { loadRemoteApi } = require('./test-library-sorting.cjs');
 
 function load(file, imports = {}) {
   const source = fs.readFileSync(`${__dirname}/../${file}`, 'utf8');
@@ -9,7 +10,7 @@ function load(file, imports = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText;
   const module = { exports: {} };
-  vm.runInNewContext(javascript, { module, exports: module.exports, require: (name) => {
+  vm.runInNewContext(javascript, { module, exports: module.exports, AbortController, require: (name) => {
     assert.ok(name in imports, `Unexpected import: ${name}`);
     return imports[name];
   } });
@@ -171,10 +172,7 @@ async function checkHidden() {
 }
 
 async function checkRemoteHidden() {
-  const { RemoteApi } = load('src/data/RemoteApi.ts', {
-    './redirectGuard': {}, './cryptoUtils': {}, './dacMode': {}, './SettingsApi': {}, './PluginsApi': {}, './HttpTransport': {},
-    './librarySortModes': load('src/data/librarySortModes.ts'),
-  });
+  const RemoteApi = loadRemoteApi(load);
   const api = new RemoteApi({});
   const queries = [];
   api.jsonGet = async (path, params) => {
@@ -197,8 +195,18 @@ async function checkRemoteHidden() {
 }
 
 async function checkUpload(outcome) {
-  const source = fs.readFileSync(`${__dirname}/../src/ui/screens/TransferScreen.tsx`, 'utf8');
-  const body = source.slice(source.indexOf('  const upload = async'), source.indexOf('  // The app may not have noticed'));
+  const { createTransferUpload } = load('src/ui/transfer/useTransferUploads.ts', {
+    react: {},
+    '../../../modules/compas-files/src': {
+      collectLocalFiles: async () => Array.from({ length: 3 }, (_, i) => ({ path: String(i), name: String(i), relativeDir: 'Album', size: 1 })),
+    },
+    '../../session/transferPlan': load('src/session/transferPlan.ts'),
+    '../localizedLabels': { localizedMessage: (text) => text },
+    './transferFileUploads': load('src/ui/transfer/transferFileUploads.ts', {
+      '../../../modules/compas-files/src': { localFileUri: (path) => path },
+      '../../session/transferAvailability': { isConnectionError: () => false },
+    }),
+  });
   const reads = [];
   let uploads = 0;
   const controller = { current: null };
@@ -214,20 +222,19 @@ async function checkUpload(outcome) {
     },
   };
   const noop = () => {};
-  const context = {
-    AbortController, Date, Error, Map, uploadControllerRef: controller, phoneHiddenRef: { current: false },
-    uploading: false, ready: true, connected: true, selected: new Map([['phone', {}]]),
-    transferRef: { current: api }, aliveRef: { current: true }, MAX_FILE_BYTES: Infinity, PROGRESS_INTERVAL_MS: 150,
-    collectLocalFiles: async () => Array.from({ length: 3 }, (_, i) => ({ path: String(i), name: String(i), relativeDir: 'Album', size: 1 })),
-    planTransfer: load('src/session/transferPlan.ts').planTransfer, localFileUri: (path) => path,
-    isConnectionError: () => false, localizedMessage: (text) => text, t: (text) => text,
-    setChoosingDestination: noop, setError: noop, setNotice: noop, setPreparing: noop,
-    setJob: noop, setSelected: noop, setUploadedSinceFinish: noop, setPane: noop,
+  const state = {
+    uploadControllerRef: controller, uploading: false,
+    setPreparing: noop, setJob: noop, setUploadedSinceFinish: noop,
+  };
+  const options = {
+    phoneHiddenRef: { current: false }, ready: true, connected: true, selected: new Map([['phone', {}]]),
+    transferRef: { current: api }, aliveRef: { current: true }, t: (text) => text,
+    setChoosingDestination: noop, setError: noop, setNotice: noop,
+    setSelected: noop, setPane: noop,
+    reopenPathRef: { current: null },
     loadSd: (path) => { assert.equal(controller.current, null); reads.push(path); },
   };
-  await vm.runInNewContext(ts.transpileModule(`${body}\nupload('Music');`, {
-    compilerOptions: { target: ts.ScriptTarget.ES2020 },
-  }).outputText, context);
+  await createTransferUpload(state, options)('Music');
   assert.equal(uploads, outcome === 'finished' ? 3 : 2);
   assert.deepEqual(reads, ['Music']);
 }

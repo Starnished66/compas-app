@@ -1,25 +1,19 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { LibraryCategory, LibraryEntry, RemoteAction, RemoteUiState } from '../../data/types';
-import { AppText } from '../components/AppText';
-import { ArtworkThumb } from '../components/ArtworkThumb';
 import { BottomSheet } from '../components/BottomSheet';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { Divider } from '../components/Divider';
 import { InlineError } from '../components/InlineError';
-import { StarRating } from '../components/StarRating';
-import { SheetActionRow } from '../components/SheetActionRow';
 import { usePalette } from '../PaletteProvider';
 import { playlistDisplayName } from '../playlistName';
 import { useSnackbar } from '../snackbar/useSnackbar';
 import { useEntryArtwork } from '../library/useEntryArtwork';
 import { SnackbarMessage } from '../snackbar/snackbarContext';
 import { Space } from '../tokens';
-import { AddToPlaylistStep } from './AddToPlaylistStep';
-import { PlaylistNameStep } from './PlaylistNameStep';
 import { PendingSongAction, useSongActionPending } from './useSongActionPending';
 import { PlaylistMatch, isViewingPlaylist, usePlaylistViewer } from './usePlaylistViewer';
 import { useSheetStep } from './useSheetStep';
+import { renderSongActionStep } from './songActionPanels';
 import { useI18n } from '../../i18n';
 
 export interface SongActionsSheetProps {
@@ -28,8 +22,6 @@ export interface SongActionsSheetProps {
 }
 
 type SheetStep = 'actions' | 'playlists' | 'name';
-
-const HEADER_ARTWORK_SIZE = 48;
 
 function findSongEntries(entries: readonly LibraryEntry[], title: string, position: number | null | undefined): LibraryEntry[] {
   return entries.filter(
@@ -83,6 +75,67 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
   stateRef.current = state;
   const viewPlaylist = usePlaylistViewer(state, onAction);
 
+  const { confirmed, timedOut } = useSongActionFeedback(stateRef, onAction, snackbar, viewPlaylist, t);
+  const { pending, revealed, start, clear } = useSongActionPending(state, onAction, confirmed, timedOut);
+
+  const details = useSongActionDetails(state, visible, pending);
+  const { title, playlistName, busy } = details;
+  const commands = createSongActionCommands(state, onAction, details, { start, clear, setStep, setDraftName, setConfirmingRemove });
+  const { close, removeFromPlaylist } = commands;
+
+  return (
+    <>
+      <BottomSheet key={sheetKey} visible={visible && (!busy || revealed)} onClose={close} contentKey={step}>
+        {renderSongActionStep({
+          step, setStep, state, onAction, details, commands, pending, draftName, palette, t, setConfirmingRemove,
+        })}
+        {state.connectionMessage ? <InlineError message={state.connectionMessage} style={styles.error} /> : null}
+      </BottomSheet>
+      <ConfirmDialog
+        visible={visible && confirmingRemove}
+        title={t('Remove from {name}?', { name: playlistName })}
+        message={t('“{title}” is removed from this playlist. It stays in your library.', { title })}
+        confirmLabel={t('Remove')}
+        destructive
+        onConfirm={removeFromPlaylist}
+        onClose={() => setConfirmingRemove(false)}
+      />
+    </>
+  );
+}
+
+type Translate = ReturnType<typeof useI18n>['t'];
+type SongAction = SongActionsSheetProps['onAction'];
+type StateRef = React.RefObject<RemoteUiState>;
+type Snackbar = ReturnType<typeof useSnackbar>;
+
+function showSongRatingFeedback(
+  action: Extract<PendingSongAction, { kind: 'rating' }>, stateRef: StateRef,
+  onAction: SongAction, snackbar: Snackbar, t: Translate,
+) {
+  const entryId = action.entryId;
+  const undoable = entryId != null && !showsFavorites(stateRef.current);
+  snackbar.show({
+    text: action.stars
+      ? (action.rating ? t('Rating saved') : t('Rating cleared'))
+      : action.rating ? t('Added to favorites') : t('Removed from favorites'),
+    ...(undoable
+      ? {
+          actionLabel: t('Undo'),
+          onAction: () => {
+            if (stateRef.current.libraryEntries.some((entry) => entry.id === entryId)) {
+              setRatingFor(onAction, entryId, action.previous);
+            }
+          },
+        }
+      : {}),
+  });
+}
+
+function useSongActionFeedback(
+  stateRef: StateRef, onAction: SongAction, snackbar: Snackbar,
+  viewPlaylist: ReturnType<typeof usePlaylistViewer>, t: Translate,
+) {
   const confirmed = useCallback(
     (action: PendingSongAction) => {
       const latest = stateRef.current;
@@ -106,26 +159,9 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
             ...view({ name: action.playlistName }),
           });
           return;
-        case 'rating': {
-          const entryId = action.entryId;
-          const undoable = entryId != null && !showsFavorites(latest);
-          snackbar.show({
-            text: action.stars
-              ? (action.rating ? t('Rating saved') : t('Rating cleared'))
-              : action.rating ? t('Added to favorites') : t('Removed from favorites'),
-            ...(undoable
-              ? {
-                  actionLabel: t('Undo'),
-                  onAction: () => {
-                    if (stateRef.current.libraryEntries.some((entry) => entry.id === entryId)) {
-                      setRatingFor(onAction, entryId, action.previous);
-                    }
-                  },
-                }
-              : {}),
-          });
+        case 'rating':
+          showSongRatingFeedback(action, stateRef, onAction, snackbar, t);
           return;
-        }
         case 'remove':
           snackbar.show({ text: t('Removed from {name}', { name: action.playlistName }) });
           return;
@@ -140,8 +176,10 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
     () => snackbar.show({ text: t('No response from the player. Check whether the change was applied.') }),
     [snackbar, t],
   );
-  const { pending, revealed, start, clear } = useSongActionPending(state, onAction, confirmed, timedOut);
+  return { confirmed, timedOut };
+}
 
+function useSongActionDetails(state: RemoteUiState, visible: boolean, pending: PendingSongAction | null) {
   // The library scans only run while the sheet is open; while it closes the last result is kept so the
   // header and move rows don't change mid-animation.
   const { libraryEntries, songActionTitle, songActionPosition } = state;
@@ -168,6 +206,24 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
   const playlistName = playlist ? playlistDisplayName(playlist.name) : '';
   const busy = pending != null;
 
+  return { entry, entryArtwork, hasEarlier, hasLater, uniqueEntryId, title, features, stars, rating, canEditPlaylistTrack, playlistName, busy };
+}
+
+type SongDetails = ReturnType<typeof useSongActionDetails>;
+
+interface SongCommandControls {
+  start: ReturnType<typeof useSongActionPending>['start'];
+  clear: ReturnType<typeof useSongActionPending>['clear'];
+  setStep: (step: SheetStep) => void;
+  setDraftName: (name: string) => void;
+  setConfirmingRemove: (show: boolean) => void;
+}
+
+function createSongActionCommands(
+  state: RemoteUiState, onAction: SongAction, details: SongDetails, controls: SongCommandControls,
+) {
+  const { title, busy, playlistName, rating, stars, uniqueEntryId } = details;
+  const { start, clear, setStep, setDraftName, setConfirmingRemove } = controls;
   const close = () => {
     clear();
     onAction({ type: 'CloseSongActions' });
@@ -207,137 +263,24 @@ export function SongActionsSheet({ state, onAction }: SongActionsSheetProps) {
     run({ kind: 'remove', title, playlistName }, { type: 'RemovePlaylistTrack' });
   };
 
-  const renderActions = () => (
-    <>
-      <View style={styles.header}>
-        <ArtworkThumb uri={entryArtwork} size={HEADER_ARTWORK_SIZE} />
-        <View style={styles.headerText}>
-          <AppText variant="bodyStrong" numberOfLines={1}>
-            {title}
-          </AppText>
-          {entry?.subtitle ? (
-            <AppText variant="caption" tone="inkMuted" numberOfLines={1}>
-              {entry.subtitle}
-            </AppText>
-          ) : null}
-        </View>
-      </View>
-      <Divider />
-      <SheetActionRow
-        icon="queueAdd"
-        label={t('Add to queue')}
-        busy={pending?.kind === 'queue'}
-        onPress={() => run({ kind: 'queue', title }, { type: 'AddSongToQueue' })}
-      />
-      {rating != null && stars ? (
-        <StarRating rating={rating} onChange={setRating} disabled={busy} busy={pending?.kind === 'rating'} style={styles.rating} />
-      ) : rating != null && features.includes('favorites_edit') ? (
-        <SheetActionRow
-          icon="heart"
-          iconFilled={rating > 0}
-          iconColor={rating ? palette.accent : undefined}
-          label={t(rating ? 'Remove from favorites' : 'Add to favorites')}
-          busy={pending?.kind === 'rating'}
-          onPress={() => setRating(rating ? 0 : 5)}
-        />
-      ) : null}
-      <SheetActionRow icon="playlistAdd" label={t('Add to playlist…')} onPress={openPlaylistStep} />
-      {canEditPlaylistTrack && hasEarlier ? (
-        <SheetActionRow
-          icon="arrowUp"
-          label={t('Move earlier')}
-          busy={pending?.kind === 'move' && pending.direction === -1}
-          onPress={() => movePlaylistTrack(-1)}
-        />
-      ) : null}
-      {canEditPlaylistTrack && hasLater ? (
-        <SheetActionRow
-          icon="arrowDown"
-          label={t('Move later')}
-          busy={pending?.kind === 'move' && pending.direction === 1}
-          onPress={() => movePlaylistTrack(1)}
-        />
-      ) : null}
-      {canEditPlaylistTrack ? (
-        <SheetActionRow
-          icon="trash"
-          iconColor={palette.statusError}
-          label={t('Remove from {name}', { name: playlistName })}
-          busy={pending?.kind === 'remove'}
-          onPress={() => {
-            if (!busy) setConfirmingRemove(true);
-          }}
-        />
-      ) : null}
-    </>
-  );
+  return { close, run, openPlaylistStep, addToPlaylist, createPlaylist, setRating, movePlaylistTrack, removeFromPlaylist };
+}
 
-  const renderStep = () => {
-    switch (step) {
-      case 'playlists':
-        return (
-          <AddToPlaylistStep
-            playlists={state.playlistOptions}
-            status={state.playlistOptionsStatus}
-            busyKey={pending?.kind === 'playlist' ? pending.key : null}
-            onNewPlaylist={() => {
-              if (!busy) setStep('name');
-            }}
-            onSelect={addToPlaylist}
-            onRetry={() => onAction({ type: 'LoadSongPlaylists' })}
-          />
-        );
-      case 'name':
-        return (
-          <PlaylistNameStep
-            title={t('New playlist')}
-            message={t('Starts with “{title}”', { title })}
-            confirmLabel={t('Create')}
-            initialName={draftName}
-            requireChange={false}
-            takenNames={state.playlistOptions.map((option) => playlistDisplayName(option.name))}
-            busy={pending?.kind === 'create'}
-            onSubmit={createPlaylist}
-            onCancel={close}
-          />
-        );
-      default:
-        return renderActions();
-    }
-  };
-
-  return (
-    <>
-      <BottomSheet key={sheetKey} visible={visible && (!busy || revealed)} onClose={close} contentKey={step}>
-        {renderStep()}
-        {state.connectionMessage ? <InlineError message={state.connectionMessage} style={styles.error} /> : null}
-      </BottomSheet>
-      <ConfirmDialog
-        visible={visible && confirmingRemove}
-        title={t('Remove from {name}?', { name: playlistName })}
-        message={t('“{title}” is removed from this playlist. It stays in your library.', { title })}
-        confirmLabel={t('Remove')}
-        destructive
-        onConfirm={removeFromPlaylist}
-        onClose={() => setConfirmingRemove(false)}
-      />
-    </>
-  );
+export interface SongActionView {
+  step: SheetStep;
+  setStep: (step: SheetStep) => void;
+  state: RemoteUiState;
+  onAction: SongAction;
+  details: SongDetails;
+  commands: ReturnType<typeof createSongActionCommands>;
+  pending: PendingSongAction | null;
+  draftName: string;
+  palette: ReturnType<typeof usePalette>;
+  t: Translate;
+  setConfirmingRemove: (show: boolean) => void;
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.md,
-    paddingHorizontal: Space.lg,
-    paddingBottom: Space.md,
-  },
-  headerText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  rating: { alignSelf: 'center' },
   error: {
     paddingHorizontal: Space.lg,
     paddingTop: Space.md,

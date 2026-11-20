@@ -26,7 +26,11 @@ export interface PlayerSettingsScreenProps {
 }
 
 /** Player settings: rendered entirely from the player's schema, grouped like the device. */
-export function PlayerSettingsScreen({ state, settingsApi, onClose }: PlayerSettingsScreenProps) {
+export function PlayerSettingsScreen(props: PlayerSettingsScreenProps) {
+  return renderPlayerSettings(props, usePlayerSettingsScreen(props));
+}
+
+function usePlayerSettingsScreen({ state, settingsApi, onClose }: PlayerSettingsScreenProps) {
   const { t, language } = useI18n();
   const snackbar = useSnackbar();
   const insets = useScreenInsets();
@@ -64,6 +68,13 @@ export function PlayerSettingsScreen({ state, settingsApi, onClose }: PlayerSett
     void controller?.change(setting.key, value);
   };
 
+  return { t, language, insets, setGroupId, loud, setLoud, settings, controller, schema, group, player, change };
+}
+
+type SettingsPage = ReturnType<typeof usePlayerSettingsScreen>;
+
+function renderPlayerSettings({ onClose }: PlayerSettingsScreenProps, page: SettingsPage) {
+  const { t, language, insets, setGroupId, loud, setLoud, controller, group } = page;
   return (
     <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <ScreenTitleBar
@@ -71,51 +82,8 @@ export function PlayerSettingsScreen({ state, settingsApi, onClose }: PlayerSett
         onBack={group ? () => setGroupId(null) : onClose}
       />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        {settings.phase === 'loading' ? (
-          <View style={styles.center}>
-            <Spinner />
-            <AppText variant="body" tone="inkMuted">{t('Loading player settings…')}</AppText>
-          </View>
-        ) : null}
-        {settings.phase === 'unsupported' ? (
-          <MessageCard variant="surface" title={t('Remote settings aren’t available')} body={t('Update the player to change its settings from here.')} />
-        ) : null}
-        {settings.phase === 'error' ? (
-          <MessageCard
-            variant="surface"
-            title={t('Couldn’t load the player settings')}
-            body={settings.error === 'pin_required' ? t('The saved PIN was rejected. Enter the current PIN.') : undefined}
-            actionLabel={t('Try again')}
-            onAction={() => void controller?.load()}
-          />
-        ) : null}
-        {settings.phase === 'ready' && schema ? (
-          <>
-            {group ? (
-              <SettingGroupPanel
-                schema={schema}
-                groupId={group.id}
-                values={settings.values}
-                writable={settings.writable}
-                busyKeys={settings.busyKeys}
-                pendingApply={settings.pendingApply}
-                rescanBusy={settings.rescanBusy}
-                onChange={change}
-                onAction={(id) => void controller?.runAction(id)}
-              />
-            ) : (
-              <>
-                <AppText variant="body" tone="inkMuted" style={styles.note}>
-                  {t('Changes are sent to {player} right away and show on its screen.', { player })}
-                </AppText>
-                <SettingGroupList schema={schema} values={settings.values} onOpen={setGroupId} />
-                <AppText variant="caption" tone="inkMuted" style={styles.note}>
-                  {t('Wi-Fi, Remote Control, the PIN and Bluetooth options can only be changed on the player, so a remote change can never lock you out.')}
-                </AppText>
-              </>
-            )}
-          </>
-        ) : null}
+        {renderSettingsStatus(page)}
+        {renderSettingsGroups(page)}
       </ScrollView>
       <DangerConfirm
         pending={loud}
@@ -127,6 +95,65 @@ export function PlayerSettingsScreen({ state, settingsApi, onClose }: PlayerSett
         }}
       />
     </View>
+  );
+}
+
+function renderSettingsStatus({ settings, controller, t }: SettingsPage) {
+  return (
+    <>
+      {settings.phase === 'loading' ? (
+        <View style={styles.center}>
+          <Spinner />
+          <AppText variant="body" tone="inkMuted">{t('Loading player settings…')}</AppText>
+        </View>
+      ) : null}
+      {settings.phase === 'unsupported' ? (
+        <MessageCard variant="surface" title={t('Remote settings aren’t available')} body={t('Update the player to change its settings from here.')} />
+      ) : null}
+      {settings.phase === 'error' ? (
+        <MessageCard
+          variant="surface"
+          title={t('Couldn’t load the player settings')}
+          body={settings.error === 'pin_required' ? t('The saved PIN was rejected. Enter the current PIN.') : undefined}
+          actionLabel={t('Try again')}
+          onAction={() => void controller?.load()}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function renderSettingsGroups({ settings, schema, group, change, controller, t, player, setGroupId }: SettingsPage) {
+  return (
+    <>
+      {settings.phase === 'ready' && schema ? (
+        <>
+          {group ? (
+            <SettingGroupPanel
+              schema={schema}
+              groupId={group.id}
+              values={settings.values}
+              writable={settings.writable}
+              busyKeys={settings.busyKeys}
+              pendingApply={settings.pendingApply}
+              rescanBusy={settings.rescanBusy}
+              onChange={change}
+              onAction={(id) => void controller?.runAction(id)}
+            />
+          ) : (
+            <>
+              <AppText variant="body" tone="inkMuted" style={styles.note}>
+                {t('Changes are sent to {player} right away and show on its screen.', { player })}
+              </AppText>
+              <SettingGroupList schema={schema} values={settings.values} onOpen={setGroupId} />
+              <AppText variant="caption" tone="inkMuted" style={styles.note}>
+                {t('Wi-Fi, Remote Control, the PIN and Bluetooth options can only be changed on the player, so a remote change can never lock you out.')}
+              </AppText>
+            </>
+          )}
+        </>
+      ) : null}
+    </>
   );
 }
 

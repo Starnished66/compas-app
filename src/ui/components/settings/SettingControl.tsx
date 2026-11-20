@@ -47,81 +47,105 @@ export function SettingControl({ setting, schema, values, writable, busy, pendin
 
   if (kind === 'hidden') return null;
 
-  if (kind === 'locked') {
-    const shown = formatSettingValue(setting, value, language, t);
-    return (
-      <ListRow
-        title={title}
-        titleTone="inkMuted"
-        subtitle={shown ? `${shown} · ${t('Change it on the player')}` : t('Change it on the player')}
-      />
-    );
-  }
+  const view = { setting, value, title, language, t, hint, disabled, onChange, open, setOpen, badge, pendingApply };
+  if (kind === 'locked') return renderLockedSetting(view);
+  if (kind === 'toggle') return renderToggleSetting(view);
+  if (kind === 'segmented') return renderSegmentedSetting(view);
+  if (kind === 'choice') return renderChoiceSetting(view);
+  return renderNumericSetting(view);
+}
 
-  if (kind === 'toggle') {
-    return (
-      <ListRow
-        title={title}
-        subtitle={hint}
-        trailing={<Toggle value={value === true} label={title} disabled={disabled} onChange={(next) => onChange(setting, next)} />}
-        onPress={disabled ? undefined : () => onChange(setting, value !== true)}
-        accessibilityRole="switch"
-        accessibilityLabel={title}
-        disabled={disabled}
-      />
-    );
-  }
+type I18n = ReturnType<typeof useI18n>;
 
-  if (kind === 'segmented') {
-    const options = choiceOptions(setting, language);
-    return (
-      <View style={[styles.block, disabled && styles.dim]}>
-        <View style={styles.titleRow}>
-          <AppText variant="body">{title}</AppText>
-          {hint ? <AppText variant="caption" tone="inkMuted">{hint}</AppText> : null}
-        </View>
-        <SegmentedControl
-          label={title}
-          options={options.map((o) => ({ value: String(o.value), label: o.label }))}
-          value={String(value)}
-          disabled={disabled}
-          onChange={(next) => onChange(setting, Number(next))}
-        />
+interface SettingView extends Pick<SettingControlProps, 'setting' | 'onChange' | 'pendingApply'> {
+  value: SettingValues[string];
+  title: string;
+  language: I18n['language'];
+  t: I18n['t'];
+  hint: string | undefined;
+  disabled: boolean;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  badge: ReturnType<typeof applyBadge>;
+}
+
+
+function renderLockedSetting({ setting, value, language, t, title }: SettingView) {
+  const shown = formatSettingValue(setting, value, language, t);
+  return (
+    <ListRow
+      title={title}
+      titleTone="inkMuted"
+      subtitle={shown ? `${shown} · ${t('Change it on the player')}` : t('Change it on the player')}
+    />
+  );
+}
+
+function renderToggleSetting({ setting, value, title, hint, disabled, onChange }: SettingView) {
+  return (
+    <ListRow
+      title={title}
+      subtitle={hint}
+      trailing={<Toggle value={value === true} label={title} disabled={disabled} onChange={(next) => onChange(setting, next)} />}
+      onPress={disabled ? undefined : () => onChange(setting, value !== true)}
+      accessibilityRole="switch"
+      accessibilityLabel={title}
+      disabled={disabled}
+    />
+  );
+}
+
+function renderSegmentedSetting({ setting, value, title, hint, disabled, onChange, language }: SettingView) {
+  const options = choiceOptions(setting, language);
+  return (
+    <View style={[styles.block, disabled && styles.dim]}>
+      <View style={styles.titleRow}>
+        <AppText variant="body">{title}</AppText>
+        {hint ? <AppText variant="caption" tone="inkMuted">{hint}</AppText> : null}
       </View>
-    );
-  }
+      <SegmentedControl
+        label={title}
+        options={options.map((o) => ({ value: String(o.value), label: o.label }))}
+        value={String(value)}
+        disabled={disabled}
+        onChange={(next) => onChange(setting, Number(next))}
+      />
+    </View>
+  );
+}
 
-  if (kind === 'choice') {
-    const options = choiceOptions(setting, language);
-    return (
-      <>
+function renderChoiceSetting({ setting, value, title, hint, disabled, onChange, language, t, open, setOpen }: SettingView) {
+  const options = choiceOptions(setting, language);
+  return (
+    <>
+      <ListRow
+        title={title}
+        subtitle={[formatSettingValue(setting, value, language, t), hint].filter(Boolean).join(' · ')}
+        trailing={<Icon name={open ? 'chevronUp' : 'chevronDown'} size={18} />}
+        onPress={disabled ? undefined : () => setOpen(!open)}
+        disabled={disabled}
+        expanded={open}
+      />
+      {open ? options.map((option) => (
         <ListRow
-          title={title}
-          subtitle={[formatSettingValue(setting, value, language, t), hint].filter(Boolean).join(' · ')}
-          trailing={<Icon name={open ? 'chevronUp' : 'chevronDown'} size={18} />}
-          onPress={disabled ? undefined : () => setOpen(!open)}
+          key={option.value}
+          variant="action"
+          title={option.label}
+          selected={value === option.value}
+          accessibilityRole="radio"
           disabled={disabled}
-          expanded={open}
+          trailing={value === option.value ? <Icon name="check" /> : null}
+          onPress={() => {
+            setOpen(false);
+            if (value !== option.value) onChange(setting, option.value);
+          }}
         />
-        {open ? options.map((option) => (
-          <ListRow
-            key={option.value}
-            variant="action"
-            title={option.label}
-            selected={value === option.value}
-            accessibilityRole="radio"
-            disabled={disabled}
-            trailing={value === option.value ? <Icon name="check" /> : null}
-            onPress={() => {
-              setOpen(false);
-              if (value !== option.value) onChange(setting, option.value);
-            }}
-          />
-        )) : null}
-      </>
-    );
-  }
+      )) : null}
+    </>
+  );
+}
 
+function renderNumericSetting({ setting, value, title, disabled, onChange, t, pendingApply, badge }: SettingView) {
   const known = typeof value === 'number';
   const numeric = known ? value : (setting.min ?? 0);
   return (

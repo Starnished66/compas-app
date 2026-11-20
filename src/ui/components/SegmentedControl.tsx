@@ -44,8 +44,39 @@ export function SegmentedControl<T extends string>({
   style,
 }: SegmentedControlProps<T>) {
   const palette = usePalette();
-  const reducedMotion = useReducedMotion();
   const large = size === 'lg';
+  const { selected, pillX, pillWidth, onSegmentLayout } = useSegmentIndicator(value, large);
+
+  return (
+    <View
+      accessibilityRole="radiogroup"
+      accessibilityLabel={label}
+      style={[
+        styles.group,
+        large
+          ? [styles.groupLarge, { backgroundColor: palette.surface, borderColor: palette.outline }]
+          : [styles.groupSmall, { backgroundColor: palette.surfaceRaised }],
+        disabled && styles.disabled,
+        style,
+      ]}
+    >
+      {selected ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.pill,
+            large ? styles.pillLarge : styles.pillSmall,
+            { backgroundColor: palette.accentContainer, left: pillX, width: pillWidth },
+          ]}
+        />
+      ) : null}
+      {options.map((option) => renderSegmentOption(option, { value, onChange, disabled, large, onSegmentLayout, palette }))}
+    </View>
+  );
+}
+
+function useSegmentIndicator<T extends string>(value: T, large: boolean) {
+  const reducedMotion = useReducedMotion();
   const [segments, setSegments] = useState<Record<string, Segment>>({});
   const pillX = useSharedValue(0);
   const pillWidth = useSharedValue(0);
@@ -75,66 +106,53 @@ export function SegmentedControl<T extends string>({
     });
   };
 
+  return { selected, pillX, pillWidth, onSegmentLayout };
+}
+
+function renderSegmentOption<T extends string>(
+  option: SegmentedOption<T>,
+  { value, onChange, disabled, large, onSegmentLayout, palette }: {
+    value: T;
+    onChange: (value: T) => void;
+    disabled: boolean;
+    large: boolean;
+    onSegmentLayout: ReturnType<typeof useSegmentIndicator<T>>['onSegmentLayout'];
+    palette: ReturnType<typeof usePalette>;
+  },
+) {
+  const isSelected = option.value === value;
+  const foreground = isSelected ? palette.onAccentContainer : palette.ink;
   return (
-    <View
-      accessibilityRole="radiogroup"
-      accessibilityLabel={label}
-      style={[
-        styles.group,
-        large
-          ? [styles.groupLarge, { backgroundColor: palette.surface, borderColor: palette.outline }]
-          : [styles.groupSmall, { backgroundColor: palette.surfaceRaised }],
-        disabled && styles.disabled,
-        style,
-      ]}
+    <Pressable
+      key={option.value}
+      accessibilityRole="radio"
+      accessibilityLabel={option.caption ? `${option.label}, ${option.caption}` : option.label}
+      accessibilityState={{ checked: isSelected, disabled }}
+      onPress={() => {
+        if (!isSelected) onChange(option.value);
+      }}
+      disabled={disabled}
+      onLayout={onSegmentLayout(option.value)}
+      style={large ? styles.segmentLarge : styles.segmentSmall}
     >
-      {selected ? (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.pill,
-            large ? styles.pillLarge : styles.pillSmall,
-            { backgroundColor: palette.accentContainer, left: pillX, width: pillWidth },
-          ]}
-        />
-      ) : null}
-      {options.map((option) => {
-        const isSelected = option.value === value;
-        const foreground = isSelected ? palette.onAccentContainer : palette.ink;
-        return (
-          <Pressable
-            key={option.value}
-            accessibilityRole="radio"
-            accessibilityLabel={option.caption ? `${option.label}, ${option.caption}` : option.label}
-            accessibilityState={{ checked: isSelected, disabled }}
-            onPress={() => {
-              if (!isSelected) onChange(option.value);
-            }}
-            disabled={disabled}
-            onLayout={onSegmentLayout(option.value)}
-            style={large ? styles.segmentLarge : styles.segmentSmall}
-          >
-            {option.icon ? <Icon name={option.icon} color={foreground} filled={isSelected} /> : null}
-            {large ? (
-              <View style={styles.largeText}>
-                <AppText variant="bodyStrong" numberOfLines={1} style={{ color: foreground }}>
-                  {option.label}
-                </AppText>
-                {option.caption ? (
-                  <AppText variant="micro" numberOfLines={1} style={{ color: foreground }}>
-                    {option.caption}
-                  </AppText>
-                ) : null}
-              </View>
-            ) : (
-              <AppText variant="caption" numberOfLines={1} style={[styles.smallLabel, { color: foreground }]}>
-                {option.label}
-              </AppText>
-            )}
-          </Pressable>
-        );
-      })}
-    </View>
+      {option.icon ? <Icon name={option.icon} color={foreground} filled={isSelected} /> : null}
+      {large ? (
+        <View style={styles.largeText}>
+          <AppText variant="bodyStrong" numberOfLines={1} style={{ color: foreground }}>
+            {option.label}
+          </AppText>
+          {option.caption ? (
+            <AppText variant="micro" numberOfLines={1} style={{ color: foreground }}>
+              {option.caption}
+            </AppText>
+          ) : null}
+        </View>
+      ) : (
+        <AppText variant="caption" numberOfLines={1} style={[styles.smallLabel, { color: foreground }]}>
+          {option.label}
+        </AppText>
+      )}
+    </Pressable>
   );
 }
 

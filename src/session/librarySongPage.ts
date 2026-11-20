@@ -82,6 +82,10 @@ const readLocalSongPage = (
   );
 };
 
+function showSongPageError({ shared }: LibrarySongPageDependencies, message: string) {
+  shared.setState((prev) => ({ ...prev, libraryStatus: ContentStatus.Error, libraryCountLabel: message }));
+}
+
 const startSongPage = async (
   deps: LibrarySongPageDependencies,
   filter: LibraryFilter,
@@ -92,7 +96,7 @@ const startSongPage = async (
 ) => {
   const {
     activeCatalogRef, apiRef, connectionAttemptRef, featureSetRef, libraryBrowseCatalogRef,
-    libraryEntriesRef, libraryLoadGenerationRef, libraryPageLoadingRef, libraryPageRef, setState,
+    libraryEntriesRef, libraryLoadGenerationRef, libraryPageLoadingRef, libraryPageRef,
     stateRef, syncedCatalogStoreRef,
   } = deps.shared;
   const { recoverCatalogBrowse, t } = deps;
@@ -137,11 +141,7 @@ const startSongPage = async (
   } catch (err: any) {
     if (api !== apiRef.current || attempt !== connectionAttemptRef.current || generation !== libraryLoadGenerationRef.current) return;
     if (recoverCatalogBrowse(err, catalog)) return startSongPage(deps, filter, playContext, albumKey, false, albumIdentity);
-    setState((prev) => ({
-      ...prev,
-      libraryStatus: ContentStatus.Error,
-      libraryCountLabel: err?.message || 'Failed to load tracks',
-    }));
+    showSongPageError(deps, err?.message || 'Failed to load tracks');
   } finally {
     if (libraryPageLoadingRef.current === generation) libraryPageLoadingRef.current = null;
   }

@@ -11,8 +11,7 @@ export interface SlideUpScreenProps {
   style?: StyleProp<ViewStyle>;
 }
 
-export function SlideUpScreen({ visible, children, onHidden, style }: SlideUpScreenProps) {
-  const palette = usePalette();
+function useSlideUpMotion(visible: boolean, onHidden: SlideUpScreenProps['onHidden']) {
   const reducedMotion = useReducedMotion();
   const { height: windowHeight } = useWindowDimensions();
   const [mounted, setMounted] = useState(visible);
@@ -60,6 +59,12 @@ export function SlideUpScreen({ visible, children, onHidden, style }: SlideUpScr
     });
   }, [opacity, reducedMotion, translateY, visible, windowHeight]);
 
+  return { mounted, translateY, opacity };
+}
+
+export function SlideUpScreen({ visible, children, onHidden, style }: SlideUpScreenProps) {
+  const palette = usePalette();
+  const { mounted, translateY, opacity } = useSlideUpMotion(visible, onHidden);
   if (!mounted) return null;
 
   return (

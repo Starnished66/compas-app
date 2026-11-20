@@ -77,11 +77,10 @@ function indexBounds({ minIndex = 0, maxIndex, itemCount }: DragReorderOptions):
   return { min: minIndex, max: Math.min(maxIndex ?? itemCount - 1, itemCount - 1) };
 }
 
-export function useDragReorder(options: DragReorderOptions): DragReorder {
-  const { t } = useI18n();
-  const reducedMotion = useReducedMotion();
+function useDragState(options: DragReorderOptions, reducedMotion: boolean) {
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
-  const [{ shifts, appliedShifts, displaced, restingStyles, lift, responders, handles }] = useState(createDragState);
+  const [values] = useState(createDragState);
+  const { shifts, restingStyles } = values;
   const drag = useRef({ from: -1, target: -1 });
   const resetPending = useRef(false);
   const latest = useRef({ ...options, reducedMotion });
@@ -92,9 +91,13 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
     restingStyles.push(undefined);
   }
 
-  const bounds = () => indexBounds(latest.current);
-  const { min: minBound, max: maxBound } = indexBounds(options);
+  return { draggingIndex, setDraggingIndex, ...values, drag, resetPending, latest };
+}
 
+type DragState = ReturnType<typeof useDragState>;
+
+function createShiftAnimations(state: DragState) {
+  const { drag, shifts, appliedShifts, displaced, lift, latest } = state;
   const applyTarget = (target: number) => {
     const { from, target: previous } = drag.current;
     if (target === previous) return;
@@ -122,6 +125,13 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
     lift.setValue(1);
   };
 
+  return { applyTarget, resetPositions };
+}
+
+function createDragAnimations(state: DragState) {
+  const { drag, shifts, displaced, lift, latest, setDraggingIndex, restingStyles, resetPending } = state;
+  const { applyTarget, resetPositions } = createShiftAnimations(state);
+
   const begin = (index: number) => {
     drag.current = { from: index, target: index };
     const value = shifts[index];
@@ -135,16 +145,6 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
       easing: Easings.standard,
       useNativeDriver: true,
     }).start();
-  };
-
-  const move = (dy: number) => {
-    const { from } = drag.current;
-    if (from < 0) return;
-    const { rowHeight } = latest.current;
-    const { min, max } = bounds();
-    const clamped = clamp(dy, (min - from) * rowHeight, (max - from) * rowHeight);
-    shifts[from]?.setValue(clamped);
-    applyTarget(clamp(from + Math.round(clamped / rowHeight), min, max));
   };
 
   const finish = () => {
@@ -173,6 +173,23 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
     });
   };
 
+  return { begin, finish, applyTarget, resetPositions };
+}
+
+type DragAnimations = ReturnType<typeof createDragAnimations>;
+
+function createDragResponders(state: DragState, { begin, applyTarget, finish }: DragAnimations) {
+  const { shifts, drag, latest, responders } = state;
+  const move = (dy: number) => {
+    const { from } = drag.current;
+    if (from < 0) return;
+    const { rowHeight } = latest.current;
+    const { min, max } = indexBounds(latest.current);
+    const clamped = clamp(dy, (min - from) * rowHeight, (max - from) * rowHeight);
+    shifts[from]?.setValue(clamped);
+    applyTarget(clamp(from + Math.round(clamped / rowHeight), min, max));
+  };
+
   const responderFor = (index: number) => {
     const existing = responders.get(index);
     if (existing) return existing;
@@ -189,8 +206,13 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
     return responder;
   };
 
+  return responderFor;
+}
+
+function useDragCompletion({ enabled }: DragReorderOptions, state: DragState, { finish, resetPositions }: DragAnimations) {
+  const { drag, draggingIndex, resetPending } = state;
   useEffect(() => {
-    if (!options.enabled && drag.current.from >= 0) finish();
+    if (!enabled && drag.current.from >= 0) finish();
   });
 
   // Runs in the commit that applies the reorder (onMove and the drag end batch into one render), before paint,
@@ -201,6 +223,9 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
     resetPositions();
   });
 
+}
+
+function useDragStyles({ draggingIndex, shifts, lift, restingStyles }: DragState) {
   const liftedStyle = useMemo<RowStyle | null>(() => {
     const shift = draggingIndex === null ? undefined : shifts[draggingIndex];
     if (!shift) return null;
@@ -226,8 +251,18 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
     [draggingIndex, liftedStyle, restingStyles, shifts],
   );
 
+  return rowStyle;
+}
+
+function useDragHandles(
+  state: DragState,
+  responderFor: ReturnType<typeof createDragResponders>,
+  { min: minBound, max: maxBound }: ReturnType<typeof indexBounds>,
+  t: ReturnType<typeof useI18n>['t'],
+) {
+  const { handles, latest } = state;
   const handleProps = useCallback((index: number): DragHandleProps => {
-    const { min, max } = bounds();
+    const { min, max } = indexBounds(latest.current);
     const up = index > min;
     const down = index < max;
     // Keyed on the actions the row offers rather than the bounds, so loading another page keeps every
@@ -254,5 +289,19 @@ export function useDragReorder(options: DragReorderOptions): DragReorder {
     return props;
   }, [minBound, maxBound, t]);
 
+  return handleProps;
+}
+
+export function useDragReorder(options: DragReorderOptions): DragReorder {
+  const { t } = useI18n();
+  const reducedMotion = useReducedMotion();
+  const state = useDragState(options, reducedMotion);
+  const bounds = indexBounds(options);
+  const animations = createDragAnimations(state);
+  const responderFor = createDragResponders(state, animations);
+  useDragCompletion(options, state, animations);
+  const rowStyle = useDragStyles(state);
+  const handleProps = useDragHandles(state, responderFor, bounds, t);
+  const { draggingIndex } = state;
   return { rowStyle, handleProps, draggingIndex, scrollEnabled: draggingIndex === null };
 }

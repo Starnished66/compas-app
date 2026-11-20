@@ -56,19 +56,7 @@ export function BulkActionsSheet({ visible, ids, state, onAction, onClose }: Bul
       {started ? (
         state.bulkActionProgress?.phase === 'resolving' || state.bulkActionProgress?.phase === 'writing' ? null : <Button label={t('Done')} onPress={close} />
       ) : step === 'actions' ? (
-        <>
-          <AppText variant="caption" tone="inkMuted" style={styles.note}>{t('Selected items are from the loaded results.')}</AppText>
-          <SheetActionRow icon="queueAdd" label={t('Add to queue')} onPress={() => run('queue')} />
-          <SheetActionRow icon="shuffle" label={t('Add one random song to queue')} onPress={() => run('random')} />
-          {canFavorite ? <>
-            <SheetActionRow icon={ratings ? 'star' : 'heart'} label={ratings ? t('Add to {name}', { name: t(favoritesLabel) }) : t('Add to favorites')} onPress={() => run('favorite', { favorite: true })} />
-            <SheetActionRow icon={ratings ? 'star' : 'heart'} label={ratings ? t('Remove from {name}', { name: t(favoritesLabel) }) : t('Remove from favorites')} onPress={() => run('favorite', { favorite: false })} />
-          </> : null}
-          {canEditPlaylists ? <>
-            <SheetActionRow icon="playlistAdd" label={t('Add to playlist')} onPress={() => { setStep('playlists'); onAction({ type: 'LoadBulkPlaylists' }); }} />
-            <SheetActionRow icon="plus" label={t('Create playlist')} onPress={() => { setStep('create'); onAction({ type: 'LoadBulkPlaylists' }); }} />
-          </> : null}
-        </>
+        renderBulkCommands({ ratings, canFavorite, canEditPlaylists, favoritesLabel, run, setStep, onAction, t })
       ) : step === 'playlists' ? (
         state.bulkPlaylistOptionsStatus === ContentStatus.Loading ? <AppText style={styles.note}>{t('Loading playlists…')}</AppText> :
           state.bulkPlaylistOptionsStatus === ContentStatus.Error ? <InlineError message={state.connectionMessage || t('Could not load playlists')} /> :
@@ -85,6 +73,37 @@ export function BulkActionsSheet({ visible, ids, state, onAction, onClose }: Bul
       )}
       {step !== 'actions' ? <Button label={t('Back')} variant="plain" onPress={() => setStep('actions')} /> : null}
     </BottomSheet>
+  );
+}
+
+type BulkRequest = Extract<RemoteAction, { type: 'RunBulkAction' }>;
+
+function renderBulkCommands({
+  ratings, canFavorite, canEditPlaylists, favoritesLabel, run, setStep, onAction, t,
+}: {
+  ratings: boolean;
+  canFavorite: boolean;
+  canEditPlaylists: boolean;
+  favoritesLabel: string;
+  run: (action: BulkRequest['action'], extras?: Pick<BulkRequest, 'favorite' | 'key' | 'name'>) => void;
+  setStep: (step: 'playlists' | 'create') => void;
+  onAction: BulkActionsSheetProps['onAction'];
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  return (
+    <>
+      <AppText variant="caption" tone="inkMuted" style={styles.note}>{t('Selected items are from the loaded results.')}</AppText>
+      <SheetActionRow icon="queueAdd" label={t('Add to queue')} onPress={() => run('queue')} />
+      <SheetActionRow icon="shuffle" label={t('Add one random song to queue')} onPress={() => run('random')} />
+      {canFavorite ? <>
+        <SheetActionRow icon={ratings ? 'star' : 'heart'} label={ratings ? t('Add to {name}', { name: t(favoritesLabel) }) : t('Add to favorites')} onPress={() => run('favorite', { favorite: true })} />
+        <SheetActionRow icon={ratings ? 'star' : 'heart'} label={ratings ? t('Remove from {name}', { name: t(favoritesLabel) }) : t('Remove from favorites')} onPress={() => run('favorite', { favorite: false })} />
+      </> : null}
+      {canEditPlaylists ? <>
+        <SheetActionRow icon="playlistAdd" label={t('Add to playlist')} onPress={() => { setStep('playlists'); onAction({ type: 'LoadBulkPlaylists' }); }} />
+        <SheetActionRow icon="plus" label={t('Create playlist')} onPress={() => { setStep('create'); onAction({ type: 'LoadBulkPlaylists' }); }} />
+      </> : null}
+    </>
   );
 }
 

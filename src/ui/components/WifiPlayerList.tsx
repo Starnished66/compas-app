@@ -58,17 +58,7 @@ export function WifiPlayerList({
           />
         </EnterView>
       ))}
-      {nothingFound && state.wifiDiscoveryStatus === ContentStatus.Error ? (
-        <ListNotice
-          title={t('Couldn’t search this network')}
-          body={t('Check that Wi-Fi is on and that Compás Remote may use the local network, then search again.')}
-        />
-      ) : nothingFound ? (
-        <ListNotice
-          title={t('No players found')}
-          body={t('Make sure the player is on, on the same Wi-Fi, and has remote control turned on.')}
-        />
-      ) : null}
+      {nothingFound ? renderDiscoveryNotice(state.wifiDiscoveryStatus, t) : null}
       <Divider style={styles.divider} />
       <Collapsible open={!manualOpen}>
         <ListRow
@@ -88,6 +78,20 @@ export function WifiPlayerList({
         />
       </Collapsible>
     </Card>
+  );
+}
+
+function renderDiscoveryNotice(status: ContentStatus, t: ReturnType<typeof useI18n>['t']) {
+  return status === ContentStatus.Error ? (
+    <ListNotice
+      title={t('Couldn’t search this network')}
+      body={t('Check that Wi-Fi is on and that Compás Remote may use the local network, then search again.')}
+    />
+  ) : (
+    <ListNotice
+      title={t('No players found')}
+      body={t('Make sure the player is on, on the same Wi-Fi, and has remote control turned on.')}
+    />
   );
 }
 

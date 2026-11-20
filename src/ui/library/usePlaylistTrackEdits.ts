@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { ContentStatus, LibraryEntry, RemoteAction, RemoteUiState } from '../../data/types';
 import { movePlaylistEntry, removePlaylistEntry } from './playlistTrackEdits';
 
@@ -60,6 +60,48 @@ export function usePlaylistTrackEdits(
     if (succeeded && result) latest.current.onSettled(result);
   }, []);
 
+  usePlaylistEditConfirmation(state, onAction, playlistKey, pending, settle);
+
+  const begin = (nextEntries: LibraryEntry[], move: PendingMove | null, result: PlaylistEditOutcome) => {
+    const current = latest.current.state;
+    if (!current.activePlaylist) return false;
+    pending.current = {
+      playlistKey: current.activePlaylist.key,
+      baseRevision: current.playlistRevision ?? null,
+      move,
+      startedAt: Date.now(),
+    };
+    outcome.current = result;
+    setOverride(nextEntries);
+    return true;
+  };
+
+  const remove = useCallback((entry: LibraryEntry) => {
+    if (pending.current) return;
+    const source = latest.current.state.libraryEntries;
+    if (!source.includes(entry)) return;
+    if (!begin(source.filter((item) => item !== entry), null, { kind: 'removed', title: entry.title })) return;
+    removePlaylistEntry(latest.current.onAction, entry.id);
+  }, []);
+
+  const move = useCallback((from: number, to: number) => {
+    if (pending.current || from === to) return;
+    const source = latest.current.state.libraryEntries;
+    const entry = source[from];
+    if (!entry || to < 0 || to >= source.length) return;
+    const direction = to > from ? 1 : -1;
+    const pendingMove = { index: from, remaining: Math.abs(to - from), direction, title: entry.title } as const;
+    if (!begin(reorder(source, from, to), pendingMove, { kind: 'moved', title: entry.title })) return;
+    movePlaylistEntry(latest.current.onAction, entry.id, direction);
+  }, []);
+
+  return { entries, busy: override != null, remove, move };
+}
+
+function usePlaylistEditConfirmation(
+  state: RemoteUiState, onAction: Dispatch, playlistKey: string | null,
+  pending: RefObject<PendingEdit | null>, settle: (succeeded: boolean) => void,
+) {
   useEffect(() => {
     const edit = pending.current;
     if (!edit) return;
@@ -98,39 +140,4 @@ export function usePlaylistTrackEdits(
     settle,
     state,
   ]);
-
-  const begin = (nextEntries: LibraryEntry[], move: PendingMove | null, result: PlaylistEditOutcome) => {
-    const current = latest.current.state;
-    if (!current.activePlaylist) return false;
-    pending.current = {
-      playlistKey: current.activePlaylist.key,
-      baseRevision: current.playlistRevision ?? null,
-      move,
-      startedAt: Date.now(),
-    };
-    outcome.current = result;
-    setOverride(nextEntries);
-    return true;
-  };
-
-  const remove = useCallback((entry: LibraryEntry) => {
-    if (pending.current) return;
-    const source = latest.current.state.libraryEntries;
-    if (!source.includes(entry)) return;
-    if (!begin(source.filter((item) => item !== entry), null, { kind: 'removed', title: entry.title })) return;
-    removePlaylistEntry(latest.current.onAction, entry.id);
-  }, []);
-
-  const move = useCallback((from: number, to: number) => {
-    if (pending.current || from === to) return;
-    const source = latest.current.state.libraryEntries;
-    const entry = source[from];
-    if (!entry || to < 0 || to >= source.length) return;
-    const direction = to > from ? 1 : -1;
-    const pendingMove = { index: from, remaining: Math.abs(to - from), direction, title: entry.title } as const;
-    if (!begin(reorder(source, from, to), pendingMove, { kind: 'moved', title: entry.title })) return;
-    movePlaylistEntry(latest.current.onAction, entry.id, direction);
-  }, []);
-
-  return { entries, busy: override != null, remove, move };
 }

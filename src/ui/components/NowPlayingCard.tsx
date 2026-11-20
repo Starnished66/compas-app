@@ -49,17 +49,11 @@ const SKIPPING_META_OPACITY = 0.5;
 const EXPAND_ICON_SIZE = 18;
 const META_GAP = 2;
 
-export function NowPlayingCard({
-  state,
-  track,
-  onAction,
-  collapse,
-  compact,
-  dimmed = false,
-  onOpenNowPlaying,
-  onOpenAudioFormat,
-  onLayout,
-}: NowPlayingCardProps) {
+export function NowPlayingCard(props: NowPlayingCardProps) {
+  return renderNowPlayingCard(props, useNowPlayingCard(props));
+}
+
+function useNowPlayingCard({ state, track, onAction, collapse, compact, dimmed = false }: NowPlayingCardProps) {
   const { t } = useI18n();
   const palette = usePalette();
   const { preference } = useMiniProgressPreference();
@@ -85,6 +79,15 @@ export function NowPlayingCard({
     disabled: commands.disabled,
   };
 
+  return { t, palette, progressStyle, seekStays, animated, commands, artStyle, metaStyle, liveOpacity,
+    metaOpacity, canRate, canFavorite, shown, subtitle, showCollapsedProgress, transportCallbacks };
+}
+
+type CardView = ReturnType<typeof useNowPlayingCard>;
+
+function renderNowPlayingCard(props: NowPlayingCardProps, view: CardView) {
+  const { state, track, compact, dimmed = false, onOpenNowPlaying, onLayout } = props;
+  const { palette, animated, t, liveOpacity, showCollapsedProgress, progressStyle } = view;
   return (
     <Animated.View pointerEvents={dimmed ? 'none' : 'box-none'} style={{ opacity: liveOpacity }}>
       <Reanimated.View
@@ -113,116 +116,9 @@ export function NowPlayingCard({
           />
         </Reanimated.View>
 
-        <Reanimated.View style={[styles.mainRow, animated.mainRow]} pointerEvents="box-none">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('Open Now playing')}
-            onPress={onOpenNowPlaying}
-            style={({ pressed }) => pressed && styles.artPressed}
-          >
-            <Reanimated.View style={[styles.artFrame, animated.artFrame]}>
-              <Reanimated.View style={[styles.artInner, animated.artInner]}>
-                <Animated.View style={artStyle}>
-                  <ArtworkThumb uri={track.artwork} size={NOW_PLAYING_ART_SIZE} radius="lg" placeholderIcon="disc" />
-                </Animated.View>
-              </Reanimated.View>
-            </Reanimated.View>
-          </Pressable>
+        {renderNowPlayingMainRow(props, view)}
 
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${shown.title}, ${subtitle}`}
-            onPress={onOpenNowPlaying}
-            style={styles.meta}
-          >
-            <Animated.View style={[styles.metaText, { opacity: metaOpacity }]}>
-              <Animated.View style={[styles.metaText, metaStyle]}>
-                <AppText variant="headline" numberOfLines={compact ? 1 : 2}>
-                  {shown.title}
-                </AppText>
-                <AppText variant="body" tone="inkMuted" numberOfLines={1}>
-                  {subtitle}
-                </AppText>
-              </Animated.View>
-            </Animated.View>
-            {track.album ? (
-              <Reanimated.View style={[styles.clip, animated.album]}>
-                <AppText variant="caption" tone="inkMuted" numberOfLines={1}>
-                  {track.album}
-                </AppText>
-              </Reanimated.View>
-            ) : null}
-            <Reanimated.View style={[styles.clip, animated.badges]} pointerEvents={compact ? 'none' : 'auto'}>
-              <AudioFormatBadges track={track} onPress={onOpenAudioFormat} />
-            </Reanimated.View>
-          </Pressable>
-
-          {!canRate ? (
-            <Reanimated.View style={[styles.clip, animated.favorite]} pointerEvents={compact ? 'none' : 'box-none'}>
-              {canFavorite ? (
-                <FavoriteButton rating={commands.displayedRating} onChange={commands.setRating} disabled={commands.disabled} />
-              ) : null}
-            </Reanimated.View>
-          ) : null}
-
-          <Reanimated.View
-            style={[styles.clip, styles.compactTransportFrame, animated.compactTransport]}
-            pointerEvents={compact ? 'box-none' : 'none'}
-          >
-            <TransportControls
-              variant="compact"
-              isPlaying={state.isPlaying}
-              {...transportCallbacks}
-              playRing={
-                showCollapsedProgress && progressStyle === 'ring' ? (
-                  <PlayButtonRing track={track} playing={state.isPlaying} buttonSize={Size.controlMd} />
-                ) : null
-              }
-              style={styles.compactTransport}
-            />
-          </Reanimated.View>
-        </Reanimated.View>
-
-        {canRate && track.title ? (
-          <Reanimated.View
-            style={[styles.clip, animated.transport, styles.rating]}
-            pointerEvents={compact ? 'none' : 'box-none'}
-            accessibilityElementsHidden={compact}
-            importantForAccessibility={compact ? 'no-hide-descendants' : 'auto'}
-          >
-            <StarRating rating={commands.displayedRating} onChange={commands.setRating}
-              disabled={commands.disabled} />
-          </Reanimated.View>
-        ) : null}
-
-        <Reanimated.View
-          style={[styles.seekFrame, !seekStays && styles.clip, animated.seek]}
-          pointerEvents={compact && !seekStays ? 'none' : 'box-none'}
-        >
-          <SeekBar
-            playing={state.isPlaying}
-            onSeek={commands.seek}
-            disabled={commands.disabled}
-            pendingLabel={commands.pendingLabel}
-            collapse={collapse}
-          />
-        </Reanimated.View>
-
-        <Reanimated.View style={[styles.clip, animated.transport]} pointerEvents={compact ? 'none' : 'box-none'}>
-          <TransportControls
-            isPlaying={state.isPlaying}
-            playbackMode={state.playbackMode}
-            {...transportCallbacks}
-            onToggleShuffle={commands.toggleShuffle}
-            onCycleRepeat={commands.cycleRepeat}
-            disabled={commands.disabled}
-            style={styles.fullTransport}
-          />
-        </Reanimated.View>
-
-        <Reanimated.View style={[styles.clip, animated.volume]} pointerEvents={compact ? 'none' : 'box-none'}>
-          <VolumeRow volume={state.volume} onChange={commands.setVolume} />
-        </Reanimated.View>
+        {renderNowPlayingCardControls(props, view)}
       </Reanimated.View>
       {showCollapsedProgress && progressStyle === 'card' ? (
         <CardComet
@@ -233,6 +129,137 @@ export function NowPlayingCard({
         />
       ) : null}
     </Animated.View>
+  );
+}
+
+function renderNowPlayingMainRow(props: NowPlayingCardProps, view: CardView) {
+  const { state, track, compact, onOpenNowPlaying } = props;
+  const { animated, artStyle, canRate, canFavorite, commands, transportCallbacks, showCollapsedProgress, progressStyle, t } = view;
+  return (
+    <Reanimated.View style={[styles.mainRow, animated.mainRow]} pointerEvents="box-none">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t('Open Now playing')}
+        onPress={onOpenNowPlaying}
+        style={({ pressed }) => pressed && styles.artPressed}
+      >
+        <Reanimated.View style={[styles.artFrame, animated.artFrame]}>
+          <Reanimated.View style={[styles.artInner, animated.artInner]}>
+            <Animated.View style={artStyle}>
+              <ArtworkThumb uri={track.artwork} size={NOW_PLAYING_ART_SIZE} radius="lg" placeholderIcon="disc" />
+            </Animated.View>
+          </Reanimated.View>
+        </Reanimated.View>
+      </Pressable>
+
+      {renderCardMetadata(props, view)}
+
+      {!canRate ? (
+        <Reanimated.View style={[styles.clip, animated.favorite]} pointerEvents={compact ? 'none' : 'box-none'}>
+          {canFavorite ? (
+            <FavoriteButton rating={commands.displayedRating} onChange={commands.setRating} disabled={commands.disabled} />
+          ) : null}
+        </Reanimated.View>
+      ) : null}
+
+      <Reanimated.View
+        style={[styles.clip, styles.compactTransportFrame, animated.compactTransport]}
+        pointerEvents={compact ? 'box-none' : 'none'}
+      >
+        <TransportControls
+          variant="compact"
+          isPlaying={state.isPlaying}
+          {...transportCallbacks}
+          playRing={
+            showCollapsedProgress && progressStyle === 'ring' ? (
+              <PlayButtonRing track={track} playing={state.isPlaying} buttonSize={Size.controlMd} />
+            ) : null
+          }
+          style={styles.compactTransport}
+        />
+      </Reanimated.View>
+    </Reanimated.View>
+  );
+}
+
+function renderCardMetadata({ track, compact, onOpenNowPlaying, onOpenAudioFormat }: NowPlayingCardProps, view: CardView) {
+  const { shown, subtitle, metaOpacity, metaStyle, animated } = view;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${shown.title}, ${subtitle}`}
+      onPress={onOpenNowPlaying}
+      style={styles.meta}
+    >
+      <Animated.View style={[styles.metaText, { opacity: metaOpacity }]}>
+        <Animated.View style={[styles.metaText, metaStyle]}>
+          <AppText variant="headline" numberOfLines={compact ? 1 : 2}>
+            {shown.title}
+          </AppText>
+          <AppText variant="body" tone="inkMuted" numberOfLines={1}>
+            {subtitle}
+          </AppText>
+        </Animated.View>
+      </Animated.View>
+      {track.album ? (
+        <Reanimated.View style={[styles.clip, animated.album]}>
+          <AppText variant="caption" tone="inkMuted" numberOfLines={1}>
+            {track.album}
+          </AppText>
+        </Reanimated.View>
+      ) : null}
+      <Reanimated.View style={[styles.clip, animated.badges]} pointerEvents={compact ? 'none' : 'auto'}>
+        <AudioFormatBadges track={track} onPress={onOpenAudioFormat} />
+      </Reanimated.View>
+    </Pressable>
+  );
+}
+
+function renderNowPlayingCardControls({ track, compact, state, collapse }: NowPlayingCardProps, view: CardView) {
+  const { canRate, animated, commands, seekStays, transportCallbacks } = view;
+  return (
+    <>
+      {canRate && track.title ? (
+        <Reanimated.View
+          style={[styles.clip, animated.transport, styles.rating]}
+          pointerEvents={compact ? 'none' : 'box-none'}
+          accessibilityElementsHidden={compact}
+          importantForAccessibility={compact ? 'no-hide-descendants' : 'auto'}
+        >
+          <StarRating rating={commands.displayedRating} onChange={commands.setRating}
+            disabled={commands.disabled} />
+        </Reanimated.View>
+      ) : null}
+
+      <Reanimated.View
+        style={[styles.seekFrame, !seekStays && styles.clip, animated.seek]}
+        pointerEvents={compact && !seekStays ? 'none' : 'box-none'}
+      >
+        <SeekBar
+          playing={state.isPlaying}
+          onSeek={commands.seek}
+          disabled={commands.disabled}
+          pendingLabel={commands.pendingLabel}
+          collapse={collapse}
+        />
+      </Reanimated.View>
+
+      <Reanimated.View style={[styles.clip, animated.transport]} pointerEvents={compact ? 'none' : 'box-none'}>
+        <TransportControls
+          isPlaying={state.isPlaying}
+          playbackMode={state.playbackMode}
+          {...transportCallbacks}
+          onToggleShuffle={commands.toggleShuffle}
+          onCycleRepeat={commands.cycleRepeat}
+          disabled={commands.disabled}
+          style={styles.fullTransport}
+        />
+      </Reanimated.View>
+
+      <Reanimated.View style={[styles.clip, animated.volume]} pointerEvents={compact ? 'none' : 'box-none'}>
+        <VolumeRow volume={state.volume} onChange={commands.setVolume} />
+      </Reanimated.View>
+    </>
   );
 }
 

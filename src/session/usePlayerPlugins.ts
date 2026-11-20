@@ -24,8 +24,7 @@ export interface PlayerPluginsState {
   mutate: (request: () => Promise<ActionResult>) => Promise<void>;
 }
 
-/** Session-scoped, bounded pagination and serialized reads/writes for plugin management. */
-export function usePlayerPlugins(api: PluginsApi | null, features: string[], active: boolean): PlayerPluginsState {
+function usePluginState() {
   const { t } = useI18n();
   const [store, setStore] = useState<StoreSnapshot | null>(null);
   const [installed, setInstalled] = useState<InstalledSnapshot | null>(null);
@@ -44,8 +43,22 @@ export function usePlayerPlugins(api: PluginsApi | null, features: string[], act
   const pendingStatusCheck = useRef(false);
   const pendingFullReload = useRef(false);
   const reloadRef = useRef<() => Promise<void>>(async () => {});
-  const featureKey = features.filter((x) => ['plugin_store', 'plugin_management', 'player_layouts'].includes(x)).sort().join('|');
+  return {
+    t, store, setStore, installed, setInstalled, layouts, setLayouts, loading, setLoading, busy, setBusy,
+    error, setError, statusUnknown, setStatusUnknown, statusUnknownRef, refreshPending, setRefreshPending,
+    generation, mounted, inFlight, actionBusy, pendingStatusCheck, pendingFullReload, reloadRef,
+  };
+}
 
+type PluginState = ReturnType<typeof usePluginState>;
+
+interface PluginConnection {
+  api: PluginsApi | null;
+  active: boolean;
+  featureKey: string;
+}
+
+function usePluginMount(active: boolean, { mounted, generation, pendingStatusCheck, inFlight, actionBusy, reloadRef }: PluginState) {
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current += 1; }; }, []);
 
   const schedulePendingStatusCheck = useCallback(() => {
@@ -54,6 +67,14 @@ export function usePlayerPlugins(api: PluginsApi | null, features: string[], act
     Promise.resolve().then(() => reloadRef.current());
   }, [active]);
 
+  return schedulePendingStatusCheck;
+}
+
+type ScheduleStatus = ReturnType<typeof usePluginMount>;
+
+function useLoadPlugins({ api, active, featureKey }: PluginConnection, state: PluginState, schedulePendingStatusCheck: ScheduleStatus) {
+  const { inFlight, mounted, generation, setStore, setInstalled, setRefreshPending, setLayouts, setError,
+    setStatusUnknown, statusUnknownRef, t, setLoading, reloadRef } = state;
   const loadAll = useCallback(async (token: number, clearStatus = true): Promise<boolean> => {
     if (!api || inFlight.current || !active) return false;
     inFlight.current = true;
@@ -93,6 +114,14 @@ export function usePlayerPlugins(api: PluginsApi | null, features: string[], act
     }
   }, [active, api, featureKey, schedulePendingStatusCheck, t]);
 
+  return loadAll;
+}
+
+type LoadPlugins = ReturnType<typeof useLoadPlugins>;
+
+function usePluginStatusCheck({ api, active, featureKey }: PluginConnection, state: PluginState, loadAll: LoadPlugins) {
+  const { inFlight, actionBusy, pendingStatusCheck, pendingFullReload, setLoading, generation, reloadRef,
+    setStore, setInstalled, setLayouts, setError, setStatusUnknown, setRefreshPending, setBusy } = state;
   const statusCheck = useCallback(async () => {
     if (!api || !active) return;
     if (inFlight.current || actionBusy.current) { pendingStatusCheck.current = true; setLoading(true); return; }
@@ -112,6 +141,15 @@ export function usePlayerPlugins(api: PluginsApi | null, features: string[], act
     return () => { if (generation.current === token) generation.current += 1; };
   }, [active, api, featureKey, loadAll]);
 
+  return statusCheck;
+}
+
+function usePluginPolling(
+  { api, active, featureKey }: PluginConnection,
+  state: PluginState, loadAll: LoadPlugins, schedulePendingStatusCheck: ScheduleStatus,
+) {
+  const { store, inFlight, actionBusy, generation, mounted, setStore, refreshPending, setRefreshPending, setInstalled,
+    pendingFullReload, pendingStatusCheck, setLoading, reloadRef } = state;
   const storeBusy = !!store && RUNNING.has(store.state);
   const pollStatus = useCallback(async () => {
     if (!api || !active || inFlight.current || actionBusy.current) return;
@@ -153,6 +191,15 @@ export function usePlayerPlugins(api: PluginsApi | null, features: string[], act
     return () => clearInterval(interval);
   }, [active, api, pollStatus, refreshPending, storeBusy]);
 
+  return storeBusy;
+}
+
+function usePluginMutation(
+  { api, active }: PluginConnection, state: PluginState, storeBusy: boolean,
+  loadAll: LoadPlugins, schedulePendingStatusCheck: ScheduleStatus,
+) {
+  const { inFlight, actionBusy, refreshPending, statusUnknown, setBusy, setError, setStatusUnknown, generation,
+    mounted, t, reloadRef, setLoading } = state;
   const mutate = useCallback(async (request: () => Promise<ActionResult>) => {
     if (!api || !active || inFlight.current || actionBusy.current || storeBusy || refreshPending || statusUnknown) return;
     actionBusy.current = true;
@@ -186,6 +233,21 @@ export function usePlayerPlugins(api: PluginsApi | null, features: string[], act
     }
   }, [active, api, loadAll, refreshPending, schedulePendingStatusCheck, statusUnknown, storeBusy, t]);
 
+  return mutate;
+}
+
+/** Session-scoped, bounded pagination and serialized reads and writes for plugin management. */
+export function usePlayerPlugins(api: PluginsApi | null, features: string[], active: boolean): PlayerPluginsState {
+  const state = usePluginState();
+  const featureKey = features.filter((x) => ['plugin_store', 'plugin_management', 'player_layouts'].includes(x)).sort().join('|');
+
+  const connection = { api, active, featureKey };
+  const scheduleStatus = usePluginMount(active, state);
+  const loadAll = useLoadPlugins(connection, state, scheduleStatus);
+  const statusCheck = usePluginStatusCheck(connection, state, loadAll);
+  const storeBusy = usePluginPolling(connection, state, loadAll, scheduleStatus);
+  const mutate = usePluginMutation(connection, state, storeBusy, loadAll, scheduleStatus);
+  const { store, installed, layouts, loading, busy, error, statusUnknown, refreshPending } = state;
   return { store, installed, layouts, loading, busy, error, statusUnknown, storeBusy, refreshPending, statusCheck, mutate };
 }
 

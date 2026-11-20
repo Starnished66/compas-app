@@ -40,11 +40,7 @@ interface UpdatesState {
 }
 const UpdatesContext = createContext<UpdatesState | null>(null);
 
-/**
- * `playerVersion` is the connected player's reported version. The latest firmware release is always
- * listed, but it is announced (snackbar, Android notification) only when that version is known and older.
- */
-export function UpdatesProvider({ playerVersion, children }: { playerVersion?: string | null; children: React.ReactNode }) {
+function useReleaseState(playerVersion?: string | null) {
   const { t } = useI18n();
   const playerVersionRef = useRef(playerVersion ?? null);
   playerVersionRef.current = playerVersion ?? null;
@@ -71,6 +67,17 @@ export function UpdatesProvider({ playerVersion, children }: { playerVersion?: s
   const lastAttempt = useRef(0);
   const mounted = useRef(true);
   const writes = useRef(Promise.resolve());
+  return {
+    firmwareUpdate, firmwareUpdateRef, tRef, saved, revision, setRevision, ready, setReady, checking, setChecking,
+    installing, setInstalling, installPermission, setInstallPermission, installError, setInstallError, permissionRetry,
+    setPermissionRetry, error, setError, appVersion, setAppVersion, application, setApplication, inFlight,
+    deliveryInFlight, channelRevision, lastAttempt, mounted, writes,
+  };
+}
+
+type ReleaseState = ReturnType<typeof useReleaseState>;
+
+function useReleaseStorage({ saved, writes, mounted, setRevision, deliveryInFlight }: ReleaseState) {
   const persist = useCallback(() => {
     const value = JSON.stringify(saved.current);
     writes.current = writes.current.catch(() => {}).then(() => AsyncStorage.setItem(STORAGE_KEY, value)).catch(() => {});
@@ -94,6 +101,14 @@ export function UpdatesProvider({ playerVersion, children }: { playerVersion?: s
     } finally { deliveryInFlight.current = false; }
   }, [persist]);
 
+  return { persist, deliver };
+}
+
+type ReleaseStorage = ReturnType<typeof useReleaseStorage>;
+
+function useReleaseCheck(state: ReleaseState, { persist, deliver }: ReleaseStorage) {
+  const { ready, inFlight, lastAttempt, saved, setChecking, setError, channelRevision, appVersion,
+    mounted, setApplication, firmwareUpdateRef } = state;
   const check = useCallback((): Promise<void> => {
     if (!ready) return Promise.resolve();
     if (inFlight.current) return inFlight.current;
@@ -130,6 +145,14 @@ export function UpdatesProvider({ playerVersion, children }: { playerVersion?: s
     return request;
   }, [appVersion, deliver, persist, ready]);
 
+  return check;
+}
+
+function useReleaseLifecycle(
+  state: ReleaseState, playerVersion: string | null | undefined,
+  check: ReturnType<typeof useReleaseCheck>, { deliver }: ReleaseStorage,
+) {
+  const { mounted, saved, lastAttempt, setApplication, setAppVersion, setReady, ready, firmwareUpdateRef } = state;
   useEffect(() => {
     mounted.current = true;
     let cancelled = false;
@@ -168,6 +191,10 @@ export function UpdatesProvider({ playerVersion, children }: { playerVersion?: s
     if (update) void deliver([update]);
   }, [deliver, playerVersion, ready]);
 
+}
+
+function useReleaseControls(state: ReleaseState, check: ReturnType<typeof useReleaseCheck>, { persist, deliver }: ReleaseStorage) {
+  const { tRef, saved, firmwareUpdateRef, channelRevision, setApplication, inFlight } = state;
   const setAlerts = useCallback(async (enabled: boolean) => {
     try {
     if (enabled) {
@@ -204,6 +231,11 @@ export function UpdatesProvider({ playerVersion, children }: { playerVersion?: s
     try { await Linking.openURL(notice.releaseUrl); }
     catch { Alert.alert(tRef.current('Could not open release'), tRef.current('Try again when a browser and internet connection are available.')); }
   }, []);
+  return { setAlerts, setBetaUpdates, acknowledge, openRelease };
+}
+
+function useReleaseInstallation(state: ReleaseState) {
+  const { application, setInstalling, setInstallError, setInstallPermission, setPermissionRetry, ready, permissionRetry } = state;
   const installApplicationUpdate = useCallback(async () => {
     if (Platform.OS !== 'android' || !application?.sha256 || application.versionCode == null || application.size == null) return;
     setInstalling(true);
@@ -239,6 +271,22 @@ export function UpdatesProvider({ playerVersion, children }: { playerVersion?: s
     });
     return () => sub.remove();
   }, [permissionRetry, installApplicationUpdate]);
+  return { installApplicationUpdate, requestInstallPermission };
+}
+
+/**
+ * `playerVersion` is the connected player's reported version. The latest firmware release is always
+ * listed, but it is announced (snackbar, Android notification) only when that version is known and older.
+ */
+export function UpdatesProvider({ playerVersion, children }: { playerVersion?: string | null; children: React.ReactNode }) {
+  const state = useReleaseState(playerVersion);
+  const storage = useReleaseStorage(state);
+  const check = useReleaseCheck(state, storage);
+  useReleaseLifecycle(state, playerVersion, check, storage);
+  const { setAlerts, setBetaUpdates, acknowledge, openRelease } = useReleaseControls(state, check, storage);
+  const { installApplicationUpdate, requestInstallPermission } = useReleaseInstallation(state);
+  const { saved, firmwareUpdate, application, appVersion, revision, checking, installError, error, installing,
+    installPermission, ready } = state;
   const notices = [firmwareUpdate(saved.current.firmware), application].filter((n): n is ReleaseNotice => n != null);
   void revision;
   return <UpdatesContext.Provider value={{ firmware: saved.current.firmware, application, appVersion, checking, checkedAt: saved.current.checkedAt,

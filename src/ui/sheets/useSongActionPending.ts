@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { ConnectionStatus, RemoteAction, RemoteUiState } from '../../data/types';
 
 export type PendingSongAction =
@@ -67,6 +67,15 @@ export function useSongActionPending(
     onAction({ type: 'CloseSongActions' });
   }, [clear, onAction, pending, state.songActionRating]);
 
+  usePendingTimeout(pending, clear, setRevealed, onTimedOutRef);
+
+  return { pending: pending?.action ?? null, revealed, start, clear };
+}
+
+function usePendingTimeout(
+  pending: PendingRecord | null, clear: () => void, setRevealed: (visible: boolean) => void,
+  onTimedOutRef: RefObject<((action: PendingSongAction) => void) | undefined>,
+) {
   useEffect(() => {
     if (!pending) return;
     const reveal = setTimeout(() => setRevealed(true), REVEAL_DELAY_MS);
@@ -80,6 +89,4 @@ export function useSongActionPending(
       clearTimeout(giveUp);
     };
   }, [clear, pending]);
-
-  return { pending: pending?.action ?? null, revealed, start, clear };
 }

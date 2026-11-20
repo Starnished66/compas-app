@@ -98,7 +98,16 @@ function accentSourceFor(state: RemoteUiState, accentStyle: AccentStyle): Accent
 }
 
 export default function App() {
-  const { state, onAction, playbackPosition, catalogSyncProgress, libraryArtwork, wifiImportStatus, refreshWifiImport, startWifiImport, stopWifiImport, listWifiImportFiles, uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile, createWifiImportDirectory, playerSettingsApi, playerPluginsApi } = useRemoteSession();
+  const session = useAppSession();
+  const screens = useAppScreens(session.state);
+  const navigation = useAppNavigation(session, screens);
+  return renderApp(session, screens, navigation);
+}
+
+function useAppSession() {
+  const session = useRemoteSession();
+  const { state, wifiImportStatus, refreshWifiImport, startWifiImport, stopWifiImport, listWifiImportFiles,
+    uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile, createWifiImportDirectory } = session;
   const connectedPlayer = useConnectedPlayer(state);
   const transfer: TransferApi = {
     status: wifiImportStatus,
@@ -111,6 +120,12 @@ export default function App() {
     remove: deleteWifiImportFile,
     mkdir: createWifiImportDirectory,
   };
+  return { ...session, connectedPlayer, transfer };
+}
+
+type AppSession = ReturnType<typeof useAppSession>;
+
+function useAppScreens(state: RemoteUiState) {
   const [nowPlayingVisible, setNowPlayingVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [updatesVisible, setUpdatesVisible] = useState(false);
@@ -144,7 +159,19 @@ export default function App() {
     if (!state.currentTrack || !isConnected) setNowPlayingVisible(false);
   }, [state.currentTrack, isConnected]);
 
-  const bulkProgress = state.bulkActionProgress;
+  return {
+    nowPlayingVisible, setNowPlayingVisible, settingsVisible, setSettingsVisible, updatesVisible, setUpdatesVisible,
+    playerSettingsVisible, setPlayerSettingsVisible, playerPluginsVisible, setPlayerPluginsVisible, lastBrowseCategoryRef,
+    connectionReturnCount, setConnectionReturnCount, isDark, palette, connectionVisible, mainScreen, activeTab,
+    isConnected, showMiniPlayer, insets, contentBottomInset,
+  };
+}
+
+type AppScreens = ReturnType<typeof useAppScreens>;
+
+function useAppNavigation({ state, onAction }: AppSession, screens: AppScreens) {
+  const { nowPlayingVisible, setNowPlayingVisible, setConnectionReturnCount, lastBrowseCategoryRef,
+    setSettingsVisible, setUpdatesVisible, activeTab } = screens;
   const queueOpen = state.screen.type === 'Queue';
   useEffect(() => {
     if (queueOpen && !nowPlayingVisible) onAction({ type: 'Back' });
@@ -186,19 +213,15 @@ export default function App() {
   const [visitedTabs] = useState(() => new Set<TabKey>());
   visitedTabs.add(activeTab);
 
-  const renderActiveTab = () => {
-    switch (mainScreen.type) {
-      case 'Home':
-        return <HomeScreen state={state} onAction={onAction} onOpenNowPlaying={openNowPlaying} onOpenSettings={openSettings} settingsOpen={settingsVisible} bottomInset={contentBottomInset} />;
-      case 'Library':
-        return mainScreen.category === LibraryCategory.Playlists
-          ? <PlaylistsScreen state={state} onAction={onAction} contentBottomInset={contentBottomInset} />
-          : <LibraryScreen state={state} onAction={onAction} category={mainScreen.category} contentBottomInset={contentBottomInset} />;
-      case 'Transfer':
-        return null;
-    }
-  };
+  return { queueOpen, handleConnectionHidden, selectTab, openNowPlaying, closeNowPlaying, openSettings, openUpdates, visitedTabs };
+}
 
+type AppNavigation = ReturnType<typeof useAppNavigation>;
+
+function renderApp(session: AppSession, screens: AppScreens, navigation: AppNavigation) {
+  const { state, playbackPosition, catalogSyncProgress, libraryArtwork } = session;
+  const { palette, mainScreen, nowPlayingVisible, showMiniPlayer, connectionVisible, isDark } = screens;
+  const { queueOpen, openUpdates } = navigation;
   return (
     <UpdatesProvider playerVersion={state.supportedFeatures.includes('device_info') ? state.playerVersion : null}>
     <CatalogSyncProgressContext.Provider value={catalogSyncProgress}>
@@ -220,81 +243,8 @@ export default function App() {
                     <SessionSnackbars state={state} />
                     <UpdateAnnouncements onOpenUpdates={openUpdates} />
                     <CrashReportRecovery />
-                    <View
-                      importantForAccessibility={nowPlayingVisible ? 'no-hide-descendants' : 'auto'}
-                      accessibilityElementsHidden={nowPlayingVisible}
-                      style={[styles.root, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}
-                    >
-                      <View style={styles.root}>
-                        <PageTransition style={styles.content} transitionKey={`${activeTab}:${connectionReturnCount}`} kind="fade">
-                          {TAB_ORDER.filter((tab) => visitedTabs.has(tab)).map((tab) => (
-                            <TabPane key={tab} active={tab === activeTab}>
-                              {tab === 'transfer'
-                                // Stays mounted once opened so uploads keep running while other tabs are browsed.
-                                ? <TransferScreen state={state} onAction={onAction} transfer={transfer} active={activeTab === 'transfer'} contentBottomInset={contentBottomInset} />
-                                : tab === activeTab ? renderActiveTab() : null}
-                            </TabPane>
-                          ))}
-                        </PageTransition>
-                        <AppChrome
-                          state={state}
-                          onAction={onAction}
-                          activeTab={activeTab}
-                          showMiniPlayer={showMiniPlayer}
-                          onSelectTab={selectTab}
-                          onOpenNowPlaying={openNowPlaying}
-                        />
-                      </View>
-                    </View>
-                    <SlideUpScreen visible={connectionVisible} onHidden={handleConnectionHidden}>
-                      <ConnectionScreen state={state} onAction={onAction} />
-                    </SlideUpScreen>
-                    <NowPlayingScreen
-                      connectionStatus={state.connectionStatus}
-                      connectionTransport={state.connectionTransport}
-                      connectionMessage={state.connectionMessage}
-                      currentTrack={state.currentTrack}
-                      dacMode={state.dacMode}
-                      currentRating={state.currentRating}
-                      pendingCurrentRating={state.pendingCurrentRating}
-                      isPlaying={state.isPlaying}
-                      playbackMode={state.playbackMode}
-                      volume={state.volume}
-                      supportedFeatures={state.supportedFeatures}
-                      playerName={state.playerName}
-                      queue={state.queue}
-                      queueTotal={state.queueTotal}
-                      queueStatus={state.queueStatus}
-                      queueHasMore={state.queueHasMore}
-                      queueLoadingMore={state.queueLoadingMore}
-                      queueRemovalProgress={bulkProgress?.action === 'queueRemove' ? bulkProgress : undefined}
-                      queueBusy={bulkProgress?.phase === 'resolving' || bulkProgress?.phase === 'writing'}
-                      queueOpen={queueOpen}
-                      onAction={onAction}
-                      visible={nowPlayingVisible}
-                      onClose={closeNowPlaying}
-                    />
-                    <SettingsSheet
-                      state={state}
-                      player={connectedPlayer}
-                      onAction={onAction}
-                      visible={settingsVisible}
-                      onClose={() => setSettingsVisible(false)}
-                      onOpenConnection={() => onAction({ type: 'OpenConnection' })}
-                      onOpenUpdates={openUpdates}
-                      onOpenTransfer={() => onAction({ type: 'OpenTransfer' })}
-                      onOpenPlayerSettings={() => setPlayerSettingsVisible(true)}
-                      onOpenPlugins={() => setPlayerPluginsVisible(true)}
-                    />
-                    <SlideUpScreen visible={playerSettingsVisible}>
-                      <PlayerSettingsScreen state={state} settingsApi={playerSettingsApi()} onClose={() => setPlayerSettingsVisible(false)} />
-                    </SlideUpScreen>
-                    <SlideUpScreen visible={playerPluginsVisible}>
-                      <PlayerPluginsScreen state={state} pluginsApi={playerPluginsApi()} onClose={() => setPlayerPluginsVisible(false)} active={playerPluginsVisible} />
-                    </SlideUpScreen>
-                    <UpdatesSheet visible={updatesVisible} onClose={() => setUpdatesVisible(false)} playerVersion={state.supportedFeatures.includes('device_info') ? state.playerVersion : null} />
-                    <SongActionsSheet state={state} onAction={onAction} />
-                    <PinDialog state={state} onAction={onAction} />
+                    {renderAppTabs(session, screens, navigation)}
+                    {renderAppOverlays(session, screens, navigation)}
                   </AppSnackbarProvider>
                 </View>
               </BackgroundPreferenceProvider>
@@ -306,6 +256,124 @@ export default function App() {
     </PlaybackPositionContext.Provider>
     </CatalogSyncProgressContext.Provider>
     </UpdatesProvider>
+  );
+}
+
+function renderAppTabs(session: AppSession, screens: AppScreens, navigation: AppNavigation) {
+  const { state, onAction, transfer } = session;
+  const { mainScreen, settingsVisible, contentBottomInset, nowPlayingVisible, insets, activeTab, connectionReturnCount, showMiniPlayer } = screens;
+  const { openNowPlaying, openSettings, visitedTabs, selectTab } = navigation;
+  const renderActiveTab = () => {
+    switch (mainScreen.type) {
+      case 'Home':
+        return <HomeScreen state={state} onAction={onAction} onOpenNowPlaying={openNowPlaying} onOpenSettings={openSettings} settingsOpen={settingsVisible} bottomInset={contentBottomInset} />;
+      case 'Library':
+        return mainScreen.category === LibraryCategory.Playlists
+          ? <PlaylistsScreen state={state} onAction={onAction} contentBottomInset={contentBottomInset} />
+          : <LibraryScreen state={state} onAction={onAction} category={mainScreen.category} contentBottomInset={contentBottomInset} />;
+      case 'Transfer':
+        return null;
+    }
+  };
+
+  return (
+    <View
+      importantForAccessibility={nowPlayingVisible ? 'no-hide-descendants' : 'auto'}
+      accessibilityElementsHidden={nowPlayingVisible}
+      style={[styles.root, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}
+    >
+      <View style={styles.root}>
+        <PageTransition style={styles.content} transitionKey={`${activeTab}:${connectionReturnCount}`} kind="fade">
+          {TAB_ORDER.filter((tab) => visitedTabs.has(tab)).map((tab) => (
+            <TabPane key={tab} active={tab === activeTab}>
+              {tab === 'transfer'
+                // Stays mounted once opened so uploads keep running while other tabs are browsed.
+                ? <TransferScreen state={state} onAction={onAction} transfer={transfer} active={activeTab === 'transfer'} contentBottomInset={contentBottomInset} />
+                : tab === activeTab ? renderActiveTab() : null}
+            </TabPane>
+          ))}
+        </PageTransition>
+        <AppChrome
+          state={state}
+          onAction={onAction}
+          activeTab={activeTab}
+          showMiniPlayer={showMiniPlayer}
+          onSelectTab={selectTab}
+          onOpenNowPlaying={openNowPlaying}
+        />
+      </View>
+    </View>
+  );
+}
+
+function renderAppOverlays(session: AppSession, screens: AppScreens, navigation: AppNavigation) {
+  const { state, onAction, connectedPlayer, playerSettingsApi, playerPluginsApi } = session;
+  const {
+    connectionVisible, settingsVisible, setSettingsVisible, setPlayerSettingsVisible, setPlayerPluginsVisible,
+    playerSettingsVisible, playerPluginsVisible, updatesVisible, setUpdatesVisible,
+  } = screens;
+  const { handleConnectionHidden, openUpdates } = navigation;
+  return (
+    <>
+      <SlideUpScreen visible={connectionVisible} onHidden={handleConnectionHidden}>
+        <ConnectionScreen state={state} onAction={onAction} />
+      </SlideUpScreen>
+      {renderAppNowPlaying(state, onAction, screens, navigation)}
+      <SettingsSheet
+        state={state}
+        player={connectedPlayer}
+        onAction={onAction}
+        visible={settingsVisible}
+        onClose={() => setSettingsVisible(false)}
+        onOpenConnection={() => onAction({ type: 'OpenConnection' })}
+        onOpenUpdates={openUpdates}
+        onOpenTransfer={() => onAction({ type: 'OpenTransfer' })}
+        onOpenPlayerSettings={() => setPlayerSettingsVisible(true)}
+        onOpenPlugins={() => setPlayerPluginsVisible(true)}
+      />
+      <SlideUpScreen visible={playerSettingsVisible}>
+        <PlayerSettingsScreen state={state} settingsApi={playerSettingsApi()} onClose={() => setPlayerSettingsVisible(false)} />
+      </SlideUpScreen>
+      <SlideUpScreen visible={playerPluginsVisible}>
+        <PlayerPluginsScreen state={state} pluginsApi={playerPluginsApi()} onClose={() => setPlayerPluginsVisible(false)} active={playerPluginsVisible} />
+      </SlideUpScreen>
+      <UpdatesSheet visible={updatesVisible} onClose={() => setUpdatesVisible(false)} playerVersion={state.supportedFeatures.includes('device_info') ? state.playerVersion : null} />
+      <SongActionsSheet state={state} onAction={onAction} />
+      <PinDialog state={state} onAction={onAction} />
+    </>
+  );
+}
+
+function renderAppNowPlaying(state: RemoteUiState, onAction: AppSession['onAction'], screens: AppScreens, navigation: AppNavigation) {
+  const { nowPlayingVisible } = screens;
+  const { queueOpen, closeNowPlaying } = navigation;
+  const bulkProgress = state.bulkActionProgress;
+  return (
+    <NowPlayingScreen
+      connectionStatus={state.connectionStatus}
+      connectionTransport={state.connectionTransport}
+      connectionMessage={state.connectionMessage}
+      currentTrack={state.currentTrack}
+      dacMode={state.dacMode}
+      currentRating={state.currentRating}
+      pendingCurrentRating={state.pendingCurrentRating}
+      isPlaying={state.isPlaying}
+      playbackMode={state.playbackMode}
+      volume={state.volume}
+      supportedFeatures={state.supportedFeatures}
+      playerName={state.playerName}
+      queue={state.queue}
+      queueTotal={state.queueTotal}
+      queueStatus={state.queueStatus}
+      queueHasMore={state.queueHasMore}
+      queueLoadingMore={state.queueLoadingMore}
+      queueRemovalProgress={bulkProgress?.action === 'queueRemove' ? bulkProgress : undefined}
+      queueBusy={bulkProgress?.phase === 'resolving' || bulkProgress?.phase === 'writing'}
+      queueOpen={queueOpen}
+      onAction={onAction}
+      visible={nowPlayingVisible}
+      onClose={closeNowPlaying}
+    />
   );
 }
 

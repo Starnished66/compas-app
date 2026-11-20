@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import { Animated } from 'react-native';
 import { SharedValue, useSharedValue, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -45,7 +45,6 @@ export function useTabBarMotion(activeIndex: number, minimized: boolean, onColla
       useNativeDriver: true,
     });
   const settleCollapse = () => latest.current.onCollapseSettled();
-
   const replay = (value: Animated.Value, duration: number) => {
     if (latest.current.reducedMotion) return;
     value.setValue(0);
@@ -79,6 +78,19 @@ export function useTabBarMotion(activeIndex: number, minimized: boolean, onColla
     );
   }, [activeIndex, collapse, minimizeSquash, minimized, othersOpacity, restSlot, slot, tabSquash]);
 
+  const drag = createTabDrag({ dragging, slot, detach, pillOpacity, timing, latest });
+
+  return { slot, collapse, othersOpacity, tabSquash, minimizeSquash, detach, pillOpacity, ...drag };
+}
+
+function createTabDrag({ dragging, slot, detach, pillOpacity, timing, latest }: {
+  dragging: RefObject<boolean>;
+  slot: Animated.Value;
+  detach: Animated.Value;
+  pillOpacity: Animated.Value;
+  timing: (value: Animated.Value, toValue: number, duration: number, easing: (t: number) => number) => Animated.CompositeAnimation;
+  latest: RefObject<{ activeIndex: number }>;
+}) {
   const beginDrag = () => {
     dragging.current = true;
     slot.stopAnimation();
@@ -95,5 +107,5 @@ export function useTabBarMotion(activeIndex: number, minimized: boolean, onColla
     if (latest.current.activeIndex < 0) timing(pillOpacity, 0, Durations.editLabel, Easings.ease).start();
   };
 
-  return { slot, collapse, othersOpacity, tabSquash, minimizeSquash, detach, pillOpacity, beginDrag, dragTo, endDrag };
+  return { beginDrag, dragTo, endDrag };
 }

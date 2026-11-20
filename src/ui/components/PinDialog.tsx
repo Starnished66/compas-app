@@ -117,44 +117,59 @@ export function PinDialog({ state, onAction }: PinDialogProps) {
         </>
       }
     >
-      <View style={styles.field}>
-        <Animated.View style={shakeStyle}>
-          <TextField
-            size="lg"
-            value={state.pinInput}
-            onChangeText={(text) =>
-              onAction({ type: 'SetPinInput', value: text.replace(/\D/g, '').slice(0, PIN_MAX_LENGTH) })
-            }
-            invalid={!!state.pinError && !locked}
-            editable={!locked}
-            secureTextEntry
-            keyboardType="number-pad"
-            maxLength={PIN_MAX_LENGTH}
-            placeholder="••••"
-            accessibilityLabel="PIN"
-            textContentType="oneTimeCode"
-            autoFocus
-            returnKeyType="done"
-            onSubmitEditing={submit}
-            inputRef={inputRef}
-          />
-        </Animated.View>
-        <AppText variant="caption" tone="inkMuted">
-          {t('4–12 digits. Saved on this phone once the player accepts it.')}
-        </AppText>
-        {locked ? (
-          <StatusIndicator
-            status="busy"
-            pulse={false}
-            dotSize="sm"
-            numberOfLines={LOCK_MESSAGE_LINES}
-            label={t('Too many tries. Try again in {time}.', { time: formatCountdown(lockSeconds) })}
-          />
-        ) : state.pinError ? (
-          <InlineError message={state.pinError} />
-        ) : null}
-      </View>
+      {renderPinField({ state, onAction, locked, lockSeconds, inputRef, shakeStyle, submit, t })}
     </Dialog>
+  );
+}
+
+interface PinFieldOptions extends PinDialogProps {
+  locked: boolean;
+  lockSeconds: number;
+  inputRef: React.RefObject<TextInput | null>;
+  shakeStyle: ReturnType<typeof useRejectedPinFeedback>;
+  submit: () => void;
+  t: ReturnType<typeof useI18n>['t'];
+}
+
+function renderPinField({ state, onAction, locked, lockSeconds, inputRef, shakeStyle, submit, t }: PinFieldOptions) {
+  return (
+    <View style={styles.field}>
+      <Animated.View style={shakeStyle}>
+        <TextField
+          size="lg"
+          value={state.pinInput}
+          onChangeText={(text) =>
+            onAction({ type: 'SetPinInput', value: text.replace(/\D/g, '').slice(0, PIN_MAX_LENGTH) })
+          }
+          invalid={!!state.pinError && !locked}
+          editable={!locked}
+          secureTextEntry
+          keyboardType="number-pad"
+          maxLength={PIN_MAX_LENGTH}
+          placeholder="••••"
+          accessibilityLabel="PIN"
+          textContentType="oneTimeCode"
+          autoFocus
+          returnKeyType="done"
+          onSubmitEditing={submit}
+          inputRef={inputRef}
+        />
+      </Animated.View>
+      <AppText variant="caption" tone="inkMuted">
+        {t('4–12 digits. Saved on this phone once the player accepts it.')}
+      </AppText>
+      {locked ? (
+        <StatusIndicator
+          status="busy"
+          pulse={false}
+          dotSize="sm"
+          numberOfLines={LOCK_MESSAGE_LINES}
+          label={t('Too many tries. Try again in {time}.', { time: formatCountdown(lockSeconds) })}
+        />
+      ) : state.pinError ? (
+        <InlineError message={state.pinError} />
+      ) : null}
+    </View>
   );
 }
 

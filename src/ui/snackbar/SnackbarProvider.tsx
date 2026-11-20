@@ -29,9 +29,7 @@ function topHostId(hosts: RegisteredHost[]): number | null {
   return top?.id ?? null;
 }
 
-export function SnackbarProvider({ bottomOffset, children }: SnackbarProviderProps) {
-  const [message, setMessage] = useState<SnackbarEntry | null>(null);
-  const [hosts, setHosts] = useState<RegisteredHost[]>([]);
+function useSnackbarMessage(setMessage: React.Dispatch<React.SetStateAction<SnackbarEntry | null>>) {
   const nextId = useRef(0);
   const messageRef = useRef<SnackbarEntry | null>(null);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -69,6 +67,14 @@ export function SnackbarProvider({ bottomOffset, children }: SnackbarProviderPro
     hide();
     action?.();
   }, [hide]);
+
+  return { show, hide, runAction };
+}
+
+export function SnackbarProvider({ bottomOffset, children }: SnackbarProviderProps) {
+  const [message, setMessage] = useState<SnackbarEntry | null>(null);
+  const [hosts, setHosts] = useState<RegisteredHost[]>([]);
+  const { show, hide, runAction } = useSnackbarMessage(setMessage);
 
   const registerHost = useCallback((id: number, priority: number) => {
     setHosts((previous) => [...previous.filter((registered) => registered.id !== id), { id, priority }]);

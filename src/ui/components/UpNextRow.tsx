@@ -34,7 +34,12 @@ const HANDLE_ENTER_SHIFT = 24;
 const ROW_VERTICAL_PADDING = 6;
 const EDIT_SHIFT = Space.xs + REMOVE_SLOT_WIDTH + Space.md - Space.lg;
 
-function UpNextRowContent({ track, index, editing, current, playing, onPress, onRemove, dragHandle }: UpNextRowProps) {
+function UpNextRowContent(props: UpNextRowProps) {
+  const view = useUpNextRow(props);
+  return renderUpNextRow(props, view);
+}
+
+function useUpNextRow({ track, editing, index }: UpNextRowProps) {
   const { t } = useI18n();
   const palette = usePalette();
   const progress = useEditStagger(editing, index);
@@ -53,6 +58,14 @@ function UpNextRowContent({ track, index, editing, current, playing, onPress, on
   const subtitle = track.artist || t('Unknown artist');
   const artworkUri = useQueueRowArtwork(track);
 
+  return { t, palette, motion, subtitle, artworkUri };
+}
+
+type UpNextRowView = ReturnType<typeof useUpNextRow>;
+
+function renderUpNextRow(props: UpNextRowProps, view: UpNextRowView) {
+  const { track, editing, current, onPress } = props;
+  const { palette, motion, subtitle, artworkUri } = view;
   return (
     <Pressable
       accessible={!editing}
@@ -75,54 +88,65 @@ function UpNextRowContent({ track, index, editing, current, playing, onPress, on
             </AppText>
           </View>
         </Animated.View>
-        <Animated.View
-          pointerEvents={editing ? 'box-none' : 'none'}
-          style={[styles.removeSlot, motion.removeSlot]}
-        >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('Remove {title} from queue', { title: track.title })}
-            accessibilityElementsHidden={!editing}
-            importantForAccessibility={editing ? 'auto' : 'no-hide-descendants'}
-            onPress={() => onRemove(track)}
-            style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
-          >
-            <View style={[styles.removeDisc, { backgroundColor: palette.statusError }]}>
-              <View style={[styles.removeBar, { backgroundColor: palette.background }]} />
-            </View>
-          </Pressable>
-        </Animated.View>
-        <View style={[styles.trailing, dragHandle && styles.trailingWithHandle]}>
-          <Animated.View
-            pointerEvents="none"
-            style={[styles.details, motion.details]}
-          >
-            {current ? <PlayingIndicator playing={playing} /> : null}
-            {track.duration ? (
-              <AppText variant="caption" tone="inkMuted" tabular>
-                {track.duration}
-              </AppText>
-            ) : null}
-          </Animated.View>
-          {dragHandle ? (
-            <Animated.View
-              pointerEvents={editing ? 'auto' : 'none'}
-              style={[styles.handle, motion.handle]}
-              accessibilityElementsHidden={!editing}
-              importantForAccessibility={editing ? 'auto' : 'no-hide-descendants'}
-            >
-              <View {...dragHandle} style={styles.handleTarget}>
-                <Icon name="dragHandle" color={palette.inkMuted} />
-              </View>
-            </Animated.View>
-          ) : null}
-        </View>
+        {renderUpNextActions(props, view)}
       </View>
     </Pressable>
   );
 }
 
 export const UpNextRow = React.memo(UpNextRowContent);
+
+function renderUpNextActions(
+  { track, editing, current, playing, onRemove, dragHandle }: UpNextRowProps,
+  { palette, motion, t }: UpNextRowView,
+) {
+  return (
+    <>
+      <Animated.View
+        pointerEvents={editing ? 'box-none' : 'none'}
+        style={[styles.removeSlot, motion.removeSlot]}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('Remove {title} from queue', { title: track.title })}
+          accessibilityElementsHidden={!editing}
+          importantForAccessibility={editing ? 'auto' : 'no-hide-descendants'}
+          onPress={() => onRemove(track)}
+          style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
+        >
+          <View style={[styles.removeDisc, { backgroundColor: palette.statusError }]}>
+            <View style={[styles.removeBar, { backgroundColor: palette.background }]} />
+          </View>
+        </Pressable>
+      </Animated.View>
+      <View style={[styles.trailing, dragHandle && styles.trailingWithHandle]}>
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.details, motion.details]}
+        >
+          {current ? <PlayingIndicator playing={playing} /> : null}
+          {track.duration ? (
+            <AppText variant="caption" tone="inkMuted" tabular>
+              {track.duration}
+            </AppText>
+          ) : null}
+        </Animated.View>
+        {dragHandle ? (
+          <Animated.View
+            pointerEvents={editing ? 'auto' : 'none'}
+            style={[styles.handle, motion.handle]}
+            accessibilityElementsHidden={!editing}
+            importantForAccessibility={editing ? 'auto' : 'no-hide-descendants'}
+          >
+            <View {...dragHandle} style={styles.handleTarget}>
+              <Icon name="dragHandle" color={palette.inkMuted} />
+            </View>
+          </Animated.View>
+        ) : null}
+      </View>
+    </>
+  );
+}
 
 const styles = StyleSheet.create({
   row: {

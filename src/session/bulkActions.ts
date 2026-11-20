@@ -161,6 +161,26 @@ export async function readQueueSnapshot(
   return { revision: first.revision, total: first.total, songs };
 }
 
+function bulkLibraryFilter(target: EntryTarget): LibraryFilter | null {
+  let filter: LibraryFilter | null = null;
+  if (target.type === 'Album') {
+    filter = {
+      album: target.group.name,
+      ...(target.group.albumArtist ? { albumArtist: target.group.albumArtist } : {}),
+      ...(target.context?.kind === 'artist' ? { artist: target.context.name } : {}),
+      ...(target.context?.kind === 'albumArtist' ? { albumArtist: target.context.name } : {}),
+    };
+    if (filter.artist && filter.albumArtist) delete filter.albumArtist;
+  } else if (target.type === 'Group' && target.kind === 'artist') {
+    filter = { artist: target.group.name };
+  } else if (target.type === 'Group' && target.kind === 'albumArtist') {
+    filter = { albumArtist: target.group.name };
+  } else if (target.type === 'Group' && target.kind === 'genre') {
+    filter = { genre: target.group.name };
+  }
+  return filter;
+}
+
 /** Resolve selected collections a page at a time and dedupe by stable player song ID. */
 export async function resolveBulkSongs(
   api: RemoteApi,
@@ -199,22 +219,7 @@ export async function resolveBulkSongs(
       continue;
     }
 
-    let filter: LibraryFilter | null = null;
-    if (target.type === 'Album') {
-      filter = {
-        album: target.group.name,
-        ...(target.group.albumArtist ? { albumArtist: target.group.albumArtist } : {}),
-        ...(target.context?.kind === 'artist' ? { artist: target.context.name } : {}),
-        ...(target.context?.kind === 'albumArtist' ? { albumArtist: target.context.name } : {}),
-      };
-      if (filter.artist && filter.albumArtist) delete filter.albumArtist;
-    } else if (target.type === 'Group' && target.kind === 'artist') {
-      filter = { artist: target.group.name };
-    } else if (target.type === 'Group' && target.kind === 'albumArtist') {
-      filter = { albumArtist: target.group.name };
-    } else if (target.type === 'Group' && target.kind === 'genre') {
-      filter = { genre: target.group.name };
-    }
+    const filter = bulkLibraryFilter(target);
     if (!filter) continue;
 
     let offset = 0;

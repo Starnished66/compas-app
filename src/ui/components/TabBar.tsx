@@ -32,7 +32,11 @@ const BAR_PADDING = Space.xs;
 const BAR_BORDER = 1;
 const MINIMIZED_ROW_WIDTH = MinimizedTabBarWidth - 2 * (BAR_PADDING + BAR_BORDER);
 
-export function TabBar({ active, onSelect, minimized = false, onExpand, style }: TabBarProps) {
+export function TabBar(props: TabBarProps) {
+  return renderTabBar(props, useTabBarView(props));
+}
+
+function useTabBarView({ active, onSelect, minimized = false, onExpand }: TabBarProps) {
   const { t } = useI18n();
   const palette = usePalette();
   const rowRef = useRef<View>(null);
@@ -77,6 +81,11 @@ export function TabBar({ active, onSelect, minimized = false, onExpand, style }:
     else onSelect(tab);
   };
 
+  return { t, palette, rowRef, motion, drag, onRowLayout, rowWidth, tabWidth, pressTab };
+}
+
+function renderTabBar({ active, minimized = false, style }: TabBarProps, view: ReturnType<typeof useTabBarView>) {
+  const { t, palette, rowRef, motion, drag, onRowLayout, rowWidth, tabWidth, pressTab } = view;
   return (
     <View
       {...drag.panHandlers}

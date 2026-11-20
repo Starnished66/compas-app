@@ -65,27 +65,9 @@ export function TransportControls({
   const shufflePop = usePopAnimation(shuffleOn);
   const repeatPop = usePopAnimation(repeat.icon + repeat.active);
 
-  if (variant === 'compact') {
-    return (
-      <View style={[styles.compactRow, style]}>
-        <IconButton icon="skipPrevious" label={t('Previous')} onPress={onPrevious} disabled={disabled} />
-        <View>
-          <IconButton
-            icon={playIcon}
-            label={playLabel}
-            variant="accent"
-            iconSize={COMPACT_PLAY_ICON_SIZE}
-            iconStyle={glyphStyle}
-            onPress={onTogglePlayback}
-            disabled={disabled}
-            busy={pending}
-          />
-          {playRing}
-        </View>
-        <IconButton icon="skipNext" label={t('Next')} onPress={onNext} disabled={disabled} />
-      </View>
-    );
-  }
+  if (variant === 'compact') return renderCompactTransport({
+    onPrevious, onNext, onTogglePlayback, disabled, pending, playRing, style, playIcon, playLabel, glyphStyle, t,
+  });
 
   return (
     <View style={[styles.fullRow, spread ? styles.spread : styles.centered, style]}>
@@ -113,19 +95,55 @@ export function TransportControls({
         busy={pending}
       />
       <IconButton icon="skipNext" label={t('Next')} variant="raised" onPress={onNext} disabled={disabled} />
-      {onCycleRepeat ? (
-        <Animated.View style={repeatPop}>
-          <IconButton
-            icon={repeat.icon}
-            label={repeat.label}
-            active={repeat.active}
-            iconStrokeWidth={repeat.active ? ACTIVE_STROKE_WIDTH : undefined}
-            onPress={onCycleRepeat}
-            disabled={disabled}
-          />
-        </Animated.View>
-      ) : null}
+      {onCycleRepeat ? renderRepeatButton(repeat, repeatPop, onCycleRepeat, disabled) : null}
     </View>
+  );
+}
+
+function renderCompactTransport({
+  onPrevious, onNext, onTogglePlayback, disabled, pending, playRing, style, playIcon, playLabel, glyphStyle, t,
+}: Pick<TransportControlsProps, 'onPrevious' | 'onNext' | 'onTogglePlayback' | 'disabled' | 'pending' | 'playRing' | 'style'> & {
+  playIcon: IconName;
+  playLabel: string;
+  glyphStyle: ReturnType<typeof usePlayGlyphSwap>;
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  return (
+    <View style={[styles.compactRow, style]}>
+      <IconButton icon="skipPrevious" label={t('Previous')} onPress={onPrevious} disabled={disabled} />
+      <View>
+        <IconButton
+          icon={playIcon}
+          label={playLabel}
+          variant="accent"
+          iconSize={COMPACT_PLAY_ICON_SIZE}
+          iconStyle={glyphStyle}
+          onPress={onTogglePlayback}
+          disabled={disabled}
+          busy={pending}
+        />
+        {playRing}
+      </View>
+      <IconButton icon="skipNext" label={t('Next')} onPress={onNext} disabled={disabled} />
+    </View>
+  );
+}
+
+function renderRepeatButton(
+  repeat: ReturnType<typeof repeatPresentation>, repeatPop: ReturnType<typeof usePopAnimation>,
+  onCycleRepeat: NonNullable<TransportControlsProps['onCycleRepeat']>, disabled: boolean,
+) {
+  return (
+    <Animated.View style={repeatPop}>
+      <IconButton
+        icon={repeat.icon}
+        label={repeat.label}
+        active={repeat.active}
+        iconStrokeWidth={repeat.active ? ACTIVE_STROKE_WIDTH : undefined}
+        onPress={onCycleRepeat}
+        disabled={disabled}
+      />
+    </Animated.View>
   );
 }
 

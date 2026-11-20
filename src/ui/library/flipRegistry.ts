@@ -1,9 +1,10 @@
 import { ReactNode, createContext } from 'react';
-import { Animated, Dimensions } from 'react-native';
-import type { HostInstance } from 'react-native';
+import { Animated } from 'react-native';
 import type { IconName } from '../components/iconPaths';
 import { Durations, Easings, staggerDelay } from '../motion';
-import { FlipGhostBatch } from './flipGhostBatch';
+import { FlipGhosts } from './flipGhosts';
+import { byPosition, isVisible, measure, snapshotLayout, viewportHeight, type BoxSnapshot } from './flipLayout';
+import { planSortMotion } from './flipSortMotion';
 import {
   FlipMode,
   FlipMotion,
@@ -11,11 +12,8 @@ import {
   FlipPart,
   FlipRect,
   REST_OFFSET,
-  intersectsViewport,
   measuresAfterFlip,
   offsetAt,
-  shiftRect,
-  snapshotsBeforeFlip,
   sortRole,
   verticalDirection,
 } from './flipMotion';
@@ -67,12 +65,6 @@ export interface FlipRowGhostSpec extends FlipGhostBase {
 
 export type FlipGhostSpec = FlipArtGhostSpec | FlipRowGhostSpec;
 
-interface BoxSnapshot {
-  rect: FlipRect;
-  opacity: number;
-  content?: ReactNode;
-}
-
 interface FlipRun {
   motion?: FlipMotion;
 }
@@ -94,10 +86,8 @@ const STAGGER_MAX_INDEX = 10;
 const VIEW_CONTENT_SHIFT = 6;
 const ART_ENTER_SCALE = 0.9;
 const ART_ENTER_MS = 320;
-const SORT_ENTER_SHIFT = 16;
 const SORT_LEAVE_DRIFT = 12;
 const SORT_TRAVEL_OPACITY = 0.2;
-const SORT_FADE_DISTANCE = 24;
 
 export function createFlipValues(): FlipValues {
   return {
@@ -106,26 +96,6 @@ export function createFlipValues(): FlipValues {
     scale: new Animated.Value(1),
     opacity: new Animated.Value(1),
   };
-}
-
-function measure(ref: { current: unknown }): FlipRect | null {
-  const element = ref.current as Partial<HostInstance> | null;
-  if (!element || typeof element.getBoundingClientRect !== 'function') return null;
-  const rect = element.getBoundingClientRect();
-  if (!rect.width && !rect.height) return null;
-  return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-}
-
-function viewportHeight(): number {
-  return Dimensions.get('window').height;
-}
-
-function isVisible(rect: FlipRect): boolean {
-  return intersectsViewport(rect, viewportHeight());
-}
-
-function byPosition(a: FlipRect, b: FlipRect): number {
-  return a.y - b.y || a.x - b.x;
 }
 
 function nodeId(key: string, part: FlipPart): string {
@@ -154,11 +124,7 @@ export class FlipRegistry {
   private nodes = new Map<string, FlipNode>();
   private runs = new WeakMap<FlipValues, FlipRun>();
   private pending: PendingFlip | null = null;
-  private ghosts = new FlipGhostBatch<FlipGhostSpec>();
-  private ghostListeners = new Set<(ghosts: FlipGhostSpec[]) => void>();
-  private nextGhostId = 1;
-  private collectingGhosts = false;
-  private collectedGhosts = false;
+  private ghosts = new FlipGhosts();
 
   register(node: FlipNode): () => void {
     const id = nodeId(node.key, node.part);
@@ -171,20 +137,7 @@ export class FlipRegistry {
 
   begin(mode: FlipMode): void {
     const now = Date.now();
-    const boxes = new Map<string, BoxSnapshot>();
-    const arts = new Map<string, FlipRect>();
-    for (const node of this.nodes.values()) {
-      if (!snapshotsBeforeFlip(mode, node.part)) continue;
-      const layout = measure(node.ref);
-      if (!layout) continue;
-      const offset = this.freeze(node.values, now);
-      const rect = shiftRect(layout, offset);
-      if (node.part === 'box') {
-        boxes.set(node.key, { rect, opacity: offset.opacity, content: isVisible(rect) ? node.content : undefined });
-      } else if (isVisible(rect)) {
-        arts.set(node.key, rect);
-      }
-    }
+    const { boxes, arts } = snapshotLayout(this.nodes.values(), mode, now, (values, time) => this.freeze(values, time));
     this.pending = {
       mode,
       boxes,
@@ -208,43 +161,18 @@ export class FlipRegistry {
       rect: this.measureAfterFlip(pending.mode, node),
     }));
     measured.sort((a, b) => (a.rect && b.rect ? byPosition(a.rect, b.rect) : a.rect ? -1 : b.rect ? 1 : 0));
-    this.collectingGhosts = true;
-    this.collectedGhosts = false;
-    try {
+    this.ghosts.collect(() => {
       for (const { node, rect } of measured) this.playNode(node, rect);
       if (pending.mode === 'sort') this.leave(pending);
-    } finally {
-      this.collectingGhosts = false;
-    }
-    if (this.collectedGhosts) this.publishGhosts();
+    });
   }
 
   subscribeGhosts(listener: (ghosts: FlipGhostSpec[]) => void): () => void {
-    this.ghostListeners.add(listener);
-    listener(this.ghosts.current);
-    return () => {
-      this.ghostListeners.delete(listener);
-    };
+    return this.ghosts.subscribeGhosts(listener);
   }
 
   private measureAfterFlip(mode: FlipMode, node: FlipNode): FlipRect | null {
     return measuresAfterFlip(mode, node.part) ? measure(node.ref) : null;
-  }
-
-  private publishGhosts() {
-    const ghosts = this.ghosts.current;
-    this.ghostListeners.forEach((listener) => listener(ghosts));
-  }
-
-  private addGhosts(ghosts: FlipGhostSpec[]) {
-    if (!ghosts.length) return;
-    this.ghosts.add(ghosts);
-    if (this.collectingGhosts) this.collectedGhosts = true;
-    else this.publishGhosts();
-  }
-
-  private finishGhost(id: number) {
-    if (this.ghosts.finish(id)) this.publishGhosts();
   }
 
   private freeze(values: FlipValues, now: number): FlipOffset {
@@ -305,26 +233,9 @@ export class FlipRegistry {
     }
     pending.shown.add(node.key);
     const delay = staggerDelay(this.orderOf(pending, node.key), Durations.sortStagger, STAGGER_MAX_INDEX);
-    if (role === 'enter' || !previous) {
-      const direction = verticalDirection(rect, previous?.rect);
-      this.animateSort(node.values, { x: 0, y: direction * SORT_ENTER_SHIFT, opacity: 0 }, {
-        delay: Durations.sortEnterDelay + delay,
-        duration: Durations.sortEnter,
-        dip: false,
-      });
-      return;
-    }
-    const dx = previous.rect.x - rect.x;
-    const dy = previous.rect.y - rect.y;
-    if (!dx && !dy && previous.opacity === 1) {
-      this.rest(node.values);
-      return;
-    }
-    this.animateSort(node.values, { x: dx, y: dy, opacity: previous.opacity }, {
-      delay,
-      duration: Durations.sortFlip,
-      dip: Math.hypot(dx, dy) > SORT_FADE_DISTANCE,
-    });
+    const motion = planSortMotion(rect, previous, role === 'enter', delay);
+    if (!motion) this.rest(node.values);
+    else this.animateSort(node.values, motion.from, motion.timing);
   }
 
   private animateSort(
@@ -362,7 +273,7 @@ export class FlipRegistry {
       .sort(([, a], [, b]) => byPosition(a.rect, b.rect));
     if (!leaving.length) return;
     const ghosts = leaving.map(([key, snapshot], index): FlipRowGhostSpec => {
-      const id = this.nextGhostId++;
+      const id = this.ghosts.allocateId();
       return {
         kind: 'row',
         id,
@@ -371,10 +282,10 @@ export class FlipRegistry {
         opacity: snapshot.opacity,
         drift: verticalDirection(snapshot.rect, pending.landed.get(key)) * SORT_LEAVE_DRIFT,
         delay: staggerDelay(index, Durations.sortStagger, STAGGER_MAX_INDEX),
-        onDone: () => this.finishGhost(id),
+        onDone: () => this.ghosts.finish(id),
       };
     });
-    this.addGhosts(ghosts);
+    this.ghosts.add(ghosts);
   }
 
   private playView(pending: PendingFlip, node: FlipNode, rect: FlipRect) {
@@ -403,7 +314,7 @@ export class FlipRegistry {
       place(values, { ...REST_OFFSET, opacity: 0 });
       const run: FlipRun = {};
       this.runs.set(values, run);
-      const id = this.nextGhostId++;
+      const id = this.ghosts.allocateId();
       const ghost: FlipArtGhostSpec = {
         kind: 'art',
         id,
@@ -413,10 +324,10 @@ export class FlipRegistry {
         delay,
         onDone: () => {
           if (this.runs.get(values) === run) this.rest(values);
-          this.finishGhost(id);
+          this.ghosts.finish(id);
         },
       };
-      this.addGhosts([ghost]);
+      this.ghosts.add([ghost]);
       return;
     }
     place(values, { ...REST_OFFSET, opacity: 0 }, ART_ENTER_SCALE);

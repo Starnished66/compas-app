@@ -53,27 +53,7 @@ export function MiniPlayer({
   const artist = track.artist || t('Unknown artist');
   const { artStyle, metaStyle } = useTrackChangeMotion(track);
   const glyphStyle = usePlayGlyphSwap(isPlaying);
-  const reducedMotion = useReducedMotion();
-  const enter = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.timing(enter, {
-      toValue: 1,
-      duration: motionDuration(reducedMotion, Durations.miniPlayerEnter),
-      easing: Easings.standard,
-      useNativeDriver: true,
-    }).start();
-  }, [enter, reducedMotion]);
-
-  const skip = (direction: -1 | 1, command: () => void) => {
-    recordSkip(direction, trackKey(track));
-    command();
-  };
-
-  const enterStyle = {
-    opacity: enter,
-    transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [ENTER_OFFSET, 0] }) }],
-  };
+  const enterStyle = useMiniPlayerEntrance();
 
   return (
     <Animated.View style={[enterStyle, style]}>
@@ -99,34 +79,71 @@ export function MiniPlayer({
             {artist}
           </AppText>
         </Animated.View>
-        <IconButton
-          icon="skipPrevious"
-          label={t('Previous')}
-          size="sm"
-          iconSize={SKIP_ICON_SIZE}
-          onPress={() => skip(-1, onPrevious)}
-        />
-        <View style={styles.playButton}>
-          <IconButton
-            icon={isPlaying ? 'pause' : 'play'}
-            label={isPlaying ? t('Pause') : t('Play')}
-            size="sm"
-            variant="container"
-            iconSize={PLAY_ICON_SIZE}
-            iconStyle={glyphStyle}
-            onPress={onTogglePlayback}
-          />
-          {progressStyle === 'ring' ? (
-            <PlayButtonRing track={track} playing={isPlaying} buttonSize={Size.controlSm} />
-          ) : null}
-        </View>
-        <IconButton icon="skipNext" label={t('Next')} size="sm" iconSize={SKIP_ICON_SIZE} onPress={() => skip(1, onNext)} />
+        {renderMiniPlayerControls({ track, isPlaying, progressStyle, onTogglePlayback, onPrevious, onNext }, glyphStyle, t)}
         {progressStyle === 'bar' ? <PlaybackProgressBar style={styles.progress} /> : null}
       </Pressable>
       {progressStyle === 'card' ? (
         <CardComet track={track} playing={isPlaying} radius={Radius.lg} />
       ) : null}
     </Animated.View>
+  );
+}
+
+function useMiniPlayerEntrance() {
+  const reducedMotion = useReducedMotion();
+  const enter = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(enter, {
+      toValue: 1,
+      duration: motionDuration(reducedMotion, Durations.miniPlayerEnter),
+      easing: Easings.standard,
+      useNativeDriver: true,
+    }).start();
+  }, [enter, reducedMotion]);
+
+  return {
+    opacity: enter,
+    transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [ENTER_OFFSET, 0] }) }],
+  };
+}
+
+function renderMiniPlayerControls(
+  { track, isPlaying, progressStyle, onTogglePlayback, onPrevious, onNext }:
+    Pick<MiniPlayerProps, 'track' | 'isPlaying' | 'progressStyle' | 'onTogglePlayback' | 'onPrevious' | 'onNext'>,
+  glyphStyle: ReturnType<typeof usePlayGlyphSwap>,
+  t: ReturnType<typeof useI18n>['t'],
+) {
+  const skip = (direction: -1 | 1, command: () => void) => {
+    recordSkip(direction, trackKey(track));
+    command();
+  };
+
+  return (
+    <>
+      <IconButton
+        icon="skipPrevious"
+        label={t('Previous')}
+        size="sm"
+        iconSize={SKIP_ICON_SIZE}
+        onPress={() => skip(-1, onPrevious)}
+      />
+      <View style={styles.playButton}>
+        <IconButton
+          icon={isPlaying ? 'pause' : 'play'}
+          label={isPlaying ? t('Pause') : t('Play')}
+          size="sm"
+          variant="container"
+          iconSize={PLAY_ICON_SIZE}
+          iconStyle={glyphStyle}
+          onPress={onTogglePlayback}
+        />
+        {progressStyle === 'ring' ? (
+          <PlayButtonRing track={track} playing={isPlaying} buttonSize={Size.controlSm} />
+        ) : null}
+      </View>
+      <IconButton icon="skipNext" label={t('Next')} size="sm" iconSize={SKIP_ICON_SIZE} onPress={() => skip(1, onNext)} />
+    </>
   );
 }
 

@@ -48,28 +48,7 @@ export function CometRing({ size, radius, strokeWidth, color, busy, style }: Com
   const effect = useMemo(() => Skia.RuntimeEffect.Make(COMET_SHADER), []);
   const skColor = useMemo(() => Skia.Color(color), [color]);
 
-  const paths = useMemo(() => {
-    const track = Skia.Path.MakeFromSVGString(
-      roundedRectPerimeter({ width: size, height: size, radius, strokeWidth }).path,
-    );
-    const rings = [
-      {
-        opacity: 1,
-        path: Skia.Path.MakeFromSVGString(ringBandPath({ offset: GLOW_PAD, side: size, radius }, strokeWidth)),
-      },
-      ...GLOW_BANDS.map((band) => ({
-        opacity: band.opacity,
-        path: Skia.Path.MakeFromSVGString(
-          ringBandPath(
-            { offset: GLOW_PAD - band.spread, side: size + band.spread * 2, radius: radius + band.spread },
-            strokeWidth + band.spread * 2,
-          ),
-        ),
-      })),
-    ];
-    for (const ring of rings) ring.path?.setFillType(FillType.EvenOdd);
-    return { track, rings };
-  }, [radius, size, strokeWidth]);
+  const paths = useCometRingPaths(size, radius, strokeWidth);
 
   const uniforms = useDerivedValue(() => ({
     uCenter: [center, center],
@@ -99,4 +78,29 @@ export function CometRing({ size, radius, strokeWidth, color, busy, style }: Com
       </Canvas>
     </View>
   );
+}
+
+function useCometRingPaths(size: number, radius: number, strokeWidth: number) {
+  return useMemo(() => {
+    const track = Skia.Path.MakeFromSVGString(
+      roundedRectPerimeter({ width: size, height: size, radius, strokeWidth }).path,
+    );
+    const rings = [
+      {
+        opacity: 1,
+        path: Skia.Path.MakeFromSVGString(ringBandPath({ offset: GLOW_PAD, side: size, radius }, strokeWidth)),
+      },
+      ...GLOW_BANDS.map((band) => ({
+        opacity: band.opacity,
+        path: Skia.Path.MakeFromSVGString(
+          ringBandPath(
+            { offset: GLOW_PAD - band.spread, side: size + band.spread * 2, radius: radius + band.spread },
+            strokeWidth + band.spread * 2,
+          ),
+        ),
+      })),
+    ];
+    for (const ring of rings) ring.path?.setFillType(FillType.EvenOdd);
+    return { track, rings };
+  }, [radius, size, strokeWidth]);
 }

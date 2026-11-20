@@ -71,6 +71,29 @@ const createRemovalProgress = (
   return { counts, publish, countValues };
 };
 
+function publishQueueRemovalCancelled(
+  publish: ReturnType<typeof createRemovalProgress>['publish'],
+  countValues: ReturnType<typeof createRemovalProgress>['countValues'],
+  writePending: boolean,
+) {
+  const message = writePending
+    ? 'Stopped. {succeeded} succeeded, {failed} failed, {processed} processed of {total}. One removal may still be completing; the queue is being refreshed.'
+    : 'Stopped. {succeeded} succeeded, {failed} failed, {processed} processed of {total}. Confirmed removals remain applied.';
+  publish('cancelled', message, countValues());
+}
+
+function publishQueueRemovalError(
+  publish: ReturnType<typeof createRemovalProgress>['publish'],
+  countValues: ReturnType<typeof createRemovalProgress>['countValues'],
+  removalInFlight: boolean,
+  error: string,
+) {
+  const message = removalInFlight
+    ? '{succeeded} succeeded, {failed} failed, {processed} processed of {total}. {error} One removal may still finish; refresh the queue before retrying.'
+    : '{succeeded} succeeded, {failed} failed, {processed} processed of {total}. {error} Confirmed removals remain applied.';
+  publish('error', message, { ...countValues(), error });
+}
+
 const removeSelectedTracks = async (
   {
     shared: {
@@ -86,7 +109,7 @@ const removeSelectedTracks = async (
   try {
     publish('writing');
     let snapshot = await readQueueSnapshot((offset, limit) => api.queue(offset, limit), isCancelled);
-    if (isCancelled()) { publish('cancelled', 'Stopped. {succeeded} succeeded, {failed} failed, {processed} processed of {total}. Confirmed removals remain applied.', countValues()); return; }
+    if (isCancelled()) { publishQueueRemovalCancelled(publish, countValues, false); return; }
     if (selected.some((target) => target.revision !== snapshot.revision || snapshot.songs[target.offset]?.index !== target.songIndex)) {
       throw new Error('Queue changed. Select tracks again before removing them.');
     }
@@ -117,21 +140,14 @@ const removeSelectedTracks = async (
       writeAttempted = false;
       publish('writing');
     }
-    if (isCancelled()) publish('cancelled', removalInFlight
-      ? 'Stopped. {succeeded} succeeded, {failed} failed, {processed} processed of {total}. One removal may still be completing; the queue is being refreshed.'
-      : 'Stopped. {succeeded} succeeded, {failed} failed, {processed} processed of {total}. Confirmed removals remain applied.', countValues());
+    if (isCancelled()) publishQueueRemovalCancelled(publish, countValues, removalInFlight);
     else publish('done', '{succeeded} succeeded, {failed} failed, {processed} processed of {total}.', countValues());
   } catch (err: any) {
     if (isCancelled()) {
-      publish('cancelled', writeAttempted
-        ? 'Stopped. {succeeded} succeeded, {failed} failed, {processed} processed of {total}. One removal may still be completing; the queue is being refreshed.'
-        : 'Stopped. {succeeded} succeeded, {failed} failed, {processed} processed of {total}. Confirmed removals remain applied.', countValues());
+      publishQueueRemovalCancelled(publish, countValues, writeAttempted);
     } else {
       if (writeAttempted) { counts.failed++; counts.processed++; }
-      const message = removalInFlight
-        ? '{succeeded} succeeded, {failed} failed, {processed} processed of {total}. {error} One removal may still finish; refresh the queue before retrying.'
-        : '{succeeded} succeeded, {failed} failed, {processed} processed of {total}. {error} Confirmed removals remain applied.';
-      publish('error', message, { ...countValues(), error: err?.message || 'Queue removal stopped.' });
+      publishQueueRemovalError(publish, countValues, removalInFlight, err?.message || 'Queue removal stopped.');
     }
   } finally {
     if (api === apiRef.current && playerKey === connectedPlayerKeyRef.current) await refreshQueue(api);

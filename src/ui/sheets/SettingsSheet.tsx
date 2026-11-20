@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, type RefObject } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { ConnectionStatus, ConnectionTransport, RemoteAction, RemoteTheme, RemoteUiState } from '../../data/types';
 import { LIBRARY_SORT_MODES } from '../../data/librarySortModes';
@@ -47,7 +47,8 @@ const THEME_OPTIONS: ReadonlyArray<SegmentedOption<RemoteTheme>> = [
 
 const CHEVRON_SIZE = 18;
 
-export function SettingsSheet({ state, player, onAction, visible, onClose, onOpenConnection, onOpenUpdates, onOpenTransfer, onOpenPlayerSettings, onOpenPlugins }: SettingsSheetProps) {
+export function SettingsSheet(props: SettingsSheetProps) {
+  const { state, onAction, visible, onClose } = props;
   const updates = useUpdates();
   const { t, languagePreference, setLanguage } = useI18n();
   const [languageOpen, setLanguageOpen] = useState(false);
@@ -76,192 +77,261 @@ export function SettingsSheet({ state, player, onAction, visible, onClose, onOpe
       title={languageOpen ? t('Choose a language') : sortingOpen ? t('Library sorting') : t('Settings')}
       contentKey={languageOpen ? 'language' : sortingOpen ? 'sorting' : 'settings'}
     >
-      {languageOpen ? (
-        <View style={styles.content}>
-          <Card variant="surface">
-            <ListRow title={t('Back')} leading={<Icon name="chevronLeft" />} onPress={() => setLanguageOpen(false)} />
-            {LANGUAGE_OPTIONS.map(({ value, label }) => (
-              <ListRow
-                key={value}
-                title={value === 'system' ? t(label) : label}
-                selected={languagePreference === value}
-                accessibilityRole="radio"
-                accessibilityLabel={value === 'system' ? t(label) : label}
-                trailing={languagePreference === value ? <Icon name="check" /> : null}
-                onPress={() => {
-                  void setLanguage(value);
-                  setLanguageOpen(false);
-                }}
-              />
-            ))}
-          </Card>
-        </View>
-      ) : sortingOpen && librarySorting ? (
-        <View style={styles.content}>
-          <Card variant="surface">
-            <ListRow title={t('Back')} leading={<Icon name="chevronLeft" />} onPress={() => setSortingOpen(false)} />
-            <LibrarySortingSetting
-              sorting={librarySorting}
-              onChange={(scope, mode) => {
-                onAction({ type: 'SetLibrarySorting', scope, mode });
-              }}
-            />
-          </Card>
-        </View>
-      ) : (
-      <View style={styles.content}>
-        <Card variant="surface">
-          <PlayerCard
-            variant="row"
-            name={disconnected ? t('No player') : player.name}
-            detail={connected ? player.detail : undefined}
-            status={connectionStatusView(state)}
-            trailing={
-              connected ? (
-                <DisconnectButton compact playerName={player.name} onDisconnect={() => onAction({ type: 'Disconnect' })} />
-              ) : null
-            }
+      {languageOpen
+        ? renderLanguageSettings(t, languagePreference, setLanguage, setLanguageOpen)
+        : sortingOpen && librarySorting
+          ? renderLibrarySorting(t, librarySorting, onAction, setSortingOpen)
+          : renderSettingsMain(props, { t, updates, afterClose, languagePreference, librarySorting, connected,
+            disconnected, setLanguageOpen, setSortingOpen })}
+    </BottomSheet>
+  );
+}
+
+type I18n = ReturnType<typeof useI18n>;
+type Translate = I18n['t'];
+type TogglePage = (open: boolean) => void;
+
+interface SettingsView {
+  t: Translate;
+  updates: ReturnType<typeof useUpdates>;
+  afterClose: RefObject<RemoteAction | null>;
+  languagePreference: I18n['languagePreference'];
+  librarySorting: RemoteUiState['librarySorting'];
+  connected: boolean;
+  disconnected: boolean;
+  setLanguageOpen: TogglePage;
+  setSortingOpen: TogglePage;
+}
+
+function renderLanguageSettings(t: Translate, languagePreference: I18n['languagePreference'], setLanguage: I18n['setLanguage'], setLanguageOpen: TogglePage) {
+  return (
+    <View style={styles.content}>
+      <Card variant="surface">
+        <ListRow title={t('Back')} leading={<Icon name="chevronLeft" />} onPress={() => setLanguageOpen(false)} />
+        {LANGUAGE_OPTIONS.map(({ value, label }) => (
+          <ListRow
+            key={value}
+            title={value === 'system' ? t(label) : label}
+            selected={languagePreference === value}
+            accessibilityRole="radio"
+            accessibilityLabel={value === 'system' ? t(label) : label}
+            trailing={languagePreference === value ? <Icon name="check" /> : null}
+            onPress={() => {
+              void setLanguage(value);
+              setLanguageOpen(false);
+            }}
           />
-          {connected ? (
-            <>
-              <Divider />
-              <ListRow
-                variant="action"
-                title={t('Transfer files')}
-                leading={<Icon name="import" />}
-                subtitle={t(state.connectionTransport === ConnectionTransport.Bluetooth
-                  ? 'File transfer works when connected over Wi-Fi.'
-                  : state.supportedFeatures.includes('wifi_import')
-                    ? 'Send music from this device to the player SD card'
-                    : 'Update the player firmware to use Wi-Fi import.')}
-                trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
-                onPress={() => {
-                  onClose();
-                  onOpenTransfer();
-                }}
-              />
-              {onOpenPlugins && (state.supportedFeatures.includes('plugin_store') || state.supportedFeatures.includes('plugin_management') || state.supportedFeatures.includes('player_layouts')) ? (
-                <>
-                  <Divider />
-                  <ListRow
-                    variant="action"
-                    title={t('Plugins')}
-                    leading={<Icon name="grid" />}
-                    subtitle={t('Browse plugins and player layouts')}
-                    trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
-                    onPress={() => { onClose(); onOpenPlugins(); }}
-                  />
-                </>
-              ) : null}
-              {onOpenPlayerSettings && state.supportedFeatures.includes('settings_v1') ? (
-                <>
-                  <Divider />
-                  <ListRow
-                    variant="action"
-                    title={t('Player settings')}
-                    leading={<Icon name="sliders" />}
-                    subtitle={t('Sound, display, power and more')}
-                    trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
-                    onPress={() => {
-                      onClose();
-                      onOpenPlayerSettings();
-                    }}
-                  />
-                </>
-              ) : null}
-              {state.supportedFeatures.includes('device_info') && (state.deviceModel || state.playerVersion) ? (
-                <>
-                  <Divider />
-                  <View style={styles.deviceInfo}>
-                    <AppText variant="eyebrow" tone="inkMuted">{t('Device information')}</AppText>
-                    {state.deviceModel ? <AppText variant="caption" tone="inkMuted">{t('Player model')}: {state.deviceModel}</AppText> : null}
-                    {state.playerVersion ? <AppText variant="caption" tone="inkMuted">{t('Player version')}: {state.playerVersion}</AppText> : null}
-                    {state.playerVersion ? <AppText variant="caption" tone="inkMuted">{t('This is the running player software version; firmware is updated separately.')}</AppText> : null}
-                  </View>
-                </>
-              ) : null}
-              <Divider />
-              <ListRow
-                variant="action"
-                title={t('Update saved PIN')}
-                leading={<Icon name="key" />}
-                onPress={() => {
-                  afterClose.current = { type: 'ChangePin' };
-                  onClose();
-                }}
-              />
-            </>
-          ) : null}
+        ))}
+      </Card>
+    </View>
+  );
+}
+
+function renderLibrarySorting(
+  t: Translate, librarySorting: NonNullable<RemoteUiState['librarySorting']>,
+  onAction: SettingsSheetProps['onAction'], setSortingOpen: TogglePage,
+) {
+  return (
+    <View style={styles.content}>
+      <Card variant="surface">
+        <ListRow title={t('Back')} leading={<Icon name="chevronLeft" />} onPress={() => setSortingOpen(false)} />
+        <LibrarySortingSetting
+          sorting={librarySorting}
+          onChange={(scope, mode) => {
+            onAction({ type: 'SetLibrarySorting', scope, mode });
+          }}
+        />
+      </Card>
+    </View>
+  );
+}
+
+function renderSettingsMain(props: SettingsSheetProps, view: SettingsView) {
+  const { state, onClose, onOpenUpdates } = props;
+  const { connected, t, updates } = view;
+  return (
+    <View style={styles.content}>
+      {renderSettingsPlayer(props, view)}
+
+      <Card variant="surface">
+        <ListRow title={t('Updates')} subtitle={updates.firmware
+          ? (connected && state.playerVersion
+            ? t('Player {playerVersion} · Firmware {firmwareVersion} · App {appVersion}', { playerVersion: state.playerVersion, firmwareVersion: updates.firmware.version, appVersion: updates.appVersion })
+            : t('Firmware {version} · App {appVersion}', { version: updates.firmware.version, appVersion: updates.appVersion }))
+          : (connected && state.playerVersion
+            ? t('Player {playerVersion} · Compás Remote {appVersion}', { playerVersion: state.playerVersion, appVersion: updates.appVersion })
+            : t('Compás Remote {version}', { version: updates.appVersion }))}
+          trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />} onPress={() => { onClose(); onOpenUpdates(); }} />
+      </Card>
+      {renderSettingsPreferences(props, view)}
+    </View>
+  );
+}
+
+function renderSettingsPlayer(props: SettingsSheetProps, view: SettingsView) {
+  const { state, player, onAction, onClose, onOpenConnection } = props;
+  const { connected, disconnected, t } = view;
+  return (
+    <Card variant="surface">
+      <PlayerCard
+        variant="row"
+        name={disconnected ? t('No player') : player.name}
+        detail={connected ? player.detail : undefined}
+        status={connectionStatusView(state)}
+        trailing={
+          connected ? (
+            <DisconnectButton compact playerName={player.name} onDisconnect={() => onAction({ type: 'Disconnect' })} />
+          ) : null
+        }
+      />
+      {connected ? renderPlayerCommands(props, view) : null}
+      <Divider />
+      <ListRow
+        variant="action"
+        title={t('Connection and players')}
+        leading={<Icon name="wifi" />}
+        trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
+        onPress={() => {
+          onClose();
+          onOpenConnection();
+        }}
+      />
+    </Card>
+  );
+}
+
+function renderPlayerCommands({ state, onClose, onOpenTransfer, onOpenPlugins, onOpenPlayerSettings }: SettingsSheetProps, { t, afterClose }: SettingsView) {
+  return (
+    <>
+      <Divider />
+      <ListRow
+        variant="action"
+        title={t('Transfer files')}
+        leading={<Icon name="import" />}
+        subtitle={t(state.connectionTransport === ConnectionTransport.Bluetooth
+          ? 'File transfer works when connected over Wi-Fi.'
+          : state.supportedFeatures.includes('wifi_import')
+            ? 'Send music from this device to the player SD card'
+            : 'Update the player firmware to use Wi-Fi import.')}
+        trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
+        onPress={() => {
+          onClose();
+          onOpenTransfer();
+        }}
+      />
+      {onOpenPlugins && (state.supportedFeatures.includes('plugin_store') || state.supportedFeatures.includes('plugin_management') || state.supportedFeatures.includes('player_layouts')) ? (
+        <>
           <Divider />
           <ListRow
             variant="action"
-            title={t('Connection and players')}
-            leading={<Icon name="wifi" />}
+            title={t('Plugins')}
+            leading={<Icon name="grid" />}
+            subtitle={t('Browse plugins and player layouts')}
             trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
-            onPress={() => {
-              onClose();
-              onOpenConnection();
-            }}
+            onPress={() => { onClose(); onOpenPlugins(); }}
           />
-        </Card>
+        </>
+      ) : null}
+      {renderPlayerSettingsCommand(state, onClose, onOpenPlayerSettings, t)}
+      {renderSettingsDeviceInfo(state, t)}
+      <Divider />
+      <ListRow
+        variant="action"
+        title={t('Update saved PIN')}
+        leading={<Icon name="key" />}
+        onPress={() => {
+          afterClose.current = { type: 'ChangePin' };
+          onClose();
+        }}
+      />
+    </>
+  );
+}
 
-        <Card variant="surface">
-          <ListRow title={t('Updates')} subtitle={updates.firmware
-            ? (connected && state.playerVersion
-              ? t('Player {playerVersion} · Firmware {firmwareVersion} · App {appVersion}', { playerVersion: state.playerVersion, firmwareVersion: updates.firmware.version, appVersion: updates.appVersion })
-              : t('Firmware {version} · App {appVersion}', { version: updates.firmware.version, appVersion: updates.appVersion }))
-            : (connected && state.playerVersion
-              ? t('Player {playerVersion} · Compás Remote {appVersion}', { playerVersion: state.playerVersion, appVersion: updates.appVersion })
-              : t('Compás Remote {version}', { version: updates.appVersion }))}
-            trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />} onPress={() => { onClose(); onOpenUpdates(); }} />
-        </Card>
-        <Card variant="surface">
-          <PreferenceSetting
-            title={t('Appearance')}
-            options={THEME_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
-            value={state.theme}
-            onChange={(theme) => onAction({ type: 'SetTheme', theme })}
-          />
+function renderPlayerSettingsCommand(
+  state: RemoteUiState, onClose: () => void, onOpenPlayerSettings: SettingsSheetProps['onOpenPlayerSettings'], t: Translate,
+) {
+  if (!onOpenPlayerSettings || !state.supportedFeatures.includes('settings_v1')) return null;
+  return (
+    <>
+      <Divider />
+      <ListRow
+        variant="action"
+        title={t('Player settings')}
+        leading={<Icon name="sliders" />}
+        subtitle={t('Sound, display, power and more')}
+        trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
+        onPress={() => {
+          onClose();
+          onOpenPlayerSettings();
+        }}
+      />
+    </>
+  );
+}
+
+function renderSettingsPreferences({ state, onAction }: SettingsSheetProps, view: SettingsView) {
+  const { t, languagePreference, setLanguageOpen, librarySorting, setSortingOpen, connected } = view;
+  return (
+    <Card variant="surface">
+      <PreferenceSetting
+        title={t('Appearance')}
+        options={THEME_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
+        value={state.theme}
+        onChange={(theme) => onAction({ type: 'SetTheme', theme })}
+      />
+      <Divider />
+      <ListRow
+        title={t('Language')}
+        subtitle={languagePreference === 'system' ? t('System default') : LANGUAGE_OPTIONS.find((option) => option.value === languagePreference)?.label}
+        trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
+        onPress={() => setLanguageOpen(true)}
+      />
+      {state.supportedFeatures.includes('library_sorting') && librarySorting ? (
+        <>
           <Divider />
           <ListRow
-            title={t('Language')}
-            subtitle={languagePreference === 'system' ? t('System default') : LANGUAGE_OPTIONS.find((option) => option.value === languagePreference)?.label}
+            title={t('Sort library')}
+            subtitle={`${t(LIBRARY_SORT_MODES[librarySorting.albums.effective].label)}${librarySorting.albums.reverse ? ` · ${t('Reversed order')}` : ''}`}
             trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
-            onPress={() => setLanguageOpen(true)}
+            onPress={() => setSortingOpen(true)}
           />
-          {state.supportedFeatures.includes('library_sorting') && librarySorting ? (
-            <>
-              <Divider />
-              <ListRow
-                title={t('Sort library')}
-                subtitle={`${t(LIBRARY_SORT_MODES[librarySorting.albums.effective].label)}${librarySorting.albums.reverse ? ` · ${t('Reversed order')}` : ''}`}
-                trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
-                onPress={() => setSortingOpen(true)}
-              />
-            </>
-          ) : null}
+        </>
+      ) : null}
+      <Divider />
+      <AccentSetting />
+      <Divider />
+      <BackgroundSetting />
+      <Divider />
+      <MiniProgressSetting />
+      <Divider />
+      <SwipeActionSetting direction="right" />
+      <Divider />
+      <SwipeActionSetting direction="left" />
+      {connected ? (
+        <>
           <Divider />
-          <AccentSetting />
+          <LibrarySyncRow onSync={() => onAction({ type: 'SyncLibrary' })} />
           <Divider />
-          <BackgroundSetting />
-          <Divider />
-          <MiniProgressSetting />
-          <Divider />
-          <SwipeActionSetting direction="right" />
-          <Divider />
-          <SwipeActionSetting direction="left" />
-          {connected ? (
-            <>
-              <Divider />
-              <LibrarySyncRow onSync={() => onAction({ type: 'SyncLibrary' })} />
-              <Divider />
-              <PlayerFeatureList supportedFeatures={state.supportedFeatures} />
-            </>
-          ) : null}
-        </Card>
+          <PlayerFeatureList supportedFeatures={state.supportedFeatures} />
+        </>
+      ) : null}
+    </Card>
+  );
+}
+
+function renderSettingsDeviceInfo(state: RemoteUiState, t: Translate) {
+  if (!state.supportedFeatures.includes('device_info') || (!state.deviceModel && !state.playerVersion)) return null;
+  return (
+    <>
+      <Divider />
+      <View style={styles.deviceInfo}>
+        <AppText variant="eyebrow" tone="inkMuted">{t('Device information')}</AppText>
+        {state.deviceModel ? <AppText variant="caption" tone="inkMuted">{t('Player model')}: {state.deviceModel}</AppText> : null}
+        {state.playerVersion ? <AppText variant="caption" tone="inkMuted">{t('Player version')}: {state.playerVersion}</AppText> : null}
+        {state.playerVersion ? <AppText variant="caption" tone="inkMuted">{t('This is the running player software version; firmware is updated separately.')}</AppText> : null}
       </View>
-      )}
-    </BottomSheet>
+    </>
   );
 }
 

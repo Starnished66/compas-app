@@ -138,19 +138,14 @@ const showCategoryLoading = (deps: LibraryBrowserDependencies, cached: LibraryLi
   }));
 };
 
-const loadLibraryCategory = async (
-  deps: LibraryBrowserDependencies,
+function beginLibraryCategoryChange(
+  { shared }: LibraryBrowserDependencies,
   cat: LibraryCategory,
-  activeApi?: RemoteApi,
-  query?: string | null,
-  refresh: boolean = false
-): Promise<void> => {
-  const {
-    activeCatalogRef, activePlaylistRef, apiRef, currentLibraryCategoryRef, extensionPageRef,
-    libraryBrowseCatalogRef, libraryContextRef, libraryEntriesRef, libraryListCacheRef,
-    libraryLoadGenerationRef, libraryPageRef, searchReads, setState, shownLibraryListRef, stateRef,
-  } = deps.shared;
-  const { recoverCatalogBrowse } = deps;
+  activeApi: RemoteApi | undefined,
+  refresh: boolean,
+) {
+  const { libraryLoadGenerationRef, searchReads, apiRef, currentLibraryCategoryRef, libraryContextRef, libraryPageRef,
+    extensionPageRef, activePlaylistRef } = shared;
   const loadGeneration = ++libraryLoadGenerationRef.current;
   if (refresh || cat !== LibraryCategory.Search) searchReads.reset(!refresh);
   else searchReads.cancelSongs();
@@ -160,7 +155,23 @@ const loadLibraryCategory = async (
   libraryPageRef.current = null;
   extensionPageRef.current = null;
   activePlaylistRef.current = null;
+  return { loadGeneration, api };
+}
 
+const loadLibraryCategory = async (
+  deps: LibraryBrowserDependencies,
+  cat: LibraryCategory,
+  activeApi?: RemoteApi,
+  query?: string | null,
+  refresh: boolean = false
+): Promise<void> => {
+  const {
+    activeCatalogRef, apiRef, extensionPageRef,
+    libraryBrowseCatalogRef, libraryEntriesRef, libraryListCacheRef,
+    libraryLoadGenerationRef, setState, shownLibraryListRef, stateRef,
+  } = deps.shared;
+  const { recoverCatalogBrowse } = deps;
+  const { loadGeneration, api } = beginLibraryCategoryChange(deps, cat, activeApi, refresh);
   const source = librarySource(deps);
   const key = libraryListKey(source, cat);
   const cached = refresh ? undefined : libraryListCacheRef.current.get(source, cat);

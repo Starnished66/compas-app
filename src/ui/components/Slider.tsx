@@ -54,18 +54,7 @@ export function Slider({
     value, disabled, reducedMotion, mirrored, onChange, onCommit,
   );
   const shown = dragValue ?? clampUnit(value);
-  const trackStyle = useAnimatedStyle(() => ({
-    height: interpolate(grow.value, [0, 1], [TRACK_HEIGHT, TRACK_HEIGHT_DRAGGING]),
-  }));
-  const fillStyle = useAnimatedStyle(() => ({ width: fraction.value * width.value }));
-  const offset = useDerivedValue(() => (mirrored ? -1 : 1) * fraction.value * width.value);
-  const thumbStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: offset.value },
-      { scale: interpolate(grow.value, [0, 1], [1, THUMB_SIZE_DRAGGING / THUMB_SIZE]) },
-    ],
-  }));
-  const bubbleStyle = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
+  const { trackStyle, fillStyle, thumbStyle, bubbleStyle } = useSliderStyles(grow, fraction, width, mirrored);
   const onAccessibilityAction = (event: AccessibilityActionEvent) => {
     const delta = event.nativeEvent.actionName === 'increment' ? ACCESSIBILITY_STEP : -ACCESSIBILITY_STEP;
     commit(clampUnit(value + delta));
@@ -105,6 +94,24 @@ export function Slider({
       </View>
     </GestureDetector>
   );
+}
+
+type SliderDrag = ReturnType<typeof useSliderDrag>;
+
+function useSliderStyles(grow: SliderDrag['grow'], fraction: SliderDrag['fraction'], width: SliderDrag['width'], mirrored: boolean) {
+  const trackStyle = useAnimatedStyle(() => ({
+    height: interpolate(grow.value, [0, 1], [TRACK_HEIGHT, TRACK_HEIGHT_DRAGGING]),
+  }));
+  const fillStyle = useAnimatedStyle(() => ({ width: fraction.value * width.value }));
+  const offset = useDerivedValue(() => (mirrored ? -1 : 1) * fraction.value * width.value);
+  const thumbStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: offset.value },
+      { scale: interpolate(grow.value, [0, 1], [1, THUMB_SIZE_DRAGGING / THUMB_SIZE]) },
+    ],
+  }));
+  const bubbleStyle = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
+  return { trackStyle, fillStyle, thumbStyle, bubbleStyle };
 }
 
 const styles = StyleSheet.create({

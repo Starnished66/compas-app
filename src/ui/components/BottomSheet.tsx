@@ -1,9 +1,9 @@
-import React, { ReactNode, useEffect, useRef, useState } from 'react';
+import React, { ReactNode } from 'react';
 import {
   Animated,
   KeyboardAvoidingView,
   Modal,
-  PanResponder,
+  type PanResponderInstance,
   Pressable,
   ScrollView,
   StyleProp,
@@ -13,7 +13,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { usePalette } from '../PaletteProvider';
-import { Distances, Durations, Easings, motionDuration } from '../motion';
+import { Distances } from '../motion';
 import { SnackbarHost } from '../snackbar/SnackbarHost';
 import { Radius, Space } from '../tokens';
 import { useReducedMotion } from '../useReducedMotion';
@@ -22,6 +22,7 @@ import { SheetHandle } from './SheetHandle';
 import { useScreenInsets } from '../useScreenInsets';
 import { insetBeyond } from '../insetBeyond';
 import { useI18n } from '../../i18n';
+import { useBottomSheetMotion } from './useBottomSheetMotion';
 
 export interface BottomSheetProps {
   visible: boolean;
@@ -57,102 +58,28 @@ export function BottomSheet({
   const reducedMotion = useReducedMotion();
   const insets = useScreenInsets();
   const { height: windowHeight } = useWindowDimensions();
-  const [mounted, setMounted] = useState(visible);
-  const progress = useRef(new Animated.Value(0)).current;
-  const scrim = useRef(new Animated.Value(0)).current;
-  const dragY = useRef(new Animated.Value(0)).current;
-  const swap = useRef(new Animated.Value(1)).current;
-  const sheetHeightRef = useRef(windowHeight);
-  const closingRef = useRef(false);
-  const previousContentKey = useRef(contentKey);
-  const scrollRef = useRef<ScrollView>(null);
-  const onCloseRef = useRef(onClose);
-  const onHiddenRef = useRef(onHidden);
-  onHiddenRef.current = onHidden;
-  onCloseRef.current = onClose;
-  const onBackPressRef = useRef(onBackPress);
-  onBackPressRef.current = onBackPress;
-  const reducedMotionRef = useRef(reducedMotion);
-  reducedMotionRef.current = reducedMotion;
+  const motion = useBottomSheetMotion({ visible, onClose, onHidden, onBackPress, contentKey, reducedMotion, windowHeight });
+  if (!motion.mounted) return null;
 
-  useEffect(() => {
-    const timing = (value: Animated.Value, toValue: number, duration: number, easing: (t: number) => number) =>
-      Animated.timing(value, { toValue, duration: motionDuration(reducedMotion, duration), easing, useNativeDriver: true });
-    if (visible) {
-      closingRef.current = false;
-      setMounted(true);
-      dragY.setValue(0);
-      Animated.parallel([
-        timing(progress, 1, Durations.sheetOpen, Easings.standard),
-        timing(scrim, 1, Durations.sheetScrim, Easings.standard),
-      ]).start();
-      return;
-    }
-    Animated.parallel([
-      timing(progress, 0, Durations.sheetClose, Easings.exit),
-      timing(scrim, 0, Durations.sheetScrim, Easings.exit),
-    ]).start(({ finished }) => {
-      if (!finished) return;
-      setMounted(false);
-      onHiddenRef.current?.();
-    });
-  }, [dragY, progress, reducedMotion, scrim, visible]);
+  return renderSheet({ visible, title, children, scrollable, fullHeight, contentStyle }, motion, windowHeight, insets, palette, t);
+}
 
-  useEffect(() => {
-    if (previousContentKey.current === contentKey) return;
-    previousContentKey.current = contentKey;
-    scrollRef.current?.scrollTo({ y: 0, animated: false });
-    if (reducedMotion) {
-      swap.setValue(1);
-      return;
-    }
-    swap.setValue(0);
-    Animated.timing(swap, {
-      toValue: 1,
-      duration: Durations.sheetContentSwap,
-      easing: Easings.standard,
-      useNativeDriver: true,
-    }).start();
-  }, [contentKey, reducedMotion, swap]);
+type SheetContent = Pick<BottomSheetProps, 'visible' | 'title' | 'children' | 'contentStyle'> & {
+  scrollable: boolean;
+  fullHeight: boolean;
+};
 
-  const requestClose = () => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    onCloseRef.current();
-  };
-  // A Modal swallows BackHandler, so back reaches the sheet only through onRequestClose.
-  const handleBackPress = () => {
-    if (onBackPressRef.current?.()) return;
-    requestClose();
-  };
-
-  const settleBack = () =>
-    Animated.timing(dragY, {
-      toValue: 0,
-      duration: motionDuration(reducedMotionRef.current, Durations.sheetSnapBack),
-      easing: Easings.standard,
-      useNativeDriver: true,
-    }).start();
-
-  const createDragResponder = (closeOnTap: boolean) =>
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > Math.abs(gesture.dx),
-      onPanResponderMove: (_, gesture) => dragY.setValue(Math.max(0, gesture.dy)),
-      onPanResponderRelease: (_, gesture) => {
-        const tapped = Math.abs(gesture.dx) < Distances.sheetTap && Math.abs(gesture.dy) < Distances.sheetTap;
-        if ((closeOnTap && tapped) || gesture.dy > Distances.sheetClose) {
-          requestClose();
-          return;
-        }
-        settleBack();
-      },
-      onPanResponderTerminate: () => settleBack(),
-    });
-  const handleResponder = useRef(createDragResponder(true)).current;
-  const titleResponder = useRef(createDragResponder(false)).current;
-
-  if (!mounted) return null;
+function renderSheet(
+  { visible, title, children, scrollable, fullHeight, contentStyle }: SheetContent,
+  motion: ReturnType<typeof useBottomSheetMotion>,
+  windowHeight: number,
+  insets: ReturnType<typeof useScreenInsets>,
+  palette: ReturnType<typeof usePalette>,
+  t: ReturnType<typeof useI18n>['t'],
+) {
+  const {
+    progress, sheetHeightRef, swap, scrim, dragY, requestClose, handleBackPress, handleResponder, titleResponder, scrollRef,
+  } = motion;
 
   const maxHeight = windowHeight - insets.top - TOP_GAP;
   const slide = progress.interpolate({ inputRange: [0, 1], outputRange: [sheetHeightRef.current, 0] });
@@ -193,36 +120,57 @@ export function BottomSheet({
             fullHeight && { height: maxHeight },
           ]}
         >
-          <View>
-            <SheetHandle
-              label={t('Drag down to close')}
-              onClose={requestClose}
-              dragHandlers={handleResponder.panHandlers}
-            />
-            {title ? (
-              <View {...titleResponder.panHandlers}>
-                <AppText variant="title" accessibilityRole="header" style={styles.title}>
-                  {title}
-                </AppText>
-              </View>
-            ) : null}
-          </View>
-          {scrollable ? (
-            <ScrollView
-              ref={scrollRef}
-              style={styles.scroll}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
-              {body}
-            </ScrollView>
-          ) : (
-            <View style={[styles.scroll, fillsSheet && styles.fill]}>{body}</View>
-          )}
+          {renderHeading(title, requestClose, handleResponder, titleResponder, t)}
+          {renderBody(body, scrollable, fillsSheet, scrollRef)}
         </Animated.View>
         <SnackbarHost bottomOffset={Space.lg + insetBeyond(insets.bottom, Space.lg)} active={visible} />
       </KeyboardAvoidingView>
     </Modal>
+  );
+}
+
+function renderHeading(
+  title: BottomSheetProps['title'],
+  requestClose: () => void,
+  handleResponder: PanResponderInstance,
+  titleResponder: PanResponderInstance,
+  t: ReturnType<typeof useI18n>['t'],
+) {
+  return (
+    <View>
+      <SheetHandle
+        label={t('Drag down to close')}
+        onClose={requestClose}
+        dragHandlers={handleResponder.panHandlers}
+      />
+      {title ? (
+        <View {...titleResponder.panHandlers}>
+          <AppText variant="title" accessibilityRole="header" style={styles.title}>
+            {title}
+          </AppText>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function renderBody(
+  body: ReactNode,
+  scrollable: boolean,
+  fillsSheet: boolean,
+  scrollRef: ReturnType<typeof useBottomSheetMotion>['scrollRef'],
+) {
+  return scrollable ? (
+    <ScrollView
+      ref={scrollRef}
+      style={styles.scroll}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
+      {body}
+    </ScrollView>
+  ) : (
+    <View style={[styles.scroll, fillsSheet && styles.fill]}>{body}</View>
   );
 }
 

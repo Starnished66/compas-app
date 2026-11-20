@@ -1,5 +1,6 @@
 import { RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  type SharedValue,
   useAnimatedReaction,
   useAnimatedScrollHandler,
   useDerivedValue,
@@ -81,6 +82,26 @@ export function useHomeScrollCollapse(options: HomeScrollCollapseOptions) {
     },
   });
 
+  const snapEvents = useHomeScrollSnap(latest, scrollY, dragging, snapTimer);
+
+  const offset = useCallback(() => scrollY.value, [scrollY]);
+
+  const settledStage = useCallback((): CollapseStage | null => {
+    if (stageRef.current !== 'expanded' && stageRef.current !== 'collapsed') return null;
+    // Layout events can reach JS before the stage update scheduled from the UI thread.
+    const stage = collapseStage(collapse.value);
+    return stage === 'expanded' || stage === 'collapsed' ? stage : null;
+  }, [collapse]);
+
+  return { collapse, compact, onScroll, snapEvents, offset, settledStage };
+}
+
+function useHomeScrollSnap(
+  latest: RefObject<HomeScrollCollapseOptions>,
+  scrollY: SharedValue<number>,
+  dragging: RefObject<boolean>,
+  snapTimer: RefObject<ReturnType<typeof setTimeout> | null>,
+) {
   const cancelSnap = useCallback(() => {
     if (snapTimer.current) clearTimeout(snapTimer.current);
     snapTimer.current = null;
@@ -114,14 +135,5 @@ export function useHomeScrollCollapse(options: HomeScrollCollapseOptions) {
     [cancelSnap, scheduleSnap],
   );
 
-  const offset = useCallback(() => scrollY.value, [scrollY]);
-
-  const settledStage = useCallback((): CollapseStage | null => {
-    if (stageRef.current !== 'expanded' && stageRef.current !== 'collapsed') return null;
-    // Layout events can reach JS before the stage update scheduled from the UI thread.
-    const stage = collapseStage(collapse.value);
-    return stage === 'expanded' || stage === 'collapsed' ? stage : null;
-  }, [collapse]);
-
-  return { collapse, compact, onScroll, snapEvents, offset, settledStage };
+  return snapEvents;
 }

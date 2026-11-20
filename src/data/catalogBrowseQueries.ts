@@ -23,6 +23,53 @@ export enum CatalogGroupKind {
 
 const SONG_COUNT_CACHE_LIMIT = 64;
 
+function catalogSongFromRow(r: any): CatalogSong {
+  return {
+    id: Number(r.id),
+    title: String(r.title || ''),
+    artist: String(r.artist || ''),
+    album: String(r.album || ''),
+    albumArtist: String(r.album_artist || ''),
+    genre: String(r.genre || ''),
+    trackNumber: r.track_number != null ? Number(r.track_number) : null,
+    discNumber: r.disc_number != null ? Number(r.disc_number) : null,
+    albumKey: r.album_key ? String(r.album_key) : null,
+    artists: [],
+  };
+}
+
+function groupQuery(kind: CatalogGroupKind, nameCol: string, groupCol: string, genreJoin: string, where: string): string {
+  return kind === CatalogGroupKind.Album
+        ? `SELECT MAX(catalog_songs.album) as name,
+                  COUNT(*) as count,
+                  MIN(catalog_songs.id) as idx,
+                  MAX(catalog_songs.album_artist) as album_artist,
+                  catalog_songs.album_key as album_key
+           FROM catalog_songs
+           WHERE ${where}
+           GROUP BY catalog_songs.album_key
+           ORDER BY MAX(catalog_songs.album) COLLATE NOCASE`
+        : `SELECT MIN(${nameCol}) as name,
+                  COUNT(DISTINCT catalog_songs.id) as count,
+                  MIN(catalog_songs.id) as idx,
+                  '' as album_artist,
+                  NULL as album_key
+           FROM catalog_songs ${genreJoin}
+           WHERE ${where}
+           GROUP BY ${groupCol} COLLATE NOCASE
+           ORDER BY MIN(${nameCol}) COLLATE NOCASE`;
+}
+
+function catalogGroupFromRow(r: any): CatalogGroup {
+  return {
+    name: String(r.name || ''),
+    count: Number(r.count || 0),
+    index: Number(r.idx || 0),
+    albumArtist: String(r.album_artist || ''),
+    albumKey: r.album_key ? String(r.album_key) : null,
+  };
+}
+
 export class CatalogBrowseQueries {
   // Filtered song totals per library/revision/filter; a published revision's rows never change.
   private songCounts = new Map<string, number>();
@@ -98,20 +145,7 @@ export class CatalogBrowseQueries {
       }
     }
 
-    const songs: CatalogSong[] = rows.map((r: any) => ({
-      id: Number(r.id),
-      title: String(r.title || ''),
-      artist: String(r.artist || ''),
-      album: String(r.album || ''),
-      albumArtist: String(r.album_artist || ''),
-      genre: String(r.genre || ''),
-      trackNumber: r.track_number != null ? Number(r.track_number) : null,
-      discNumber: r.disc_number != null ? Number(r.disc_number) : null,
-      albumKey: r.album_key ? String(r.album_key) : null,
-      artists: [],
-    }));
-
-    return { total, songs };
+    return { total, songs: rows.map(catalogSongFromRow) };
   }
 
   async groups(
@@ -166,35 +200,9 @@ export class CatalogBrowseQueries {
       args.push(query.trim());
     }
 
-    const sql =
-      kind === CatalogGroupKind.Album
-        ? `SELECT MAX(catalog_songs.album) as name,
-                  COUNT(*) as count,
-                  MIN(catalog_songs.id) as idx,
-                  MAX(catalog_songs.album_artist) as album_artist,
-                  catalog_songs.album_key as album_key
-           FROM catalog_songs
-           WHERE ${filter.join(' AND ')}
-           GROUP BY catalog_songs.album_key
-           ORDER BY MAX(catalog_songs.album) COLLATE NOCASE`
-        : `SELECT MIN(${nameCol}) as name,
-                  COUNT(DISTINCT catalog_songs.id) as count,
-                  MIN(catalog_songs.id) as idx,
-                  '' as album_artist,
-                  NULL as album_key
-           FROM catalog_songs ${genreJoin}
-           WHERE ${filter.join(' AND ')}
-           GROUP BY ${groupCol} COLLATE NOCASE
-           ORDER BY MIN(${nameCol}) COLLATE NOCASE`;
-
+    const sql = groupQuery(kind, nameCol, groupCol, genreJoin, filter.join(' AND '));
     const rows = await db.query(sql, args);
-    return rows.map((r: any) => ({
-      name: String(r.name || ''),
-      count: Number(r.count || 0),
-      index: Number(r.idx || 0),
-      albumArtist: String(r.album_artist || ''),
-      albumKey: r.album_key ? String(r.album_key) : null,
-    }));
+    return rows.map(catalogGroupFromRow);
   }
 
   private async artistGroups(

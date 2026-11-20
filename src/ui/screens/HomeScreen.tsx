@@ -34,14 +34,12 @@ const ESTIMATED_CARD_COLLAPSED = 94;
 const LOAD_MORE_DISTANCE = 480;
 const CONSOLE_LIFT = CONSOLE_TOP_COLLAPSED - Size.bar;
 
-export function HomeScreen({
-  state,
-  onAction,
-  onOpenNowPlaying,
-  onOpenSettings,
-  settingsOpen = false,
-  bottomInset = DEFAULT_BOTTOM_INSET,
-}: HomeScreenProps) {
+export function HomeScreen(props: HomeScreenProps) {
+  const controls = useHomeControls(props);
+  return renderHomeScreen(props, controls);
+}
+
+function useHomeControls({ state, onAction, onOpenNowPlaying, bottomInset = DEFAULT_BOTTOM_INSET }: HomeScreenProps) {
   const reducedMotion = useReducedMotion();
   const track = state.currentTrack;
   const reconnecting = isReconnecting(state);
@@ -74,17 +72,7 @@ export function HomeScreen({
     if (canOpenNowPlaying(state)) onOpenNowPlaying();
   };
 
-  const loadMoreNearEnd = ({ offset, viewport, content }: ScrollMetrics) => {
-    if (!viewport || offset + viewport < content - LOAD_MORE_DISTANCE) {
-      lastPageRequestRef.current = '';
-      return;
-    }
-    const key = `${state.queue.length}:${state.queueTotal}`;
-    if (state.queueHasMore && !state.queueLoadingMore && lastPageRequestRef.current !== key) {
-      lastPageRequestRef.current = key;
-      onAction({ type: 'LoadMoreQueue' });
-    }
-  };
+  const loadMoreNearEnd = createQueuePaging(state, onAction, lastPageRequestRef);
 
   const { collapse, compact, onScroll, snapEvents, offset, settledStage } = useHomeScrollCollapse({
     listRef: scrollRef,
@@ -101,7 +89,23 @@ export function HomeScreen({
     transform: [{ translateY: between(collapse.value, 0, CONSOLE_LIFT) }],
   }));
 
-  const onCardLayout = (event: LayoutChangeEvent) => {
+  const onCardLayout = createCardLayout(settledStage, setCardExpanded, setCardCollapsed);
+
+  return {
+    track, reconnecting, editing, formatVisible, setFormatVisible, viewportHeight, setViewportHeight, setUpNextHeight,
+    reordering, setReordering, scrollRef, metricsRef, listPad, collapseDistance, collapsible, toggleEditing, openNowPlaying,
+    loadMoreNearEnd, collapse, compact, onScroll, snapEvents, offset, consoleStyle, onCardLayout,
+  };
+}
+
+type HomeControls = ReturnType<typeof useHomeControls>;
+
+function createCardLayout(
+  settledStage: ReturnType<typeof useHomeScrollCollapse>['settledStage'],
+  setCardExpanded: React.Dispatch<React.SetStateAction<number>>,
+  setCardCollapsed: React.Dispatch<React.SetStateAction<number>>,
+) {
+  return (event: LayoutChangeEvent) => {
     const height = event.nativeEvent.layout.height;
     const stage = settledStage();
     if (stage === 'expanded') {
@@ -110,7 +114,25 @@ export function HomeScreen({
       setCardCollapsed((previous) => (Math.abs(previous - height) > 0.5 ? height : previous));
     }
   };
+}
 
+function createQueuePaging(state: RemoteUiState, onAction: HomeScreenProps['onAction'], lastPageRequestRef: React.RefObject<string>) {
+  return ({ offset, viewport, content }: ScrollMetrics) => {
+    if (!viewport || offset + viewport < content - LOAD_MORE_DISTANCE) {
+      lastPageRequestRef.current = '';
+      return;
+    }
+    const key = `${state.queue.length}:${state.queueTotal}`;
+    if (state.queueHasMore && !state.queueLoadingMore && lastPageRequestRef.current !== key) {
+      lastPageRequestRef.current = key;
+      onAction({ type: 'LoadMoreQueue' });
+    }
+  };
+
+}
+
+function renderHomeScreen({ state, onAction, onOpenSettings, settingsOpen = false, bottomInset = DEFAULT_BOTTOM_INSET }: HomeScreenProps, controls: HomeControls) {
+  const { track, collapse, compact, formatVisible, setFormatVisible } = controls;
   if (!track) {
     return (
       <HomeEmptyState
@@ -125,57 +147,11 @@ export function HomeScreen({
 
   return (
     <View style={styles.root}>
-      <UpNextList
-        ref={scrollRef}
-        state={state}
-        onAction={onAction}
-        editing={editing}
-        onToggleEditing={toggleEditing}
-        onReorderActiveChange={setReordering}
-        onCardHeightChange={setUpNextHeight}
-        scrollProps={{
-          onLayout: (event) => {
-            const viewport = event.nativeEvent.layout.height;
-            metricsRef.current = { ...metricsRef.current, viewport };
-            setViewportHeight(viewport);
-          },
-          onScroll,
-          scrollEventThrottle: 16,
-          scrollEnabled: !reordering,
-          ...snapEvents,
-          onContentSizeChange: (_, content) => {
-            metricsRef.current = { ...metricsRef.current, offset: offset(), content };
-            loadMoreNearEnd(metricsRef.current);
-          },
-          showsVerticalScrollIndicator: false,
-          contentContainerStyle: [
-            styles.content,
-            { paddingTop: listPad, paddingBottom: bottomInset },
-            collapsible && { minHeight: viewportHeight + collapseDistance },
-          ],
-        }}
-      />
+      {renderHomeQueue(state, onAction, bottomInset, controls)}
 
       <HomeTitleBar onOpenSettings={onOpenSettings} settingsOpen={settingsOpen} collapse={collapse} compact={compact} />
 
-      <Animated.View pointerEvents="box-none" style={[styles.console, consoleStyle]}>
-        {reconnecting ? (
-          <EnterView from="down">
-            <ReconnectBanner playerName={state.playerName} />
-          </EnterView>
-        ) : null}
-        <NowPlayingCard
-          state={state}
-          track={track}
-          onAction={onAction}
-          collapse={collapse}
-          compact={compact}
-          dimmed={reconnecting}
-          onOpenNowPlaying={openNowPlaying}
-          onOpenAudioFormat={() => setFormatVisible(true)}
-          onLayout={onCardLayout}
-        />
-      </Animated.View>
+      {renderHomeConsole(state, onAction, track, controls)}
 
       <AudioFormatSheet
         visible={formatVisible}
@@ -184,6 +160,69 @@ export function HomeScreen({
         onClose={() => setFormatVisible(false)}
       />
     </View>
+  );
+}
+
+function renderHomeConsole(
+  state: RemoteUiState, onAction: HomeScreenProps['onAction'], track: RemoteTrack, controls: HomeControls,
+) {
+  const { consoleStyle, reconnecting, collapse, compact, openNowPlaying, setFormatVisible, onCardLayout } = controls;
+  return (
+    <Animated.View pointerEvents="box-none" style={[styles.console, consoleStyle]}>
+      {reconnecting ? (
+        <EnterView from="down">
+          <ReconnectBanner playerName={state.playerName} />
+        </EnterView>
+      ) : null}
+      <NowPlayingCard
+        state={state}
+        track={track}
+        onAction={onAction}
+        collapse={collapse}
+        compact={compact}
+        dimmed={reconnecting}
+        onOpenNowPlaying={openNowPlaying}
+        onOpenAudioFormat={() => setFormatVisible(true)}
+        onLayout={onCardLayout}
+      />
+    </Animated.View>
+  );
+}
+
+function renderHomeQueue(state: RemoteUiState, onAction: HomeScreenProps['onAction'], bottomInset: number, controls: HomeControls) {
+  const { scrollRef, editing, toggleEditing, setReordering, setUpNextHeight, metricsRef, setViewportHeight, onScroll,
+    reordering, snapEvents, offset, loadMoreNearEnd, listPad, collapsible, viewportHeight, collapseDistance } = controls;
+  return (
+    <UpNextList
+      ref={scrollRef}
+      state={state}
+      onAction={onAction}
+      editing={editing}
+      onToggleEditing={toggleEditing}
+      onReorderActiveChange={setReordering}
+      onCardHeightChange={setUpNextHeight}
+      scrollProps={{
+        onLayout: (event) => {
+          const viewport = event.nativeEvent.layout.height;
+          metricsRef.current = { ...metricsRef.current, viewport };
+          setViewportHeight(viewport);
+        },
+        onScroll,
+        scrollEventThrottle: 16,
+        scrollEnabled: !reordering,
+        ...snapEvents,
+        onContentSizeChange: (_, content) => {
+          metricsRef.current = { ...metricsRef.current, offset: offset(), content };
+          loadMoreNearEnd(metricsRef.current);
+        },
+        showsVerticalScrollIndicator: false,
+        contentContainerStyle: [
+          styles.content,
+          { paddingTop: listPad, paddingBottom: bottomInset },
+          collapsible && { minHeight: viewportHeight + collapseDistance },
+        ],
+      }}
+    />
   );
 }
 

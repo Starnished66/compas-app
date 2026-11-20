@@ -26,15 +26,29 @@ function load(file, imports = {}) {
 
 const sortModes = load('src/data/librarySortModes.ts');
 const { librarySortOptions } = sortModes;
-const { RemoteApi } = load('src/data/RemoteApi.ts', {
-  './redirectGuard': {},
-  './cryptoUtils': {},
-  './dacMode': {},
-  './SettingsApi': {},
-  './PluginsApi': {},
-  './HttpTransport': {},
-  './librarySortModes': sortModes,
-});
+
+function loadRemoteApi(loadModule, librarySortModes = loadModule('src/data/librarySortModes.ts')) {
+  const protocol = loadModule('src/data/remoteApiProtocol.ts');
+  const { RemoteApi } = loadModule('src/data/RemoteApi.ts', {
+    './RemoteApiConnection': loadModule('src/data/RemoteApiConnection.ts', {
+      './SettingsApi': {}, './PluginsApi': {}, './HttpTransport': {}, './cryptoUtils': {},
+      './remoteApiProtocol': protocol,
+      './parsePlaybackStatus': loadModule('src/data/parsePlaybackStatus.ts', {
+        './remoteApiProtocol': protocol, './dacMode': {},
+      }),
+    }),
+    './remoteApiProtocol': protocol,
+    './WifiImportApi': loadModule('src/data/WifiImportApi.ts', { './remoteApiProtocol': protocol, './redirectGuard': {} }),
+    './LibrarySortingApi': loadModule('src/data/LibrarySortingApi.ts', {
+      './remoteApiProtocol': protocol, './librarySortModes': librarySortModes,
+    }),
+    './PlaylistApi': loadModule('src/data/PlaylistApi.ts', { './remoteApiProtocol': protocol }),
+    './CatalogApi': loadModule('src/data/CatalogApi.ts', { './remoteApiProtocol': protocol }),
+    './SongStateApi': loadModule('src/data/SongStateApi.ts', { './remoteApiProtocol': protocol }),
+  });
+  return RemoteApi;
+}
+
 const { isServerOrderedAlbumSort, requestLibrarySortChange } = load('src/session/librarySorting.ts', {
   '../data/librarySortModes': sortModes,
 });
@@ -171,6 +185,7 @@ async function checkPreflightGuards(api) {
 }
 
 async function main() {
+  const RemoteApi = loadRemoteApi(load, sortModes);
   const api = new RemoteApi({});
   await checkSnapshots(api);
   await checkInvalidSnapshots(api);
@@ -179,7 +194,11 @@ async function main() {
   console.log('Library sorting compatibility, capability rows, and direction confirmation passed');
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+module.exports = { loadRemoteApi };
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

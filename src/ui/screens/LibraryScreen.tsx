@@ -1,56 +1,32 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useI18n } from '../../i18n';
-import { localizedCountLabel } from '../localizedLabels';
+import React, { useEffect, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import {
   ConnectionStatus,
-  ContentStatus,
   LibraryCategory,
-  LibraryEntry,
   RemoteAction,
   RemoteUiState,
 } from '../../data/types';
 import { AlphabetRail } from '../components/AlphabetRail';
-import { CategoryChips } from '../components/CategoryChips';
-import { AlbumCollectionHeader } from '../components/AlbumCollectionHeader';
-import { CollectionPlayButtons } from '../components/CollectionPlayButtons';
 import { FlipGhostLayer } from '../components/FlipGhostLayer';
-import { InlineError } from '../components/InlineError';
 import { LibraryList } from '../components/LibraryList';
-import { useSongSwipe } from '../library/useSongSwipe';
-import { LibraryPlaceholder, LibraryPlaceholderProps } from '../components/LibraryPlaceholder';
-import { LibrarySyncCard } from '../components/LibrarySyncCard';
-import { LibraryToolbar } from '../components/LibraryToolbar';
+import { LibraryPlaceholderProps } from '../components/LibraryPlaceholder';
 import { PageTransition } from '../components/PageTransition';
-import { ScreenTitleBar } from '../components/ScreenTitleBar';
-import { SearchLauncher } from '../components/SearchLauncher';
-import { StickyFrostBar } from '../components/StickyFrostBar';
-import { useScrollToTopRequest } from '../chrome/useScrollToTopRequest';
 import { Space } from '../tokens';
-import { useReducedMotion } from '../useReducedMotion';
-import { useScreenInsets } from '../useScreenInsets';
 import { letterOfEntry, railLetters } from '../library/alphabetIndex';
-import { FlipContext, FlipMode, FlipRegistry } from '../library/flipRegistry';
-import { availableCategoryOptions, categoryNoun, favoritesLabels, isSortableCategory } from '../library/libraryCategories';
-import { LibraryEntryKind, opensCollection } from '../library/libraryEntryKind';
-import { LibraryItem, entryItems, nodeItem, withLetterHeaders } from '../library/libraryItems';
+import { FlipContext } from '../library/flipRegistry';
+import { categoryNoun, favoritesLabels, isSortableCategory } from '../library/libraryCategories';
+import { entryItems, withLetterHeaders } from '../library/libraryItems';
 import { isServerOrderedAlbumSort } from '../../session/librarySorting';
 import { inlineLibraryError, libraryStateMessage } from '../library/libraryStateMessage';
-import { playCollection } from '../library/collectionPlayback';
 import { isShuffleMode } from '../../session/playbackModes';
-import { useAlbumGrid } from '../library/useAlbumGrid';
-import { useCollectionTrail } from '../library/useCollectionTrail';
-import { useLibraryLevels } from '../library/useLibraryLevels';
-import { useLibraryListScroll } from '../library/useLibraryListScroll';
-import { useStuckHeader } from '../library/useStuckHeader';
 import { useTileItems } from '../library/useTileItems';
 import { useSortDirection } from '../library/useSortDirection';
-import { useBackInterceptor } from '../useBackInterceptor';
-import { useTabActive } from '../tabActivity';
 import { SearchScreen } from './SearchScreen';
-import { BulkSelectionBar } from '../components/BulkSelectionBar';
-import { useBulkSelection } from '../library/useBulkSelection';
 import { BulkActionsSheet } from '../sheets/BulkActionsSheet';
+import {
+  useLibrarySetup, useLibraryNavigation, useLibrarySelectionLifetime, type LibrarySetup, type LibraryNavigation,
+} from './useLibraryScreenNavigation';
+import { libraryRootHeader, libraryCollectionHeader, libraryListToolbar, NESTED_ALBUMS_TITLE } from './libraryHeaders';
 
 export interface LibraryScreenProps {
   state: RemoteUiState;
@@ -60,7 +36,6 @@ export interface LibraryScreenProps {
 }
 
 const ROOT_STICKY_HEADER_INDICES = [1];
-const NESTED_ALBUMS_TITLE = 'Albums';
 const RAIL_GUTTER = 32;
 const RAIL_ENTRY_INSET = RAIL_GUTTER - Space.xs;
 const RAIL_TOP = 176;
@@ -80,140 +55,17 @@ function emptyMessage(category: LibraryCategory, nested: boolean, supportedFeatu
 }
 
 export function LibraryScreen({ state, onAction, category, contentBottomInset = Space.lg }: LibraryScreenProps) {
-  const { t } = useI18n();
-  const songSwipe = useSongSwipe(onAction, state.connectionMessage, state.queueStatus, state.connectionStatus === ConnectionStatus.Connected);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const bulkSelection = useBulkSelection(selectedIds, onAction);
-  const bulkActionsOpen = bulkSelection.ids !== null;
-  const exitSelection = useCallback(() => { setSelectionMode(false); setSelectedIds(new Set()); }, []);
-  const tabActive = useTabActive();
-  useEffect(() => {
-    if (!tabActive) setSearchOpen(false);
-  }, [tabActive]);
-  const [ascending, setAscending] = useState(true);
-  const [grid, setGrid] = useState(true);
-  const [flipSerial, setFlipSerial] = useState(0);
-  const flipRegistry = useRef(new FlipRegistry()).current;
-  const reducedMotion = useReducedMotion();
-  const browseCategory = useRef(LibraryCategory.Albums);
-  if (category !== LibraryCategory.Search) browseCategory.current = category;
-  const { columns, tileWidth } = useAlbumGrid();
-  const nested = state.libraryIsNested;
-  const librarySorting = state.librarySorting;
-  const searchActive = (searchOpen || category === LibraryCategory.Search) && !nested;
-  const trail = useCollectionTrail(state.libraryEntries, nested);
-  const { rememberOpening } = trail;
-  const insets = useScreenInsets();
-  const chipsHeader = useStuckHeader();
-  const scroll = useLibraryListScroll(chipsHeader.trackOffset);
-  const { scrollToTop, restoreOffset } = scroll;
-  const levels = useLibraryLevels({
-    entries: state.libraryEntries,
-    nested,
-    rootKey: searchActive ? LibraryCategory.Search : category,
-    currentOffset: scroll.offset,
-    onEnterLevel: (offset) => (offset ? restoreOffset(offset) : scrollToTop()),
-  });
-  const { rememberPush } = levels;
+  const setup = useLibrarySetup(state, onAction, category);
+  useLibrarySelectionLifetime(setup, state);
+  const navigation = useLibraryNavigation(setup, onAction);
+  const projection = useLibraryProjection(state, category, setup);
+  const list = useLibraryItems({ state, onAction, category }, setup, navigation, projection);
+  return renderLibraryScreen({ state, onAction, contentBottomInset }, setup, navigation, list);
+}
 
-  // Entry IDs belong to the open collection: leaving it ends selection, while the next page (or a refresh of the
-  // same list) only drops IDs that are no longer listed.
-  const collectionKey = [
-    levels.transitionKey,
-    nested,
-    state.libraryNestedTitle ?? '',
-    trail.current?.entry.id ?? '',
-    searchActive ? state.libraryQuery : '',
-  ].join('|');
-  const selectionCollection = useRef(collectionKey);
-  useEffect(() => {
-    if (bulkActionsOpen) return;
-    if (selectionCollection.current !== collectionKey) {
-      selectionCollection.current = collectionKey;
-      exitSelection();
-      return;
-    }
-    if (!state.libraryEntries.length && state.libraryStatus === ContentStatus.Loading) return;
-    setSelectedIds((previous) => {
-      if (!previous.size) return previous;
-      const listed = new Set(state.libraryEntries.map((entry) => entry.id));
-      const kept = [...previous].filter((id) => listed.has(id));
-      return kept.length === previous.size ? previous : new Set(kept);
-    });
-  }, [collectionKey, state.libraryEntries, state.libraryStatus, bulkActionsOpen, exitSelection]);
-
-  useLayoutEffect(() => {
-    if (flipSerial) flipRegistry.play();
-  }, [flipRegistry, flipSerial]);
-
-  const flip = useCallback((mode: FlipMode, apply: () => void) => {
-    if (!reducedMotion) flipRegistry.begin(mode);
-    apply();
-    setFlipSerial((value) => value + 1);
-  }, [flipRegistry, reducedMotion]);
-
-  const openEntry = useCallback(
-    (entry: LibraryEntry, kind: LibraryEntryKind) => {
-      if (opensCollection(kind)) {
-        rememberOpening({ entry, kind });
-        rememberPush();
-      }
-      onAction({ type: 'SelectLibraryEntry', id: entry.id });
-    },
-    [onAction, rememberOpening, rememberPush],
-  );
-
-  const longPressEntry = useCallback(
-    (entry: LibraryEntry, kind: LibraryEntryKind) => {
-      if (['song', 'album', 'artist', 'genre', 'playlist'].includes(kind)) {
-        if (selectionMode) {
-          setSelectedIds((previous) => {
-            const next = new Set(previous);
-            if (next.has(entry.id)) next.delete(entry.id);
-            else next.add(entry.id);
-            return next;
-          });
-        } else {
-          setSelectedIds(new Set([entry.id]));
-          setSelectionMode(true);
-        }
-      }
-    },
-    [selectionMode],
-  );
-  const selectEntry = useCallback((entry: LibraryEntry, kind: LibraryEntryKind) => {
-    if (!['song', 'album', 'artist', 'genre', 'playlist'].includes(kind)) return;
-    setSelectedIds((previous) => {
-      const next = new Set(previous);
-      if (next.has(entry.id)) next.delete(entry.id);
-      else next.add(entry.id);
-      return next;
-    });
-  }, []);
-
-  const closeSearch = useCallback(() => {
-    setSearchOpen(false);
-    onAction({ type: 'SearchLibrary', query: '' });
-  }, [onAction]);
-  // Search must close like Cancel; letting Back reach navigateBack strands the results on a spinner.
-  useBackInterceptor(selectionMode || searchActive, () => {
-    if (selectionMode) exitSelection();
-    else closeSearch();
-  });
-
-  useScrollToTopRequest('library', () => {
-    if (nested) {
-      setSearchOpen(false);
-      onAction({ type: 'OpenLibrary', category: browseCategory.current });
-    } else if (searchActive) {
-      closeSearch();
-    } else {
-      scrollToTop(true);
-    }
-  });
-
+function useLibraryProjection(state: RemoteUiState, category: LibraryCategory, setup: LibrarySetup) {
+  const { nested, searchActive, ascending, setAscending, trail, grid, columns } = setup;
+  const { librarySorting } = state;
   const sortable = !nested && isSortableCategory(category);
   const serverOrderedAlbums = category === LibraryCategory.Albums && isServerOrderedAlbumSort(librarySorting?.albums);
   const localDirectionSort = sortable && (category !== LibraryCategory.Albums || !serverOrderedAlbums);
@@ -252,21 +104,77 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   }, [searchActive, showGrid, tiles, entries, category, nested, nestedTitle, albumDetail, lettered]);
   const rowLetters = useMemo(() => (lettered ? railLetters(rows) : []), [lettered, rows]);
 
+  return {
+    entries, step, artistDetail, albumDetail, albumEntries, nativeCollectionPlayback, nativeRootSongsPlayback,
+    nativeGenrePlayback, gridCapable, showGrid, lettered, nestedTitle, rows, rowLetters, localDirectionSort,
+  };
+}
+
+type LibraryProjection = ReturnType<typeof useLibraryProjection>;
+
+function useLibraryItems(
+  { state, onAction, category }: LibraryScreenProps,
+  setup: LibrarySetup,
+  { flip }: LibraryNavigation,
+  projection: LibraryProjection,
+) {
+  const { nested, searchActive, t, insets, chipsHeader, selectedIds, selectionMode, bulkSelection, exitSelection,
+    ascending, setAscending, setGrid, setSearchOpen } = setup;
+  const { entries, step, artistDetail, albumDetail, albumEntries, nativeCollectionPlayback, nativeRootSongsPlayback,
+    nativeGenrePlayback, gridCapable, showGrid, lettered, nestedTitle, rows, rowLetters, localDirectionSort } = projection;
   const noun = nested ? (artistDetail ? 'albums' : 'items') : categoryNoun(category, state.supportedFeatures);
   const connected = state.connectionStatus === ConnectionStatus.Connected;
   const shuffleActive = isShuffleMode(state.playbackMode);
   const railGutter = lettered && entries.length > 0 ? RAIL_GUTTER : undefined;
   const inlineError = inlineLibraryError(state);
-  const hasLoadedEntries = state.libraryEntries.length > 0;
-  const { connectionStatus, connectionMessage, libraryStatus, libraryCountLabel, collectionBusy, supportedFeatures } = state;
+  const { libraryCountLabel, collectionBusy, supportedFeatures } = state;
   const { onLeadingLayout, stuck: chipsStuck } = chipsHeader;
   const insetTop = insets.top;
   const selectedCount = selectedIds.size;
   const entryCount = entries.length;
 
+  const placeholder = useLibraryPlaceholder(state, onAction, category, noun, nested, t);
+
+  const headerItems = useMemo(() => {
+    if (searchActive) return [];
+    const items = nested
+      ? libraryCollectionHeader({
+        albumDetail, step, nestedTitle, artistDetail, nativeCollectionPlayback, nativeGenrePlayback,
+        albumEntries, libraryCountLabel, collectionBusy, shuffleActive, onAction, t,
+      })
+      : libraryRootHeader({
+        onLeadingLayout, setSearchOpen, chipsStuck, insetTop, supportedFeatures, category,
+        connected, railGutter, nativeRootSongsPlayback, collectionBusy, shuffleActive, onAction, t,
+      });
+    return items.concat(libraryListToolbar({
+      inlineError, placeholder, selectionMode, selectedCount, openBulk: bulkSelection.open, exitSelection,
+      albumDetail, entryCount, noun, ascending, localDirectionSort, showGrid, gridCapable,
+      flip, setAscending, setGrid, libraryCountLabel, railGutter, t,
+    }));
+  }, [
+    searchActive, nested, albumDetail, step, nestedTitle, t, onAction, artistDetail, nativeCollectionPlayback,
+    nativeGenrePlayback, nativeRootSongsPlayback, collectionBusy, shuffleActive, onLeadingLayout, chipsStuck, insetTop,
+    supportedFeatures, category, connected, railGutter, albumEntries, libraryCountLabel,
+    inlineError, placeholder, selectionMode, selectedCount, bulkSelection.open, exitSelection, entryCount, noun, ascending, localDirectionSort,
+    showGrid, gridCapable, flip,
+  ]);
+
+  return useProjectedItems(headerItems, rows, rowLetters, placeholder);
+}
+
+function useLibraryPlaceholder(
+  state: RemoteUiState,
+  onAction: LibraryScreenProps['onAction'],
+  category: LibraryCategory,
+  noun: string,
+  nested: boolean,
+  t: ReturnType<typeof useLibrarySetup>['t'],
+) {
+  const hasLoadedEntries = state.libraryEntries.length > 0;
+  const { supportedFeatures, connectionStatus, connectionMessage, libraryStatus, libraryCountLabel } = state;
   // Header nodes and the list data are memoized on the fields they show, so session updates that change none of
   // them (playback, queue, position) keep every list item identical and LibraryList skips the render.
-  const placeholder = useMemo(
+  return useMemo(
     () =>
       libraryStateMessage({
         translate: t,
@@ -278,122 +186,14 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
       }),
     [t, onAction, noun, category, nested, supportedFeatures, connectionStatus, connectionMessage, hasLoadedEntries, libraryStatus, libraryCountLabel],
   );
+}
 
-  const headerItems = useMemo(() => {
-    const items: LibraryItem[] = [];
-    if (searchActive) return items;
-    const playButtons = (
-      <CollectionPlayButtons
-        busy={collectionBusy}
-        onPlay={() => playCollection(onAction, [], false, shuffleActive, true)}
-        onShuffle={() => playCollection(onAction, [], true, shuffleActive, true)}
-      />
-    );
-    if (nested) {
-      items.push(
-        nodeItem(
-          'title',
-          <ScreenTitleBar
-            title={albumDetail ? undefined : step?.entry.title ?? (nestedTitle === 'Tracks' || nestedTitle === NESTED_ALBUMS_TITLE ? t(nestedTitle) : nestedTitle) ?? undefined}
-            onBack={() => onAction({ type: 'Back' })}
-          />,
-        ),
-      );
-      if ((artistDetail && nativeCollectionPlayback) || nativeGenrePlayback) {
-        items.push(nodeItem('collection-playback', <View style={styles.collectionActions}>{playButtons}</View>));
-      }
-    } else {
-      items.push(
-        nodeItem(
-          'heading',
-          <View onLayout={onLeadingLayout}>
-            <ScreenTitleBar title={t('Library')} />
-            <SearchLauncher label={t('Search artists, albums, songs')} onPress={() => setSearchOpen(true)} />
-          </View>,
-        ),
-        nodeItem(
-          'chips',
-          <StickyFrostBar extended={chipsStuck} extension={insetTop}>
-            <CategoryChips
-              options={availableCategoryOptions(supportedFeatures)}
-              value={category}
-              onChange={(value) => onAction({ type: 'OpenLibrary', category: value })}
-            />
-          </StickyFrostBar>,
-        ),
-      );
-      if (connected) {
-        items.push(
-          nodeItem(
-            'sync',
-            <LibrarySyncCard
-              insetRight={railGutter}
-              // Also checks the player's catalog: a failed sync retries, and changes made on the player come in.
-              onRefresh={() => {
-                onAction({ type: 'SyncLibrary' });
-                onAction({ type: 'RefreshLibrary', category });
-              }}
-            />,
-          ),
-        );
-      }
-      if (nativeRootSongsPlayback) {
-        items.push(nodeItem('collection-playback', <View style={styles.collectionActions}>{playButtons}</View>));
-      }
-    }
-
-    if (albumEntries && step) {
-      items.push(
-        nodeItem(
-          'album',
-          <AlbumCollectionHeader
-            album={step.entry}
-            entries={albumEntries}
-            countLabel={libraryCountLabel}
-            busy={collectionBusy}
-            shuffleActive={shuffleActive}
-            nativePlayback={nativeCollectionPlayback}
-            onAction={onAction}
-          />,
-        ),
-      );
-    }
-
-    if (inlineError) {
-      items.push(nodeItem('error', <InlineError message={inlineError} style={styles.inlineError} />));
-    }
-
-    if (placeholder) {
-      items.push(nodeItem('placeholder', <LibraryPlaceholder {...placeholder} />));
-    } else {
-      if (selectionMode) {
-        items.push(nodeItem('selection', <BulkSelectionBar count={selectedCount} onActions={bulkSelection.open} onCancel={exitSelection} />));
-      }
-      if (!albumDetail) {
-        items.push(
-          nodeItem(
-            'toolbar',
-            <LibraryToolbar
-              countLabel={localizedCountLabel(libraryCountLabel || `${entryCount} ${noun}`, t)}
-              ascending={ascending}
-              onToggleSort={localDirectionSort ? () => flip('sort', () => setAscending((value) => !value)) : undefined}
-              grid={showGrid}
-              onToggleGrid={gridCapable ? () => flip('view', () => setGrid((value) => !value)) : undefined}
-              insetRight={railGutter}
-            />,
-          ),
-        );
-      }
-    }
-    return items;
-  }, [
-    searchActive, nested, albumDetail, step, nestedTitle, t, onAction, artistDetail, nativeCollectionPlayback,
-    nativeGenrePlayback, nativeRootSongsPlayback, collectionBusy, shuffleActive, onLeadingLayout, chipsStuck, insetTop,
-    supportedFeatures, category, connected, railGutter, albumEntries, libraryCountLabel,
-    inlineError, placeholder, selectionMode, selectedCount, bulkSelection.open, exitSelection, entryCount, noun, ascending, localDirectionSort,
-    showGrid, gridCapable, flip,
-  ]);
-
+function useProjectedItems(
+  headerItems: ReturnType<typeof libraryRootHeader>,
+  rows: LibraryProjection['rows'],
+  rowLetters: LibraryProjection['rowLetters'],
+  placeholder: ReturnType<typeof libraryStateMessage>,
+) {
   const rowsStart = headerItems.length;
   const letters = useMemo(
     () => (placeholder ? [] : rowLetters.map((letter) => ({ ...letter, itemIndex: letter.itemIndex + rowsStart }))),
@@ -404,24 +204,24 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
     [placeholder, headerItems, rows],
   );
 
-  const page = (content: React.ReactNode, rail?: React.ReactNode) => (
-    <FlipContext.Provider value={flipRegistry}>
-      <View style={styles.screen}>
-        <PageTransition style={styles.screen} transitionKey={levels.transitionKey} kind={levels.kind}>
-          {content}
-          {rail}
-        </PageTransition>
-        <FlipGhostLayer />
-        <BulkActionsSheet
-          visible={bulkActionsOpen}
-          ids={bulkSelection.ids ?? []}
-          state={state}
-          onAction={onAction}
-          onClose={() => { bulkSelection.close(); exitSelection(); }}
-        />
-      </View>
-    </FlipContext.Provider>
-  );
+  return { letters, listItems };
+}
+
+type LibraryItems = ReturnType<typeof useLibraryItems>;
+
+function renderLibraryScreen(
+  { state, onAction, contentBottomInset }: Pick<LibraryScreenProps, 'state' | 'onAction'> & { contentBottomInset: number },
+  setup: LibrarySetup,
+  navigation: LibraryNavigation,
+  list: LibraryItems,
+) {
+  const { bulkSelection, exitSelection, searchActive, scroll, selectionMode, selectedIds,
+    songSwipe, tileWidth, nested } = setup;
+  const { openEntry, closeSearch, selectEntry, longPressEntry } = navigation;
+  const { letters, listItems } = list;
+  const { scrollToTop } = scroll;
+  const page = (content: React.ReactNode, rail?: React.ReactNode) =>
+    renderLibraryPage(content, rail, setup, state, onAction);
 
   if (searchActive) {
     return page(
@@ -442,11 +242,7 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
     );
   }
 
-  // The first letter goes to the very top, so the header (and its selection bar) isn't left under the chips.
-  const jumpToItem = (index: number) =>
-    index <= (letters[0]?.itemIndex ?? 0)
-      ? scrollToTop(false)
-      : scroll.listRef.current?.scrollToIndex({ index, animated: false, viewOffset: STICKY_CHIPS_OFFSET });
+  const jumpToItem = libraryLetterJump(letters, scroll, scrollToTop);
 
   return page(
     <LibraryList
@@ -473,13 +269,42 @@ export function LibraryScreen({ state, onAction, category, contentBottomInset = 
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
-  collectionActions: { flexDirection: 'row', gap: Space.md, paddingHorizontal: Space.lg, paddingVertical: Space.sm },
-  inlineError: {
-    paddingHorizontal: Space.lg,
-    paddingTop: Space.md,
-  },
-});
+function libraryLetterJump(
+  letters: LibraryItems['letters'], scroll: LibrarySetup['scroll'], scrollToTop: LibrarySetup['scroll']['scrollToTop'],
+) {
+  // The first letter goes to the very top, so the header (and its selection bar) isn't left under the chips.
+  return (index: number) =>
+    index <= (letters[0]?.itemIndex ?? 0)
+      ? scrollToTop(false)
+      : scroll.listRef.current?.scrollToIndex({ index, animated: false, viewOffset: STICKY_CHIPS_OFFSET });
+}
+
+function renderLibraryPage(
+  content: React.ReactNode,
+  rail: React.ReactNode,
+  setup: LibrarySetup,
+  state: RemoteUiState,
+  onAction: LibraryScreenProps['onAction'],
+) {
+  const { flipRegistry, levels, bulkActionsOpen, bulkSelection, exitSelection } = setup;
+  return (
+    <FlipContext.Provider value={flipRegistry}>
+      <View style={styles.screen}>
+        <PageTransition style={styles.screen} transitionKey={levels.transitionKey} kind={levels.kind}>
+          {content}
+          {rail}
+        </PageTransition>
+        <FlipGhostLayer />
+        <BulkActionsSheet
+          visible={bulkActionsOpen}
+          ids={bulkSelection.ids ?? []}
+          state={state}
+          onAction={onAction}
+          onClose={() => { bulkSelection.close(); exitSelection(); }}
+        />
+      </View>
+    </FlipContext.Provider>
+  );
+}
+
+const styles = StyleSheet.create({ screen: { flex: 1 } });

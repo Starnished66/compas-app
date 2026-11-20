@@ -1,6 +1,6 @@
-import React, { Ref, memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { FlashList, ListRenderItem } from '@shopify/flash-list';
+import type { ListRenderItem } from '@shopify/flash-list';
 import { BulkActionProgress, ContentStatus, PlaybackMode, RemoteAction, RemoteTrack, RemoteUiState } from '../../data/types';
 import { AppText } from '../components/AppText';
 import { BottomSheet } from '../components/BottomSheet';
@@ -9,23 +9,19 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { IconButton } from '../components/IconButton';
 import { InlineError } from '../components/InlineError';
 import { QueueNowPlayingCard } from '../components/QueueNowPlayingCard';
-import { useDisplayTrack } from '../useDisplayTrack';
-import { DragHandle } from '../components/DragHandle';
-import { DragReorderCell } from '../components/DragReorderCell';
-import { DragReorderCellContext } from '../components/dragReorderCellContext';
-import { RemovableRow, RemovableRowHandle } from '../components/RemovableRow';
+import type { RemovableRowHandle } from '../components/RemovableRow';
 import { SectionHeader } from '../components/SectionHeader';
-import { Spinner } from '../components/Spinner';
-import { TrackRow } from '../components/TrackRow';
-import { Icon } from '../components/Icon';
+import { useDisplayTrack } from '../useDisplayTrack';
 import { usePalette } from '../PaletteProvider';
 import { Durations } from '../motion';
 import { useSnackbar } from '../snackbar/useSnackbar';
 import { Space } from '../tokens';
-import { DragHandleProps, useDragReorder } from '../useDragReorder';
+import { useDragReorder } from '../useDragReorder';
 import { useQueueReorder } from '../useQueueReorder';
-import { VisibleQueueArtworkContext, useQueueArtworkViewability, useQueueRowArtwork } from '../useQueueArtworkViewability';
+import { useQueueArtworkViewability } from '../useQueueArtworkViewability';
 import { useOptimisticErrorSnackbar } from './useOptimisticErrorSnackbar';
+import { useQueueRemovalProgress, useQueueSelectionActions, useQueueSelectionState } from './useQueueSelection';
+import { QUEUE_ROW_HEIGHT, QueueRow, renderQueueTrackList } from './QueueTrackList';
 import { useI18n } from '../../i18n';
 import { isShuffleMode } from '../../session/playbackModes';
 
@@ -43,11 +39,7 @@ export interface QueueSheetProps {
   onClose: () => void;
 }
 
-const QUEUE_ROW_ARTWORK = 40;
 const MODE_ICON_SIZE = 18;
-const END_REACHED_THRESHOLD = 0.5;
-const QUEUE_ROW_HEIGHT = 56;
-const NO_POSITION_KEEPING = { disabled: true };
 
 let removeHintShown = false;
 
@@ -57,109 +49,67 @@ function repeatLabel(mode: PlaybackMode): string {
   return 'Repeat off';
 }
 
-function keyOf(track: RemoteTrack): string {
-  return track.id;
-}
-
-function trackSubtitle(track: RemoteTrack, t: (source: string) => string): string {
-  const artist = track.artist || t('Unknown artist');
-  return track.duration ? `${artist} · ${track.duration}` : artist;
-}
-
-interface QueueRowProps {
-  track: RemoteTrack;
-  selecting: boolean;
-  selected: boolean;
-  lifted: boolean;
-  removable: boolean;
-  dragHandle?: DragHandleProps;
-  rowRef?: Ref<RemovableRowHandle>;
-  onPlay: (track: RemoteTrack) => void;
-  onToggleSelected: (track: RemoteTrack) => void;
-  onBeginSelecting: (track: RemoteTrack) => void;
-  onRemove: (track: RemoteTrack) => void;
-}
-
-// Memoized so selection, drag and page loads re-render only the rows whose own props changed.
-const QueueRow = memo(function QueueRow({
-  track,
-  selecting,
-  selected,
-  lifted,
-  removable,
-  dragHandle,
-  rowRef,
-  onPlay,
-  onToggleSelected,
-  onBeginSelecting,
-  onRemove,
-}: QueueRowProps) {
-  const { t } = useI18n();
-  const palette = usePalette();
-  const title = track.title || t('Unknown song');
-  const subtitle = trackSubtitle(track, t);
-  const artworkUri = useQueueRowArtwork(track);
-  if (selecting) {
-    return (
-      <TrackRow
-        title={title}
-        subtitle={subtitle}
-        artworkUri={artworkUri}
-        artworkSize={QUEUE_ROW_ARTWORK}
-        selected={selected}
-        onPress={() => onToggleSelected(track)}
-        onLongPress={() => onToggleSelected(track)}
-        accessory={<Icon name={selected ? 'check' : 'selectionCircle'} color={selected ? palette.accent : palette.inkMuted} />}
-      />
-    );
-  }
-  const play = () => onPlay(track);
-  return (
-    <RemovableRow
-      ref={rowRef}
-      rowHeight={QUEUE_ROW_HEIGHT}
-      swipeToRemove={removable}
-      accessibilityLabel={`${track.title}, ${subtitle}`}
-      removeLabel={t('Remove')}
-      onRemove={() => onRemove(track)}
-      onTap={play}
-      contentBackground={lifted ? palette.surfaceRaised : undefined}
-    >
-      <TrackRow
-        title={title}
-        subtitle={subtitle}
-        artworkUri={artworkUri}
-        artworkSize={QUEUE_ROW_ARTWORK}
-        onPress={play}
-        onLongPress={() => onBeginSelecting(track)}
-        accessory={dragHandle ? <DragHandle handle={dragHandle} /> : undefined}
-      />
-    </RemovableRow>
-  );
-});
-
 export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProps) {
   const { t } = useI18n();
   const palette = usePalette();
   const snackbar = useSnackbar();
-  const [confirmingClear, setConfirmingClear] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [dismissedBulkStatus, setDismissedBulkStatus] = useState(false);
-  const selecting = selectedIds.size > 0;
-  useEffect(() => { if (!visible) setSelectedIds(new Set()); }, [visible]);
+  const selection = useQueueSelectionState(visible);
+  const { confirmingClear, setConfirmingClear, selectedIds, selecting, dismissedBulkStatus, setDismissedBulkStatus } = selection;
   const lastPageRequest = useRef('');
   const firstRow = useRef<RemovableRowHandle | null>(null);
   const nowPlaying = useDisplayTrack(state.currentTrack, state.dacMode, state.isPlaying);
   const canEditQueue = state.supportedFeatures.includes('queue_edit');
-  const { queueRemovalProgress, queueBusy } = state;
-  const queueRemovalRunning = queueRemovalProgress?.phase === 'writing';
-  const queueRemovalFinished = queueRemovalProgress && !queueRemovalRunning && !dismissedBulkStatus;
-  useEffect(() => { if (queueRemovalRunning) setDismissedBulkStatus(false); }, [queueRemovalRunning]);
+  const progress = useQueueRemovalProgress(state, dismissedBulkStatus, setDismissedBulkStatus);
+  const { queueBusy } = progress;
+  const { rows, artwork, drag, hasRows } = useQueueList({
+    state, onAction, visible, canEditQueue, selecting, firstRow, snackbar, t,
+  });
+  const queueCount = Math.max(state.queueTotal, state.queue.length);
+  const loadMore = useQueuePagination(state, onAction, lastPageRequest);
+  const trackActions = useQueueTrackActions(state, onAction, snackbar, t, canEditQueue, queueBusy);
+  const selectionActions = useQueueSelectionActions(selection, progress, onAction, onClose);
+  const renderTrack = useQueueTrackRenderer({ selection, selectionActions, trackActions, drag, firstRow, canEditQueue, queueBusy });
+  const { removeSelected, cancelSelection, close, confirmClear, handleBackPress } = selectionActions;
+
+  return (
+    <BottomSheet visible={visible} onClose={close} onBackPress={handleBackPress} fullHeight scrollable={false}>
+      {renderQueueHeader({
+        onAction, playbackMode: state.playbackMode, queueCount, queueBusy, canEditQueue,
+        selectedCount: selectedIds.size, removeSelected, cancelSelection, openClear: () => setConfirmingClear(true), t,
+      })}
+      {renderQueueStatus({ state, onAction, progress, nowPlaying, hasRows, canEditQueue, setDismissedBulkStatus, t })}
+      {renderQueueTrackList({ state, rows, drag, artwork, renderTrack, loadMore, palette, t })}
+      <ConfirmDialog
+        visible={confirmingClear}
+        title={t('Clear the queue?')}
+        message={t('This removes all {count} songs from the queue on the player.', { count: queueCount })}
+        confirmLabel={t('Clear queue')}
+        destructive
+        onConfirm={confirmClear}
+        onClose={() => setConfirmingClear(false)}
+      />
+    </BottomSheet>
+  );
+}
+
+interface QueueListOptions {
+  state: QueuePlaybackState;
+  onAction: QueueSheetProps['onAction'];
+  visible: boolean;
+  canEditQueue: boolean;
+  selecting: boolean;
+  firstRow: React.RefObject<RemovableRowHandle | null>;
+  snackbar: ReturnType<typeof useSnackbar>;
+  t: ReturnType<typeof useI18n>['t'];
+}
+
+function useQueueList({ state, onAction, visible, canEditQueue, selecting, firstRow, snackbar, t }: QueueListOptions) {
+  const { queueBusy } = state;
   const reorder = useQueueReorder(state.queue, onAction, ({ track, from, to }) =>
     snackbar.show({ text: t('Moved “{title}”', { title: track.title }), actionLabel: t('Undo'), onAction: () => reorder.move(to, from) }),
   );
   const rows = reorder.queue;
-  const { onViewableItemsChanged, visibleArtwork } = useQueueArtworkViewability(rows, onAction, visible);
+  const artwork = useQueueArtworkViewability(rows, onAction, visible);
   const drag = useDragReorder({
     itemCount: rows.length,
     rowHeight: QUEUE_ROW_HEIGHT,
@@ -177,10 +127,10 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
     }, Durations.peekDelay);
     return () => clearTimeout(timer);
   }, [visible, hasRows, canEditQueue]);
-  const queueCount = Math.max(state.queueTotal, state.queue.length);
-  const shuffleOn = isShuffleMode(state.playbackMode);
-  const repeatOn = state.playbackMode === PlaybackMode.RepeatAll || state.playbackMode === PlaybackMode.RepeatOne || state.playbackMode === PlaybackMode.ShuffleRepeat;
+  return { rows, artwork, drag, hasRows };
+}
 
+function useQueuePagination(state: QueuePlaybackState, onAction: QueueSheetProps['onAction'], lastPageRequest: React.RefObject<string>) {
   // A refresh restarts the list at its first page, so the same length:total key must be requestable again.
   useEffect(() => {
     if (state.queueStatus === ContentStatus.Loading) lastPageRequest.current = '';
@@ -193,17 +143,13 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
     onAction({ type: 'LoadMoreQueue' });
   };
 
-  const confirmClear = () => {
-    setConfirmingClear(false);
-    if (queueBusy) return;
-    onAction({ type: 'ClearQueue' });
-    onClose();
-  };
-  const close = () => {
-    if (queueRemovalRunning) onAction({ type: 'CancelBulkAction' });
-    onClose();
-  };
+  return loadMore;
+}
 
+function useQueueTrackActions(
+  state: QueuePlaybackState, onAction: QueueSheetProps['onAction'], snackbar: ReturnType<typeof useSnackbar>,
+  t: ReturnType<typeof useI18n>['t'], canEditQueue: boolean, queueBusy: boolean,
+) {
   const watchResult = useOptimisticErrorSnackbar(state.connectionMessage, state.queueStatus);
   const latest = useRef({ onAction, snackbar, t, canEditQueue, queueBusy, watchResult });
   latest.current = { onAction, snackbar, t, canEditQueue, queueBusy, watchResult };
@@ -234,21 +180,23 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
     current.onAction({ type: 'PlayQueueTrack', id: track.id });
   }, []);
 
-  const toggleSelected = useCallback((track: RemoteTrack) => {
-    setSelectedIds((previous) => {
-      const next = new Set(previous);
-      if (next.has(track.id)) next.delete(track.id);
-      else next.add(track.id);
-      return next;
-    });
-  }, []);
-  const beginSelecting = useCallback((track: RemoteTrack) => setSelectedIds((previous) => new Set(previous).add(track.id)), []);
-  const removeSelected = () => {
-    if (!selectedIds.size || queueBusy) return;
-    onAction({ type: 'RemoveQueueTracks', ids: [...selectedIds] });
-    setSelectedIds(new Set());
-  };
+  return { removeTrack, playTrack };
+}
 
+interface QueueTrackRendererOptions {
+  selection: ReturnType<typeof useQueueSelectionState>;
+  selectionActions: ReturnType<typeof useQueueSelectionActions>;
+  trackActions: ReturnType<typeof useQueueTrackActions>;
+  drag: ReturnType<typeof useDragReorder>;
+  firstRow: QueueListOptions['firstRow'];
+  canEditQueue: boolean;
+  queueBusy: boolean;
+}
+
+function useQueueTrackRenderer({ selection, selectionActions, trackActions, drag, firstRow, canEditQueue, queueBusy }: QueueTrackRendererOptions) {
+  const { selecting, selectedIds } = selection;
+  const { toggleSelected, beginSelecting } = selectionActions;
+  const { playTrack, removeTrack } = trackActions;
   const { draggingIndex, handleProps } = drag;
   const renderTrack: ListRenderItem<RemoteTrack> = useCallback(({ item, index }) => (
     <QueueRow
@@ -266,91 +214,87 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
     />
   ), [queueBusy, canEditQueue, draggingIndex, handleProps, playTrack, removeTrack, selecting, selectedIds, toggleSelected, beginSelecting]);
 
-  const emptyState =
-    state.queueStatus === ContentStatus.Loading ? (
-      <View style={styles.message}>
-        <Spinner />
-        <AppText tone="inkMuted">{t('Loading queue…')}</AppText>
-      </View>
-    ) : state.queueStatus === ContentStatus.Error ? (
-      <View style={styles.message}>
-        <AppText tone="inkMuted" style={styles.centered}>
-          {t('Couldn’t load the queue.')}
-        </AppText>
-      </View>
-    ) : (
-      <View style={styles.message}>
-        <AppText tone="inkMuted" style={styles.centered}>
-          {t('Nothing else is queued. Add songs from their menu in the Library.')}
-        </AppText>
-      </View>
-    );
+  return renderTrack;
+}
 
-  const footer = state.queueLoadingMore ? (
-    <View style={styles.footer}>
-      <Spinner />
-    </View>
-  ) : hasRows && !state.queueHasMore ? (
-    <AppText variant="caption" tone="inkMuted" style={[styles.footer, styles.centered]}>
-      {t('End of queue')}
-    </AppText>
-  ) : null;
+interface QueueHeaderOptions {
+  onAction: QueueSheetProps['onAction'];
+  playbackMode: PlaybackMode;
+  queueCount: number;
+  queueBusy: boolean;
+  canEditQueue: boolean;
+  selectedCount: number;
+  removeSelected: () => void;
+  cancelSelection: () => void;
+  openClear: () => void;
+  t: ReturnType<typeof useI18n>['t'];
+}
 
+function renderQueueHeader({ onAction, playbackMode, queueCount, queueBusy, canEditQueue, selectedCount, removeSelected, cancelSelection, openClear, t }: QueueHeaderOptions) {
+  const shuffleOn = isShuffleMode(playbackMode);
+  const repeatOn = playbackMode === PlaybackMode.RepeatAll || playbackMode === PlaybackMode.RepeatOne || playbackMode === PlaybackMode.ShuffleRepeat;
   return (
-    <BottomSheet
-      visible={visible}
-      onClose={close}
-      onBackPress={() => {
-        if (!selecting) return false;
-        setSelectedIds(new Set());
-        return true;
-      }}
-      fullHeight
-      scrollable={false}
-    >
-      <View style={styles.header}>
-        <View style={styles.headerTitles}>
-          <AppText variant="title" accessibilityRole="header">
-            {t('Queue')}
-          </AppText>
-          <AppText variant="caption" tone="inkMuted" tabular>
-            {t('{count} songs up next', { count: queueCount })}
-          </AppText>
-        </View>
-        <IconButton
-          icon="shuffle"
-          label={t('Shuffle')}
-          size="sm"
-          iconSize={MODE_ICON_SIZE}
-          active={shuffleOn}
-          onPress={() => onAction({ type: 'ToggleShuffle' })}
-          disabled={queueBusy}
-        />
-        <IconButton
-          icon={state.playbackMode === PlaybackMode.RepeatOne ? 'repeatOne' : 'repeat'}
-          label={t(repeatLabel(state.playbackMode))}
-          size="sm"
-          iconSize={MODE_ICON_SIZE}
-          active={repeatOn}
-          onPress={() => onAction({ type: 'CycleRepeatMode' })}
-          disabled={queueBusy}
-        />
-        {selecting ? (
-          <>
-            <AppText variant="caption" tone="inkMuted">{t('{count} selected', { count: selectedIds.size })}</AppText>
-            <Button label={t('Remove')} variant="destructive" disabled={!canEditQueue || queueBusy} onPress={removeSelected} />
-            <Button label={t('Cancel')} variant="plain" onPress={() => setSelectedIds(new Set())} />
-          </>
-        ) : (
-          <Button
-            label={t('Clear')}
-            variant="plain"
-            accessibilityLabel={t('Clear queue')}
-            disabled={queueCount === 0 || queueBusy}
-            onPress={() => setConfirmingClear(true)}
-          />
-        )}
+    <View style={styles.header}>
+      <View style={styles.headerTitles}>
+        <AppText variant="title" accessibilityRole="header">
+          {t('Queue')}
+        </AppText>
+        <AppText variant="caption" tone="inkMuted" tabular>
+          {t('{count} songs up next', { count: queueCount })}
+        </AppText>
       </View>
+      <IconButton
+        icon="shuffle"
+        label={t('Shuffle')}
+        size="sm"
+        iconSize={MODE_ICON_SIZE}
+        active={shuffleOn}
+        onPress={() => onAction({ type: 'ToggleShuffle' })}
+        disabled={queueBusy}
+      />
+      <IconButton
+        icon={playbackMode === PlaybackMode.RepeatOne ? 'repeatOne' : 'repeat'}
+        label={t(repeatLabel(playbackMode))}
+        size="sm"
+        iconSize={MODE_ICON_SIZE}
+        active={repeatOn}
+        onPress={() => onAction({ type: 'CycleRepeatMode' })}
+        disabled={queueBusy}
+      />
+      {selectedCount > 0 ? (
+        <>
+          <AppText variant="caption" tone="inkMuted">{t('{count} selected', { count: selectedCount })}</AppText>
+          <Button label={t('Remove')} variant="destructive" disabled={!canEditQueue || queueBusy} onPress={removeSelected} />
+          <Button label={t('Cancel')} variant="plain" onPress={cancelSelection} />
+        </>
+      ) : (
+        <Button
+          label={t('Clear')}
+          variant="plain"
+          accessibilityLabel={t('Clear queue')}
+          disabled={queueCount === 0 || queueBusy}
+          onPress={openClear}
+        />
+      )}
+    </View>
+  );
+}
+
+interface QueueStatusOptions {
+  state: QueuePlaybackState;
+  onAction: QueueSheetProps['onAction'];
+  progress: ReturnType<typeof useQueueRemovalProgress>;
+  nowPlaying: ReturnType<typeof useDisplayTrack>;
+  canEditQueue: boolean;
+  hasRows: boolean;
+  setDismissedBulkStatus: ReturnType<typeof useQueueSelectionState>['setDismissedBulkStatus'];
+  t: ReturnType<typeof useI18n>['t'];
+}
+
+function renderQueueStatus({ state, onAction, progress, nowPlaying, hasRows, canEditQueue, setDismissedBulkStatus, t }: QueueStatusOptions) {
+  const { queueRemovalRunning, queueRemovalFinished, queueRemovalProgress } = progress;
+  return (
+    <>
       {queueRemovalRunning ? <View style={styles.progress}><AppText>{t('{completed} of {total} processed', { completed: queueRemovalProgress?.completed ?? 0, total: queueRemovalProgress?.total ?? 0 })}</AppText><Button label={t('Stop')} variant="plain" onPress={() => onAction({ type: 'CancelBulkAction' })} /></View> : null}
       {queueRemovalFinished ? <View style={styles.progress}><AppText>{queueRemovalProgress?.message ? t(queueRemovalProgress.message, queueRemovalProgress.messageValues) : null}</AppText><Button label={t('Done')} variant="plain" onPress={() => setDismissedBulkStatus(true)} /></View> : null}
       {nowPlaying ? (
@@ -369,39 +313,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
         caption={hasRows && canEditQueue ? t('Drag ≡ to reorder · swipe left to remove') : undefined}
         style={styles.sectionHeader}
       />
-      <VisibleQueueArtworkContext.Provider value={visibleArtwork}>
-        <DragReorderCellContext.Provider value={drag.rowStyle}>
-          {/* Recycles row views; mounting fresh rows was most of the main-thread cost while flinging. */}
-          <FlashList
-            data={rows}
-            // FlashList keeps a cell's rendered row when only its index changes; rows bind drag handles
-            // by index, so a reorder must re-render them or a handle drags the song that used to be there.
-            extraData={rows}
-            maintainVisibleContentPosition={NO_POSITION_KEEPING}
-            CellRendererComponent={DragReorderCell}
-            scrollEnabled={drag.scrollEnabled}
-            keyExtractor={keyOf}
-            renderItem={renderTrack}
-            onViewableItemsChanged={onViewableItemsChanged}
-            ListEmptyComponent={emptyState}
-            ListFooterComponent={footer}
-            onEndReached={loadMore}
-            onEndReachedThreshold={END_REACHED_THRESHOLD}
-            showsVerticalScrollIndicator={false}
-            style={StyleSheet.flatten([styles.list, { backgroundColor: palette.surface }])}
-          />
-        </DragReorderCellContext.Provider>
-      </VisibleQueueArtworkContext.Provider>
-      <ConfirmDialog
-        visible={confirmingClear}
-        title={t('Clear the queue?')}
-        message={t('This removes all {count} songs from the queue on the player.', { count: queueCount })}
-        confirmLabel={t('Clear queue')}
-        destructive
-        onConfirm={confirmClear}
-        onClose={() => setConfirmingClear(false)}
-      />
-    </BottomSheet>
+    </>
   );
 }
 
@@ -429,21 +341,5 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     paddingRight: Space.lg,
-  },
-  list: {
-    flex: 1,
-  },
-  message: {
-    alignItems: 'center',
-    gap: Space.md,
-    paddingVertical: Space.xl + Space.sm,
-    paddingHorizontal: Space.xl,
-  },
-  centered: {
-    textAlign: 'center',
-  },
-  footer: {
-    padding: Space.lg,
-    alignItems: 'center',
   },
 });

@@ -216,6 +216,29 @@ export function isFirmwareReleaseNewer(installed: string | null | undefined, rel
   return compareApplicationVersions(installed.trim(), release) === -1;
 }
 
+async function readApplicationManifestBody(response: Response, timeoutRequest: Promise<never>): Promise<string> {
+  if (response.body?.getReader) {
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await Promise.race([reader.read(), timeoutRequest]);
+      if (done) break;
+      total += value.byteLength;
+      if (total > 16 * 1024) { await reader.cancel(); throw new Error('Application update manifest is too large'); }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return new TextDecoder().decode(bytes);
+  } else {
+    const text = await Promise.race([response.text(), timeoutRequest]);
+    if (new TextEncoder().encode(text).byteLength > 16 * 1024) throw new Error('Application update manifest is too large');
+    return text;
+  }
+}
+
 /** Read a bounded release manifest and accept only the canonical GitHub asset URL. */
 export async function fetchApplicationUpdateNotice(
   config: Readonly<ApplicationUpdateConfig> = APPLICATION_UPDATE_CONFIG,
@@ -241,25 +264,7 @@ export async function fetchApplicationUpdateNotice(
       if (status !== 404 && !response.ok) throw new Error(`Application update check failed with HTTP status ${status}`);
       const declaredLength = Number(response.headers.get('content-length'));
       if (Number.isFinite(declaredLength) && declaredLength > 16 * 1024) throw new Error('Application update manifest is too large');
-      if (response.body?.getReader) {
-        const reader = response.body.getReader();
-        const chunks: Uint8Array[] = [];
-        let total = 0;
-        while (true) {
-          const { done, value } = await Promise.race([reader.read(), timeoutRequest]);
-          if (done) break;
-          total += value.byteLength;
-          if (total > 16 * 1024) { await reader.cancel(); throw new Error('Application update manifest is too large'); }
-          chunks.push(value);
-        }
-        const bytes = new Uint8Array(total);
-        let offset = 0;
-        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-        text = new TextDecoder().decode(bytes);
-      } else {
-        text = await Promise.race([response.text(), timeoutRequest]);
-        if (new TextEncoder().encode(text).byteLength > 16 * 1024) throw new Error('Application update manifest is too large');
-      }
+      text = await readApplicationManifestBody(response, timeoutRequest);
     } else {
       if (Platform.OS !== 'android') return null;
       const response = await fetchAppUpdateManifest(channel);

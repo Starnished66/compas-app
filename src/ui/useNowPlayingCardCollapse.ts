@@ -45,6 +45,22 @@ export function useNowPlayingCardCollapse(collapse: CollapseProgress, seekStays:
     width: between(collapse.value, Size.controlMd, 0),
     opacity: fadeOnCollapse(collapse.value),
   }));
+  const transportStyles = useTransportCollapse(collapse, seekStays);
+
+  return {
+    card,
+    eyebrow,
+    mainRow,
+    artFrame,
+    artInner,
+    album,
+    badges,
+    favorite,
+    ...transportStyles,
+  };
+}
+
+function useTransportCollapse(collapse: CollapseProgress, seekStays: boolean) {
   const compactTransport = useAnimatedStyle(() => ({
     width: between(collapse.value, 0, COMPACT_TRANSPORT_WIDTH),
     opacity: fadeInOnCollapse(collapse.value),
@@ -71,19 +87,5 @@ export function useNowPlayingCardCollapse(collapse: CollapseProgress, seekStays:
     opacity: fadeOnCollapse(collapse.value),
   }));
 
-  return {
-    card,
-    eyebrow,
-    mainRow,
-    artFrame,
-    artInner,
-    album,
-    badges,
-    favorite,
-    compactTransport,
-    seek,
-    collapsedProgress,
-    transport,
-    volume,
-  };
+  return { compactTransport, seek, collapsedProgress, transport, volume };
 }

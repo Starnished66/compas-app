@@ -42,23 +42,12 @@ const HANDLE_ENTER_SHIFT = 24;
 const TRAILING_WIDTH = Size.controlMd;
 const EDIT_SHIFT = Size.controlMd;
 
-function PlaylistTrackRowContent({
-  entry,
-  index,
-  editing,
-  current = false,
-  playing = false,
-  lifted = false,
-  removeDisabled = false,
-  handleProps,
-  onPress,
-  onMore,
-  onRemove,
-  selectionMode = false,
-  selected = false,
-  onSelect,
-  onLongPress,
-}: PlaylistTrackRowProps) {
+function PlaylistTrackRowContent(props: PlaylistTrackRowProps) {
+  const row = usePlaylistRowMotion(props);
+  return props.selectionMode ? renderPlaylistSelection(props, row) : renderPlaylistTrack(props, row);
+}
+
+function usePlaylistRowMotion({ entry, editing, index }: PlaylistTrackRowProps) {
   const { t } = useI18n();
   const palette = usePalette();
   const artworkUri = useEntryArtwork(entry);
@@ -75,22 +64,33 @@ function PlaylistTrackRowContent({
     [progress],
   );
 
-  if (selectionMode) {
-    return (
-      <ListRow
-        title={entry.title}
-        subtitle={subtitle}
-        leading={<ArtworkThumb uri={artworkUri} placeholderIcon="music" style={styles.artwork} />}
-        trailing={<Icon name={selected ? 'check' : 'selectionCircle'} color={selected ? palette.accent : palette.inkMuted} />}
-        selected={selected}
-        onPress={() => onSelect?.(entry)}
-        onLongPress={() => onSelect?.(entry)}
-        accessibilityLabel={subtitle ? `${entry.title}, ${subtitle}` : entry.title}
-        style={styles.row}
-      />
-    );
-  }
+  return { t, palette, artworkUri, removable, subtitle, motion };
+}
 
+type PlaylistRowMotion = ReturnType<typeof usePlaylistRowMotion>;
+
+function renderPlaylistSelection(
+  { entry, selected = false, onSelect }: PlaylistTrackRowProps,
+  { artworkUri, subtitle, palette }: PlaylistRowMotion,
+) {
+  return (
+    <ListRow
+      title={entry.title}
+      subtitle={subtitle}
+      leading={<ArtworkThumb uri={artworkUri} placeholderIcon="music" style={styles.artwork} />}
+      trailing={<Icon name={selected ? 'check' : 'selectionCircle'} color={selected ? palette.accent : palette.inkMuted} />}
+      selected={selected}
+      onPress={() => onSelect?.(entry)}
+      onLongPress={() => onSelect?.(entry)}
+      accessibilityLabel={subtitle ? `${entry.title}, ${subtitle}` : entry.title}
+      style={styles.row}
+    />
+  );
+}
+
+function renderPlaylistTrack(props: PlaylistTrackRowProps, row: PlaylistRowMotion) {
+  const { entry, editing, lifted = false, removeDisabled = false, onPress, onMore, onRemove, onLongPress } = props;
+  const { t, palette, artworkUri, removable, subtitle, motion } = row;
   const removeButton = (
     <Animated.View
       pointerEvents={editing ? 'box-none' : 'none'}
@@ -104,30 +104,7 @@ function PlaylistTrackRowContent({
     </Animated.View>
   );
 
-  const trailing = (
-    <View style={styles.trailing}>
-      <Animated.View
-        pointerEvents={editing ? 'none' : 'auto'}
-        importantForAccessibility={editing ? 'no-hide-descendants' : 'auto'}
-        style={[styles.trailingLayer, motion.more]}
-      >
-        {current ? <PlayingIndicator playing={playing} /> : null}
-        <IconButton
-          icon="moreVertical"
-          label={t('Song options for {title}', { title: entry.title })}
-          color={palette.inkMuted}
-          onPress={() => onMore(entry)}
-        />
-      </Animated.View>
-      <Animated.View
-        pointerEvents={editing ? 'auto' : 'none'}
-        importantForAccessibility={editing ? 'auto' : 'no-hide-descendants'}
-        style={[styles.handle, motion.handle]}
-      >
-        {handleProps ? <DragHandle handle={handleProps} /> : null}
-      </Animated.View>
-    </View>
-  );
+  const trailing = renderPlaylistTrailing(props, row);
 
   return (
     <View style={lifted && { backgroundColor: palette.surfaceRaised }}>
@@ -155,6 +132,36 @@ function PlaylistTrackRowContent({
 }
 
 export const PlaylistTrackRow = React.memo(PlaylistTrackRowContent);
+
+function renderPlaylistTrailing(
+  { entry, editing, current = false, playing = false, handleProps, onMore }: PlaylistTrackRowProps,
+  { motion, palette, t }: PlaylistRowMotion,
+) {
+  return (
+    <View style={styles.trailing}>
+      <Animated.View
+        pointerEvents={editing ? 'none' : 'auto'}
+        importantForAccessibility={editing ? 'no-hide-descendants' : 'auto'}
+        style={[styles.trailingLayer, motion.more]}
+      >
+        {current ? <PlayingIndicator playing={playing} /> : null}
+        <IconButton
+          icon="moreVertical"
+          label={t('Song options for {title}', { title: entry.title })}
+          color={palette.inkMuted}
+          onPress={() => onMore(entry)}
+        />
+      </Animated.View>
+      <Animated.View
+        pointerEvents={editing ? 'auto' : 'none'}
+        importantForAccessibility={editing ? 'auto' : 'no-hide-descendants'}
+        style={[styles.handle, motion.handle]}
+      >
+        {handleProps ? <DragHandle handle={handleProps} /> : null}
+      </Animated.View>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   row: {

@@ -79,19 +79,7 @@ export function ProgressComet({
   label,
   style,
 }: ProgressCometProps) {
-  const perimeter = useMemo(
-    () => roundedRectPerimeter({ width, height, radius, strokeWidth: STROKE_WIDTH }),
-    [height, radius, width],
-  );
-  const breathing = useBreathing(playing);
-  const pad = cometGlowPad(headSize);
-  const canvas = { width: width + pad * 2, height: height + pad * 2, style: [styles.canvas, { left: -pad, top: -pad }] };
-  const { lap, progress } = laps;
-  const headPosition = useAnimatedProps(() => {
-    const head = pointOnPerimeter(perimeter, lap.value + progress.value);
-    return { cx: head.x + pad, cy: head.y + pad };
-  });
-  const glowStyle = useAnimatedStyle(() => ({ opacity: playing ? breathing.value : headOpacity }));
+  const { perimeter, pad, canvas, headPosition, glowStyle } = useCometGeometry({ width, height, radius, playing, headSize, headOpacity, laps });
 
   return (
     <View
@@ -128,6 +116,26 @@ export function ProgressComet({
       </Svg>
     </View>
   );
+}
+
+function useCometGeometry({
+  width, height, radius, playing, headSize, headOpacity = 1, laps,
+}: Pick<ProgressCometProps, 'width' | 'height' | 'radius' | 'playing' | 'headSize' | 'headOpacity' | 'laps'>) {
+  const perimeter = useMemo(
+    () => roundedRectPerimeter({ width, height, radius, strokeWidth: STROKE_WIDTH }),
+    [height, radius, width],
+  );
+  const breathing = useBreathing(playing);
+  const pad = cometGlowPad(headSize);
+  const canvas = { width: width + pad * 2, height: height + pad * 2, style: [styles.canvas, { left: -pad, top: -pad }] };
+  const { lap, progress } = laps;
+  const headPosition = useAnimatedProps(() => {
+    const head = pointOnPerimeter(perimeter, lap.value + progress.value);
+    return { cx: head.x + pad, cy: head.y + pad };
+  });
+  const glowStyle = useAnimatedStyle(() => ({ opacity: playing ? breathing.value : headOpacity }));
+
+  return { perimeter, pad, canvas, headPosition, glowStyle };
 }
 
 const styles = StyleSheet.create({

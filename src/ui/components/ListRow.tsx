@@ -53,24 +53,7 @@ export function ListRow({
   const palette = usePalette();
   const action = variant === 'action';
   const interactive = Boolean(onPress || onLongPress);
-  const text = (
-    <View style={styles.text}>
-      <AppText
-        variant={titleVariant ?? (action ? 'body' : 'bodyStrong')}
-        tone={titleTone ?? (active ? 'accent' : 'ink')}
-        numberOfLines={1}
-      >
-        {title}
-      </AppText>
-      {typeof subtitle === 'string' ? (
-        <AppText variant="caption" tone="inkMuted" tabular={subtitleTabular} numberOfLines={1}>
-          {subtitle}
-        </AppText>
-      ) : (
-        subtitle
-      )}
-    </View>
-  );
+  const text = renderRowText({ title, subtitle, titleVariant, titleTone, active, subtitleTabular }, action);
 
   return (
     <Pressable
@@ -101,6 +84,31 @@ export function ListRow({
       )}
       {trailing}
     </Pressable>
+  );
+}
+
+function renderRowText(
+  { title, subtitle, titleVariant, titleTone, active, subtitleTabular }:
+    Pick<ListRowProps, 'title' | 'subtitle' | 'titleVariant' | 'titleTone' | 'active' | 'subtitleTabular'>,
+  action: boolean,
+) {
+  return (
+    <View style={styles.text}>
+      <AppText
+        variant={titleVariant ?? (action ? 'body' : 'bodyStrong')}
+        tone={titleTone ?? (active ? 'accent' : 'ink')}
+        numberOfLines={1}
+      >
+        {title}
+      </AppText>
+      {typeof subtitle === 'string' ? (
+        <AppText variant="caption" tone="inkMuted" tabular={subtitleTabular} numberOfLines={1}>
+          {subtitle}
+        </AppText>
+      ) : (
+        subtitle
+      )}
+    </View>
   );
 }
 

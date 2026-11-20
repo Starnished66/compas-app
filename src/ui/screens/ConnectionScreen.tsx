@@ -49,6 +49,11 @@ function connectingLabel(target: ConnectTarget | null, message: string | null | 
 }
 
 export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
+  const connection = useConnectionScreen(state, onAction);
+  return renderConnectionScreen({ state, onAction }, connection);
+}
+
+function useConnectionScreen(state: RemoteUiState, onAction: ConnectionScreenProps['onAction']) {
   const { t } = useI18n();
   const palette = usePalette();
   const insets = useScreenInsets();
@@ -71,6 +76,17 @@ export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
     if (target && retryDelay === 0 && !connecting) onAction({ type: 'Connect' });
   };
 
+  return {
+    t, palette, insets, manualOpen, setManualOpen, player, pairAndConnect, connected, connecting, failed, transport,
+    bluetooth, status, target, alreadyConnected, retryDelay, connect,
+  };
+}
+
+type ConnectionScreenState = ReturnType<typeof useConnectionScreen>;
+
+function renderConnectionScreen(props: ConnectionScreenProps, connection: ConnectionScreenState) {
+  const { t, palette, insets, status } = connection;
+  const { onAction } = props;
   return (
     <View
       style={[
@@ -97,87 +113,109 @@ export function ConnectionScreen({ state, onAction }: ConnectionScreenProps) {
         <StatusIndicator status={status.status} label={t(status.label)} strong />
       </View>
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        {connected ? (
-          <>
-            <PlayerCard name={player.name} detail={player.detail}>
-              <View style={styles.playerActions}>
-                <Button
-                  label={t('Change PIN')}
-                  accessibilityLabel={t('Update saved PIN')}
-                  variant="container"
-                  fill
-                  onPress={() => onAction({ type: 'ChangePin' })}
-                />
-                <DisconnectButton playerName={player.name} onDisconnect={() => onAction({ type: 'Disconnect' })} />
-              </View>
-            </PlayerCard>
-            <AppText variant="eyebrow" tone="inkMuted" style={styles.eyebrow}>
-              {t('Switch player')}
-            </AppText>
-          </>
-        ) : null}
+      {renderConnectionList(props, connection)}
 
-        {BLUETOOTH_AVAILABLE ? (
-          <SegmentedControl
-            size="lg"
-            label={t('Connect over')}
-            options={TRANSPORT_OPTIONS.map((option) => ({ ...option, caption: t(option.caption ?? '') }))}
-            value={transport}
-            onChange={(next) => onAction({ type: 'SelectConnectionTransport', transport: next })}
-          />
-        ) : null}
-
-        {failed ? (
-          <EnterView>
-            <ConnectionErrorCard
-              title={t('Couldn’t connect')}
-              message={state.connectionMessage ? localizedMessage(state.connectionMessage, t) : failureAdvice(transport, t)}
-              retryDelaySeconds={retryDelay}
-              onRetry={() => onAction({ type: 'RetryConnection' })}
-            />
-          </EnterView>
-        ) : null}
-
-        {bluetooth ? (
-          <BluetoothPlayerList
-            state={state}
-            onAction={onAction}
-            connectedId={connected && state.connectionTransport === ConnectionTransport.Bluetooth ? player.bluetoothId ?? null : null}
-            onPairAndConnect={pairAndConnect}
-          />
-        ) : (
-          <WifiPlayerList
-            state={state}
-            onAction={onAction}
-            connectedAddress={connected && state.connectionTransport === ConnectionTransport.Wifi ? player.wifiAddress : null}
-            manualOpen={manualOpen}
-            onManualOpenChange={setManualOpen}
-            onSubmitAddress={connect}
-          />
-        )}
-      </ScrollView>
-
-      <ConnectFooter
-        label={retryDelay > 0
-          ? t('Wait {seconds} s', { seconds: retryDelay })
-          : target
-            ? t(connected ? 'Switch to {name}' : 'Connect to {name}', { name: target.name })
-            : t(!bluetooth && manualOpen ? 'Enter an address' : 'Choose a player')}
-        showButton={!alreadyConnected}
-        disabled={!target || retryDelay > 0}
-        connecting={connecting}
-        connectingLabel={connectingLabel(target, state.connectionMessage, t)}
-        notice={state.connectionStatus === ConnectionStatus.Disconnected ? state.connectionMessage : null}
-        onConnect={connect}
-        onCancel={() => onAction({ type: 'Disconnect' })}
-      />
+      {renderConnectFooter(props, connection)}
     </View>
+  );
+}
+
+function renderConnectedPlayer(
+  player: ConnectionScreenState['player'],
+  onAction: ConnectionScreenProps['onAction'],
+  t: ConnectionScreenState['t'],
+) {
+  return (
+    <>
+      <PlayerCard name={player.name} detail={player.detail}>
+        <View style={styles.playerActions}>
+          <Button
+            label={t('Change PIN')}
+            accessibilityLabel={t('Update saved PIN')}
+            variant="container"
+            fill
+            onPress={() => onAction({ type: 'ChangePin' })}
+          />
+          <DisconnectButton playerName={player.name} onDisconnect={() => onAction({ type: 'Disconnect' })} />
+        </View>
+      </PlayerCard>
+      <AppText variant="eyebrow" tone="inkMuted" style={styles.eyebrow}>
+        {t('Switch player')}
+      </AppText>
+    </>
+  );
+}
+
+function renderConnectionList({ state, onAction }: ConnectionScreenProps, connection: ConnectionScreenState) {
+  const { t, player, connected, transport, failed, retryDelay, bluetooth, pairAndConnect, manualOpen, setManualOpen, connect } = connection;
+  return (
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
+    {connected ? renderConnectedPlayer(player, onAction, t) : null}
+
+      {BLUETOOTH_AVAILABLE ? (
+        <SegmentedControl
+          size="lg"
+          label={t('Connect over')}
+          options={TRANSPORT_OPTIONS.map((option) => ({ ...option, caption: t(option.caption ?? '') }))}
+          value={transport}
+          onChange={(next) => onAction({ type: 'SelectConnectionTransport', transport: next })}
+        />
+      ) : null}
+
+      {failed ? (
+        <EnterView>
+          <ConnectionErrorCard
+            title={t('Couldn’t connect')}
+            message={state.connectionMessage ? localizedMessage(state.connectionMessage, t) : failureAdvice(transport, t)}
+            retryDelaySeconds={retryDelay}
+            onRetry={() => onAction({ type: 'RetryConnection' })}
+          />
+        </EnterView>
+      ) : null}
+
+      {bluetooth ? (
+        <BluetoothPlayerList
+          state={state}
+          onAction={onAction}
+          connectedId={connected && state.connectionTransport === ConnectionTransport.Bluetooth ? player.bluetoothId ?? null : null}
+          onPairAndConnect={pairAndConnect}
+        />
+      ) : (
+        <WifiPlayerList
+          state={state}
+          onAction={onAction}
+          connectedAddress={connected && state.connectionTransport === ConnectionTransport.Wifi ? player.wifiAddress : null}
+          manualOpen={manualOpen}
+          onManualOpenChange={setManualOpen}
+          onSubmitAddress={connect}
+        />
+      )}
+    </ScrollView>
+  );
+}
+
+function renderConnectFooter({ state, onAction }: ConnectionScreenProps, connection: ConnectionScreenState) {
+  const { t, retryDelay, target, connected, bluetooth, manualOpen, alreadyConnected, connecting, connect } = connection;
+  return (
+    <ConnectFooter
+      label={retryDelay > 0
+        ? t('Wait {seconds} s', { seconds: retryDelay })
+        : target
+          ? t(connected ? 'Switch to {name}' : 'Connect to {name}', { name: target.name })
+          : t(!bluetooth && manualOpen ? 'Enter an address' : 'Choose a player')}
+      showButton={!alreadyConnected}
+      disabled={!target || retryDelay > 0}
+      connecting={connecting}
+      connectingLabel={connectingLabel(target, state.connectionMessage, t)}
+      notice={state.connectionStatus === ConnectionStatus.Disconnected ? state.connectionMessage : null}
+      onConnect={connect}
+      onCancel={() => onAction({ type: 'Disconnect' })}
+    />
   );
 }
 

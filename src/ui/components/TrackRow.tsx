@@ -63,30 +63,7 @@ export function TrackRow({
   const { t } = useI18n();
   const palette = usePalette();
 
-  const leading = (
-    <>
-      {onRemove ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={removeLabel ?? t('Remove from queue')}
-          onPress={onRemove}
-          style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
-        >
-          <View style={[styles.removeDisc, { backgroundColor: palette.statusError }]}>
-            <View style={[styles.removeBar, { backgroundColor: palette.background }]} />
-          </View>
-        </Pressable>
-      ) : null}
-      {number !== undefined ? (
-        <AppText variant="caption" tone="inkMuted" tabular style={styles.number}>
-          {number}
-        </AppText>
-      ) : null}
-      {showArtwork ? (
-        <ArtworkThumb uri={artworkUri} size={artworkSize} placeholderIcon={placeholderIcon} />
-      ) : null}
-    </>
-  );
+  const leading = renderTrackLeading({ artworkUri, artworkSize, number, showArtwork, placeholderIcon, onRemove, removeLabel }, palette, t);
 
   const hasTrailing = current || Boolean(duration) || Boolean(onMore) || Boolean(accessory);
   const trailing = hasTrailing ? (
@@ -117,6 +94,38 @@ export function TrackRow({
       accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
       style={[onRemove && styles.editing, hasTrailing && !onMore && !accessory && styles.noMoreButton, style]}
     />
+  );
+}
+
+function renderTrackLeading(
+  { artworkUri, artworkSize, number, showArtwork, placeholderIcon, onRemove, removeLabel }:
+    Pick<TrackRowProps, 'artworkUri' | 'artworkSize' | 'number' | 'showArtwork' | 'placeholderIcon' | 'onRemove' | 'removeLabel'>,
+  palette: ReturnType<typeof usePalette>,
+  t: ReturnType<typeof useI18n>['t'],
+) {
+  return (
+    <>
+      {onRemove ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={removeLabel ?? t('Remove from queue')}
+          onPress={onRemove}
+          style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
+        >
+          <View style={[styles.removeDisc, { backgroundColor: palette.statusError }]}>
+            <View style={[styles.removeBar, { backgroundColor: palette.background }]} />
+          </View>
+        </Pressable>
+      ) : null}
+      {number !== undefined ? (
+        <AppText variant="caption" tone="inkMuted" tabular style={styles.number}>
+          {number}
+        </AppText>
+      ) : null}
+      {showArtwork ? (
+        <ArtworkThumb uri={artworkUri} size={artworkSize} placeholderIcon={placeholderIcon} />
+      ) : null}
+    </>
   );
 }
 

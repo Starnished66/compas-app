@@ -23,9 +23,7 @@ const SHADOW_OFFSET_Y = 16;
 const SHADOW_RADIUS = 24;
 const SHADOW_ELEVATION = 16;
 
-export function Dialog({ visible, onClose, title, message, children, actions, dismissable = true }: DialogProps) {
-  const { t } = useI18n();
-  const palette = usePalette();
+function useDialogMotion(visible: boolean) {
   const reducedMotion = useReducedMotion();
   const [mounted, setMounted] = useState(visible);
   const scrim = useRef(new Animated.Value(0)).current;
@@ -54,6 +52,13 @@ export function Dialog({ visible, onClose, title, message, children, actions, di
     });
   }, [boxOpacity, boxScale, reducedMotion, scrim, visible]);
 
+  return { mounted, scrim, boxOpacity, boxScale };
+}
+
+export function Dialog({ visible, onClose, title, message, children, actions, dismissable = true }: DialogProps) {
+  const { t } = useI18n();
+  const palette = usePalette();
+  const { mounted, scrim, boxOpacity, boxScale } = useDialogMotion(visible);
   if (!mounted) return null;
 
   return (

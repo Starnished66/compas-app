@@ -34,6 +34,47 @@ const ICON_SIZE = 20;
  */
 export function SwipeActionRow({ right, left, onSwipe, children }: SwipeActionRowProps) {
   const palette = usePalette();
+  const { offset, revealed, widthRef, panResponder } = useSwipeRowMotion(right, left, onSwipe);
+
+  const visual = revealed === 'right' ? right : revealed === 'left' ? left : null;
+  const backdropStyle = useMemo(
+    () => ({
+      backgroundColor: palette.accentContainer,
+      opacity: offset.interpolate({
+        inputRange: [-Distances.swipeThreshold, 0, Distances.swipeThreshold],
+        outputRange: [1, 0, 1],
+        extrapolate: 'clamp',
+      }),
+    }),
+    [offset, palette.accentContainer],
+  );
+  // Opaque only while the action shows underneath; at rest the row keeps the list's own background.
+  const contentStyle = useMemo(
+    () => ({ backgroundColor: revealed ? palette.surface : undefined, transform: [{ translateX: offset }] }),
+    [offset, palette.surface, revealed],
+  );
+
+  return (
+    <View style={styles.root} onLayout={(event) => { widthRef.current = event.nativeEvent.layout.width; }}>
+      {visual ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.backdrop, revealed === 'left' ? styles.alignEnd : styles.alignStart, backdropStyle]}
+        >
+          <Icon name={visual.icon} size={ICON_SIZE} color={palette.onAccentContainer} />
+          <AppText variant="bodyStrong" style={{ color: palette.onAccentContainer }}>
+            {visual.label}
+          </AppText>
+        </Animated.View>
+      ) : null}
+      <Animated.View {...panResponder.panHandlers} style={contentStyle}>
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
+
+function useSwipeRowMotion(right: SwipeActionRowProps['right'], left: SwipeActionRowProps['left'], onSwipe: SwipeActionRowProps['onSwipe']) {
   const reducedMotion = useReducedMotion();
   const [offset] = useState(() => new Animated.Value(0));
   const [revealed, setRevealed] = useState<SwipeDirection | null>(null);
@@ -76,42 +117,7 @@ export function SwipeActionRow({ right, left, onSwipe, children }: SwipeActionRo
     }),
   );
 
-  const visual = revealed === 'right' ? right : revealed === 'left' ? left : null;
-  const backdropStyle = useMemo(
-    () => ({
-      backgroundColor: palette.accentContainer,
-      opacity: offset.interpolate({
-        inputRange: [-Distances.swipeThreshold, 0, Distances.swipeThreshold],
-        outputRange: [1, 0, 1],
-        extrapolate: 'clamp',
-      }),
-    }),
-    [offset, palette.accentContainer],
-  );
-  // Opaque only while the action shows underneath; at rest the row keeps the list's own background.
-  const contentStyle = useMemo(
-    () => ({ backgroundColor: revealed ? palette.surface : undefined, transform: [{ translateX: offset }] }),
-    [offset, palette.surface, revealed],
-  );
-
-  return (
-    <View style={styles.root} onLayout={(event) => { widthRef.current = event.nativeEvent.layout.width; }}>
-      {visual ? (
-        <Animated.View
-          pointerEvents="none"
-          style={[styles.backdrop, revealed === 'left' ? styles.alignEnd : styles.alignStart, backdropStyle]}
-        >
-          <Icon name={visual.icon} size={ICON_SIZE} color={palette.onAccentContainer} />
-          <AppText variant="bodyStrong" style={{ color: palette.onAccentContainer }}>
-            {visual.label}
-          </AppText>
-        </Animated.View>
-      ) : null}
-      <Animated.View {...panResponder.panHandlers} style={contentStyle}>
-        {children}
-      </Animated.View>
-    </View>
-  );
+  return { offset, revealed, widthRef, panResponder };
 }
 
 const styles = StyleSheet.create({

@@ -33,7 +33,8 @@ export interface LibraryEntryRowProps {
 
 const CHEVRON_SIZE = 18;
 
-function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress, onLongPress, onMore, selectionMode = false, selected = false, onSelect, disabled = false }: LibraryEntryRowProps) {
+function LibraryEntryRowContent(props: LibraryEntryRowProps) {
+  const { entry, kind, number, current, playing, onPress, onLongPress, onMore, selectionMode = false, selected = false, onSelect, disabled = false } = props;
   const palette = usePalette();
   const { t } = useI18n();
   const subtitle = localizedEntrySubtitle(entry, t);
@@ -67,6 +68,22 @@ function LibraryEntryRowContent({ entry, kind, number, current, playing, onPress
     );
   }
 
+  return renderCollectionRow(props, { palette, t, subtitle, artworkUri, press, longPress });
+}
+
+interface CollectionRowView {
+  palette: ReturnType<typeof usePalette>;
+  t: ReturnType<typeof useI18n>['t'];
+  subtitle: ReturnType<typeof localizedEntrySubtitle>;
+  artworkUri: ReturnType<typeof useEntryArtwork>;
+  press: () => void;
+  longPress?: () => void;
+}
+
+function renderCollectionRow(
+  { entry, kind, selectionMode = false, selected = false, disabled = false }: LibraryEntryRowProps,
+  { palette, t, subtitle, artworkUri, press, longPress }: CollectionRowView,
+) {
   const isPlaylist = kind === 'playlist';
   const showsChevron = opensCollection(kind);
   const readOnly = isPlaylist && !entry.writable;

@@ -33,6 +33,30 @@ function withMoveApplied(queue: RemoteTrack[], from: number, to: number): Remote
   return reordered;
 }
 
+function confirmQueueStep(
+  queue: RemoteTrack[], move: PendingMove,
+  update: (next: PendingMove | null) => void,
+  sendStep: (move: PendingMove, current: RemoteTrack[]) => void,
+  onMoved: (move: QueueMove) => void,
+) {
+  const expected = move.current + move.step;
+  if (sameSong(queue[expected], move.track)) {
+    const advanced = { ...move, current: expected };
+    if (expected === move.target) {
+      update(null);
+      onMoved({ track: move.track, from: move.from, to: move.target });
+      return;
+    }
+    sendStep(advanced, queue);
+    return;
+  }
+  if (sameSong(queue[move.current], move.track)) {
+    update({ ...move, sentFor: queue });
+    return;
+  }
+  update(null);
+}
+
 export function useQueueReorder(
   queue: RemoteTrack[],
   onAction: (action: RemoteAction) => void,
@@ -64,22 +88,7 @@ export function useQueueReorder(
   useEffect(() => {
     const move = pendingRef.current;
     if (!move || queue === move.sentFor) return;
-    const expected = move.current + move.step;
-    if (sameSong(queue[expected], move.track)) {
-      const advanced = { ...move, current: expected };
-      if (expected === move.target) {
-        update(null);
-        latest.current.onMoved?.({ track: move.track, from: move.from, to: move.target });
-        return;
-      }
-      sendStep(advanced, queue);
-      return;
-    }
-    if (sameSong(queue[move.current], move.track)) {
-      update({ ...move, sentFor: queue });
-      return;
-    }
-    update(null);
+    confirmQueueStep(queue, move, update, sendStep, (finished) => latest.current.onMoved?.(finished));
   }, [queue]);
 
   useEffect(() => () => {

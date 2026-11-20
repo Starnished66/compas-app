@@ -72,27 +72,14 @@ function withSwipe(swipe: SongSwipe, entry: LibraryEntry, row: ReactElement): Re
   );
 }
 
-function LibraryListContent({
-  items,
-  onAction,
-  onOpenEntry,
-  onEntryLongPress,
-  renderPlaylistTrack,
-  hasMore,
-  status,
-  currentTrack,
-  isPlaying,
-  tileWidth,
-  stickyHeaderIndices,
-  contentBottomInset,
-  entryInsetRight,
-  scroll,
-  scrollEnabled = true,
-  selectionMode = false,
-  selectedIds,
-  onSelectEntry,
-  onEntrySelectionLongPress,
-  songSwipe,
+function LibraryListContent(props: LibraryListProps) {
+  const view = useLibraryListView(props);
+  return renderLibraryList(props, view);
+}
+
+function useLibraryListView({
+  items, onAction, onOpenEntry, hasMore, status, currentTrack, contentBottomInset,
+  entryInsetRight, selectionMode = false, onSelectEntry, onEntrySelectionLongPress, songSwipe, ...rowProps
 }: LibraryListProps) {
   const { onEndReached, onViewableItemsChanged, visibleArtwork } = useLibraryPaging({ items, hasMore, status, onAction });
   const showMoreSongs = useCallback(
@@ -114,11 +101,30 @@ function LibraryListContent({
     () => (entryInsetRight ? { paddingRight: entryInsetRight } : undefined),
     [entryInsetRight],
   );
-  const listRef = scroll?.listRef;
   const currentSong = useStableTrack(currentTrack);
   const contentContainerStyle = useMemo(() => ({ paddingBottom: contentBottomInset }), [contentBottomInset]);
 
   const swipe = selectionMode ? null : songSwipe ?? null;
+  const renderItem = useLibraryItemRenderer({
+    ...rowProps, selectionMode, onOpenEntry, onSelectEntry,
+  }, { swipe, currentSong, insetStyle, showMoreSongs, pressTile, longPressTile });
+  return { onEndReached, onViewableItemsChanged, visibleArtwork, loadingMore, contentContainerStyle, renderItem };
+}
+
+interface RowRendererView {
+  swipe: SongSwipe | null;
+  currentSong: ReturnType<typeof useStableTrack>;
+  insetStyle?: { paddingRight: number };
+  showMoreSongs: (entry: LibraryEntry) => void;
+  pressTile: (entry: LibraryEntry) => void;
+  longPressTile: (entry: LibraryEntry) => void;
+}
+
+function useLibraryItemRenderer(
+  { tileWidth, renderPlaylistTrack, isPlaying, onOpenEntry, onEntryLongPress, selectionMode = false, selectedIds, onSelectEntry }:
+    Pick<LibraryListProps, 'tileWidth' | 'renderPlaylistTrack' | 'isPlaying' | 'onOpenEntry' | 'onEntryLongPress' | 'selectionMode' | 'selectedIds' | 'onSelectEntry'>,
+  { swipe, currentSong, insetStyle, showMoreSongs, pressTile, longPressTile }: RowRendererView,
+) {
   const renderItem = useCallback(({ item }: ListRenderItemInfo<LibraryItem>) => {
     switch (item.type) {
       case 'node':
@@ -145,27 +151,9 @@ function LibraryListContent({
         const row = renderPlaylistTrack ? renderPlaylistTrack(item.entry, item.index) : null;
         return row && swipe ? withSwipe(swipe, item.entry, row) : row;
       }
-      case 'entry': {
-        const current = isCurrentEntry(item.entry, currentSong);
-        const row = (
-          <View style={insetStyle}>
-            <LibraryEntryRow
-              entry={item.entry}
-              kind={item.kind}
-              number={item.number}
-              current={current}
-              playing={current && isPlaying}
-              onPress={onOpenEntry}
-              onLongPress={onEntryLongPress}
-              onMore={item.kind === 'song' ? showMoreSongs : undefined}
-              selectionMode={selectionMode}
-              selected={selectionMode && Boolean(selectedIds?.has(item.entry.id))}
-              onSelect={onSelectEntry}
-            />
-          </View>
-        );
-        return swipe && item.kind === 'song' ? withSwipe(swipe, item.entry, row) : row;
-      }
+      case 'entry':
+        return renderLibraryEntry(item, { currentSong, isPlaying, insetStyle, onOpenEntry, onEntryLongPress,
+          showMoreSongs, selectionMode, selectedIds, onSelectEntry, swipe });
     }
   }, [
     tileWidth,
@@ -184,6 +172,46 @@ function LibraryListContent({
     swipe,
   ]);
 
+  return renderItem;
+}
+
+interface LibraryEntryView extends Pick<LibraryListProps, 'isPlaying' | 'onOpenEntry' | 'onEntryLongPress' | 'selectionMode' | 'selectedIds' | 'onSelectEntry'> {
+  currentSong: RowRendererView['currentSong'];
+  insetStyle: RowRendererView['insetStyle'];
+  showMoreSongs: RowRendererView['showMoreSongs'];
+  swipe: RowRendererView['swipe'];
+}
+
+function renderLibraryEntry(
+  item: Extract<LibraryItem, { type: 'entry' }>,
+  { currentSong, isPlaying, insetStyle, onOpenEntry, onEntryLongPress, showMoreSongs, selectionMode = false, selectedIds, onSelectEntry, swipe }: LibraryEntryView,
+) {
+  const current = isCurrentEntry(item.entry, currentSong);
+  const row = (
+    <View style={insetStyle}>
+      <LibraryEntryRow
+        entry={item.entry}
+        kind={item.kind}
+        number={item.number}
+        current={current}
+        playing={current && isPlaying}
+        onPress={onOpenEntry}
+        onLongPress={onEntryLongPress}
+        onMore={item.kind === 'song' ? showMoreSongs : undefined}
+        selectionMode={selectionMode}
+        selected={selectionMode && Boolean(selectedIds?.has(item.entry.id))}
+        onSelect={onSelectEntry}
+      />
+    </View>
+  );
+  return swipe && item.kind === 'song' ? withSwipe(swipe, item.entry, row) : row;
+}
+
+function renderLibraryList(
+  { items, scroll, stickyHeaderIndices, renderPlaylistTrack, scrollEnabled = true }: LibraryListProps,
+  { onEndReached, onViewableItemsChanged, visibleArtwork, loadingMore, contentContainerStyle, renderItem }: ReturnType<typeof useLibraryListView>,
+) {
+  const listRef = scroll?.listRef;
   return (
     <VisibleLibraryArtworkContext.Provider value={visibleArtwork}>
       <FlashList

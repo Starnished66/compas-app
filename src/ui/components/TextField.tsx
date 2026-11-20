@@ -71,17 +71,21 @@ export function TextField({
           inputStyle,
         ]}
       />
-      {showClear ? (
-        <IconButton
-          icon="close"
-          label={clearLabel ?? t('Clear')}
-          size="sm"
-          iconSize={CLEAR_ICON_SIZE}
-          color={palette.inkMuted}
-          onPress={onClear}
-        />
-      ) : null}
+      {showClear ? renderClearButton(clearLabel ?? t('Clear'), palette.inkMuted, onClear) : null}
     </View>
+  );
+}
+
+function renderClearButton(label: string, color: string, onClear: TextFieldProps['onClear']) {
+  return (
+    <IconButton
+      icon="close"
+      label={label}
+      size="sm"
+      iconSize={CLEAR_ICON_SIZE}
+      color={color}
+      onPress={onClear}
+    />
   );
 }
 

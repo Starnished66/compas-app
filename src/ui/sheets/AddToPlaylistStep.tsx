@@ -52,6 +52,29 @@ export function AddToPlaylistStep({
         }
       />
       <SectionHeader label={t('Your playlists')} tone="muted" style={styles.sectionHeader} />
+      {renderPlaylistLoadState(loading, failed, playlists.length, onRetry, t)}
+      {playlists.map((playlist) => (
+        <ListRow
+          key={playlist.key}
+          title={playlistDisplayName(playlist.name)}
+          onPress={() => onSelect(playlist.key)}
+          trailing={busyKey === playlist.key ? <Spinner style={styles.rowSpinner} /> : undefined}
+          leading={<ArtworkThumb size={Size.rowArtwork} placeholderIcon="playlist" />}
+        />
+      ))}
+      <AppText variant="caption" tone="inkMuted" style={styles.footnote}>
+        {t('Playlists the player made itself, like Most Played, can’t be changed and aren’t listed.')}
+      </AppText>
+    </View>
+  );
+}
+
+function renderPlaylistLoadState(
+  loading: boolean, failed: boolean, count: number,
+  onRetry: AddToPlaylistStepProps['onRetry'], t: ReturnType<typeof useI18n>['t'],
+) {
+  return (
+    <>
       {loading ? (
         <View style={styles.state}>
           <Spinner />
@@ -68,24 +91,12 @@ export function AddToPlaylistStep({
           <Button label={t('Try again')} variant="raised" size="sm" onPress={onRetry} />
         </View>
       ) : null}
-      {!loading && !failed && playlists.length === 0 ? (
+      {!loading && !failed && count === 0 ? (
         <AppText variant="body" tone="inkMuted" style={styles.empty}>
           {t('No playlists yet. Start one with New playlist.')}
         </AppText>
       ) : null}
-      {playlists.map((playlist) => (
-        <ListRow
-          key={playlist.key}
-          title={playlistDisplayName(playlist.name)}
-          onPress={() => onSelect(playlist.key)}
-          trailing={busyKey === playlist.key ? <Spinner style={styles.rowSpinner} /> : undefined}
-          leading={<ArtworkThumb size={Size.rowArtwork} placeholderIcon="playlist" />}
-        />
-      ))}
-      <AppText variant="caption" tone="inkMuted" style={styles.footnote}>
-        {t('Playlists the player made itself, like Most Played, can’t be changed and aren’t listed.')}
-      </AppText>
-    </View>
+    </>
   );
 }
 

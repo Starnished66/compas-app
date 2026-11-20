@@ -174,6 +174,12 @@ const catalogSyncIsCurrent = ({ shared }: CatalogSyncDependencies, api: RemoteAp
   return apiRef.current === api && attempt === connectionAttemptRef.current && generation === catalogSyncGenerationRef.current;
 };
 
+function resetCatalogSyncArtwork(shared: CatalogSyncDependencies['shared']) {
+  shared.syncedCoverUriCacheRef.current = new Map();
+  shared.queueArtworkBySongRef.current.clear();
+  shared.queueArtworkPendingRef.current.clear();
+}
+
 const startCatalogSync = async (
   deps: CatalogSyncDependencies,
   api: RemoteApi,
@@ -185,7 +191,7 @@ const startCatalogSync = async (
   const {
     apiRef, catalogCoversByAlbumRef, catalogSyncGenerationRef, catalogSyncProgress,
     connectionAttemptRef, lastCatalogCoverProgressAtRef, libraryBrowseCatalogRef,
-    queueArtworkBySongRef, queueArtworkPendingRef, stateRef, syncedCatalogStoreRef, syncedCoverUriCacheRef,
+    stateRef, syncedCatalogStoreRef,
   } = shared;
   if (apiRef.current !== api || attempt !== connectionAttemptRef.current) return;
   const generation = ++catalogSyncGenerationRef.current;
@@ -195,16 +201,12 @@ const startCatalogSync = async (
     if (!supported) {
       adoptCatalog(null);
       catalogCoversByAlbumRef.current = new Map();
-      syncedCoverUriCacheRef.current = new Map();
-      queueArtworkBySongRef.current.clear();
-      queueArtworkPendingRef.current.clear();
+      resetCatalogSyncArtwork(shared);
       catalogSyncProgress.set(null);
       return;
     }
 
-    syncedCoverUriCacheRef.current = new Map();
-    queueArtworkBySongRef.current.clear();
-    queueArtworkPendingRef.current.clear();
+    resetCatalogSyncArtwork(shared);
     lastCatalogCoverProgressAtRef.current = 0;
     catalogSyncProgress.set('Checking player library');
 

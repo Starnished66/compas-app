@@ -9,7 +9,7 @@ type Edit = { kind: 'mkdir' } | { kind: 'rename'; entry: WifiImportFileEntry };
 type Listing = { entries: WifiImportFileEntry[]; nextOffset: number | null; loaded: boolean; loading: boolean; error?: unknown; failed?: { offset: number; append: boolean } };
 const emptyListing: Listing = { entries: [], nextOffset: null, loaded: false, loading: false };
 
-export function useSdBrowser(api: TransferApi, initialPath = '', onFailure?: (cause: unknown) => void, seed?: Pick<Listing, 'entries' | 'nextOffset'>, initialShowHidden = false) {
+function useSdBrowserState(api: TransferApi, initialPath = '', onFailure?: (cause: unknown) => void, seed?: Pick<Listing, 'entries' | 'nextOffset'>, initialShowHidden = false) {
   const { t } = useI18n();
   const [showHidden, setShowHidden] = useState(initialShowHidden);
   const hidden = useRef(initialShowHidden);
@@ -27,6 +27,46 @@ export function useSdBrowser(api: TransferApi, initialPath = '', onFailure?: (ca
     setPath(nextPath);
     setListing(next);
   };
+  return { t, showHidden, setShowHidden, hidden, path, listing, saving, setSaving, editing, setEditing,
+    editValue, setEditValue, generation, current, refs, publish };
+}
+
+type BrowserState = ReturnType<typeof useSdBrowserState>;
+type LoadDirectory = (path: string, append?: boolean, offset?: number) => Promise<void>;
+
+function createSdMutations(state: BrowserState, load: LoadDirectory) {
+  const { generation, current, setSaving, publish, setEditing, setEditValue, refs, editValue, editing, saving, listing, path } = state;
+  const mutate = async (action: () => Promise<void>) => {
+    const request = ++generation.current;
+    const folder = current.current.path;
+    setSaving(true);
+    publish(folder, { ...current.current.listing, error: undefined, failed: undefined });
+    try {
+      await action();
+      if (request !== generation.current) return;
+      setEditing(null);
+      setEditValue('');
+      await load(folder);
+    } catch (cause) {
+      if (request !== generation.current) return;
+      publish(folder, { ...current.current.listing, error: cause, failed: undefined });
+      refs.current.onFailure?.(cause);
+    } finally {
+      if (request === generation.current) setSaving(false);
+    }
+  };
+  const saveEdit = async () => {
+    const name = editValue.trim();
+    if (!editing || !name || saving || listing.loading) return;
+    await mutate(() => editing.kind === 'mkdir' ? refs.current.api.mkdir(path, name) : refs.current.api.rename(editing.entry.path, name));
+  };
+  return { mutate, saveEdit };
+}
+
+export function useSdBrowser(api: TransferApi, initialPath = '', onFailure?: (cause: unknown) => void, seed?: Pick<Listing, 'entries' | 'nextOffset'>, initialShowHidden = false) {
+  const state = useSdBrowserState(api, initialPath, onFailure, seed, initialShowHidden);
+  const { t, showHidden, setShowHidden, hidden, path, listing, saving, setSaving, editing, setEditing, editValue, setEditValue,
+    generation, current, refs, publish } = state;
   useEffect(() => () => { generation.current++; }, []);
 
   const load = useCallback(async (nextPath: string, append = false, retryOffset?: number) => {
@@ -64,30 +104,7 @@ export function useSdBrowser(api: TransferApi, initialPath = '', onFailure?: (ca
     setSaving(false);
     setEditing(null);
   }, []);
-  const mutate = async (action: () => Promise<void>) => {
-    const request = ++generation.current;
-    const folder = current.current.path;
-    setSaving(true);
-    publish(folder, { ...current.current.listing, error: undefined, failed: undefined });
-    try {
-      await action();
-      if (request !== generation.current) return;
-      setEditing(null);
-      setEditValue('');
-      await load(folder);
-    } catch (cause) {
-      if (request !== generation.current) return;
-      publish(folder, { ...current.current.listing, error: cause, failed: undefined });
-      refs.current.onFailure?.(cause);
-    } finally {
-      if (request === generation.current) setSaving(false);
-    }
-  };
-  const saveEdit = async () => {
-    const name = editValue.trim();
-    if (!editing || !name || saving || listing.loading) return;
-    await mutate(() => editing.kind === 'mkdir' ? refs.current.api.mkdir(path, name) : refs.current.api.rename(editing.entry.path, name));
-  };
+  const { mutate, saveEdit } = createSdMutations(state, load);
   return { ...listing, path, loading: saving || listing.loading, error: listing.error ? sdBrowserError(listing.error, t) : null, canRetry: !!listing.failed,
     showHidden, toggleHidden, editing, editValue, setEditing, setEditValue, load, retry, reset, saveEdit, mutate };
 }

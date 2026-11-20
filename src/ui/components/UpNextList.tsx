@@ -40,9 +40,14 @@ function keyOf(track: RemoteTrack): string {
 }
 
 export const UpNextList = forwardRef<FlatList<RemoteTrack>, UpNextListProps>(function UpNextList(
-  { state, onAction, editing, onToggleEditing, onReorderActiveChange, onCardHeightChange, scrollProps },
+  props,
   ref,
 ) {
+  const view = useUpNextList(props);
+  return renderUpNextList(props, view, ref);
+});
+
+function useUpNextList({ state, onAction, editing, onReorderActiveChange, onCardHeightChange }: UpNextListProps) {
   const { t } = useI18n();
   const queue = useUpNextQueue(state, onAction, editing, UP_NEXT_ROW_HEIGHT, onReorderActiveChange);
   const { rows, drag, canEditQueue, playTrack, removeTrack } = queue;
@@ -78,6 +83,14 @@ export const UpNextList = forwardRef<FlatList<RemoteTrack>, UpNextListProps>(fun
     [canEditQueue, currentTrack, draggingIndex, editing, handleProps, playTrack, playing, removeTrack],
   );
 
+  return { t, onViewableItemsChanged, visibleArtwork, drag, rows, renderItem, hasRows, total, setHeaderHeight, setFooterHeight };
+}
+
+function renderUpNextList(
+  { state, editing, onToggleEditing, scrollProps }: UpNextListProps,
+  { t, onViewableItemsChanged, visibleArtwork, drag, rows, renderItem, hasRows, total, setHeaderHeight, setFooterHeight }: ReturnType<typeof useUpNextList>,
+  ref: React.ForwardedRef<FlatList<RemoteTrack>>,
+) {
   return (
     <VisibleQueueArtworkContext.Provider value={visibleArtwork}>
       <DragReorderCellContext.Provider value={drag.rowStyle}>
@@ -122,7 +135,7 @@ export const UpNextList = forwardRef<FlatList<RemoteTrack>, UpNextListProps>(fun
       </DragReorderCellContext.Provider>
     </VisibleQueueArtworkContext.Provider>
   );
-});
+}
 
 const styles = StyleSheet.create({
   header: {

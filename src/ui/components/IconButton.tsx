@@ -113,19 +113,25 @@ function IconButtonContent({
         { transform: [{ scale: press.scale }] },
       ]}
     >
-      {iconStyle ? (
-        <Animated.View style={iconStyle}>
-          <Icon name={icon} size={iconSize} color={color ?? foreground} filled={filled} strokeWidth={iconStrokeWidth} />
-        </Animated.View>
-      ) : (
-        <Icon name={icon} size={iconSize} color={color ?? foreground} filled={filled} strokeWidth={iconStrokeWidth} />
-      )}
+      {renderIcon({ icon, iconSize, color: color ?? foreground, filled, iconStrokeWidth, iconStyle })}
       {busy ? (
         <View pointerEvents="none" style={styles.busyRing}>
           <Spinner size={diameter + BUSY_RING_INSET * 2} color={palette.accent} />
         </View>
       ) : null}
     </AnimatedPressable>
+  );
+}
+
+function renderIcon({
+  icon, iconSize, color, filled, iconStrokeWidth, iconStyle,
+}: Pick<IconButtonProps, 'icon' | 'iconSize' | 'color' | 'filled' | 'iconStrokeWidth' | 'iconStyle'>) {
+  return iconStyle ? (
+    <Animated.View style={iconStyle}>
+      <Icon name={icon} size={iconSize} color={color} filled={filled} strokeWidth={iconStrokeWidth} />
+    </Animated.View>
+  ) : (
+    <Icon name={icon} size={iconSize} color={color} filled={filled} strokeWidth={iconStrokeWidth} />
   );
 }
 

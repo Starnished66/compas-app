@@ -45,29 +45,7 @@ export function PlaylistOptionsSheet({
   const shownPlaylist = lastPlaylist.current;
   const name = shownPlaylist ? playlistDisplayName(shownPlaylist.name) : '';
 
-  const rename = (newName: string) => {
-    if (!playlist) return;
-    const shownName = playlistDisplayName(newName.trim());
-    watchForResult({
-      message: { text: t('Renamed to {name}', { name: newName.trim() }) },
-      confirmed: (listed) => Boolean(listed?.some((entry) => entry.playlistKey && playlistDisplayName(entry.title) === shownName)),
-    });
-    onAction({ type: 'RenamePlaylist', key: playlist.key, name: newName });
-    onClose();
-  };
-
-  const remove = () => {
-    if (!playlist) return;
-    const key = playlist.key;
-    watchForResult({
-      message: { text: t('Deleted {name}', { name }) },
-      // Only a reloaded playlist list counts (empty once the last one is gone); track rows carry no playlistKey.
-      confirmed: (listed) => Boolean(listed && (listed.length === 0 || listed.some((entry) => entry.playlistKey)) && !listed.some((entry) => entry.playlistKey === key)),
-    });
-    onAction({ type: 'DeletePlaylist', key });
-    setConfirmingDelete(false);
-    onClose();
-  };
+  const { rename, remove } = createPlaylistOptionCommands(playlist, name, onAction, onClose, setConfirmingDelete, watchForResult, t);
 
   return (
     <>
@@ -105,4 +83,38 @@ export function PlaylistOptionsSheet({
       />
     </>
   );
+}
+
+function createPlaylistOptionCommands(
+  playlist: Playlist | null, name: string,
+  onAction: PlaylistOptionsSheetProps['onAction'], onClose: PlaylistOptionsSheetProps['onClose'],
+  setConfirmingDelete: (open: boolean) => void,
+  watchForResult: ReturnType<typeof useOptimisticErrorSnackbar<readonly LibraryEntry[] | undefined>>,
+  t: ReturnType<typeof useI18n>['t'],
+) {
+  const rename = (newName: string) => {
+    if (!playlist) return;
+    const shownName = playlistDisplayName(newName.trim());
+    watchForResult({
+      message: { text: t('Renamed to {name}', { name: newName.trim() }) },
+      confirmed: (listed) => Boolean(listed?.some((entry) => entry.playlistKey && playlistDisplayName(entry.title) === shownName)),
+    });
+    onAction({ type: 'RenamePlaylist', key: playlist.key, name: newName });
+    onClose();
+  };
+
+  const remove = () => {
+    if (!playlist) return;
+    const key = playlist.key;
+    watchForResult({
+      message: { text: t('Deleted {name}', { name }) },
+      // Only a reloaded playlist list counts (empty once the last one is gone); track rows carry no playlistKey.
+      confirmed: (listed) => Boolean(listed && (listed.length === 0 || listed.some((entry) => entry.playlistKey)) && !listed.some((entry) => entry.playlistKey === key)),
+    });
+    onAction({ type: 'DeletePlaylist', key });
+    setConfirmingDelete(false);
+    onClose();
+  };
+
+  return { rename, remove };
 }
