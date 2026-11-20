@@ -4,8 +4,8 @@ const vm = require('node:vm');
 const ts = require('typescript');
 
 // Exercise the hook's actual orchestration with controlled native/storage boundaries.
-const source = fs.readFileSync(`${__dirname}/../src/session/useRemoteSession.ts`, 'utf8');
-const tree = ts.createSourceFile('useRemoteSession.ts', source, ts.ScriptTarget.Latest, true);
+const source = fs.readFileSync(`${__dirname}/../src/session/connectionAttempts.ts`, 'utf8');
+const tree = ts.createSourceFile('connectionAttempts.ts', source, ts.ScriptTarget.Latest, true);
 const functions = new Map();
 function visit(node) {
   if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {

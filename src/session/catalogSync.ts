@@ -1,6 +1,12 @@
+import type { SyncedCoverStore } from '../data/SyncedCoverStore';
+import type { SessionState } from './useSessionRefs';
+import { RemoteApi } from '../data/RemoteApi';
+import { SyncedCatalogStore, CatalogIdentity, StoredCatalogCover } from '../data/SyncedCatalogStore';
+import { LocalCatalogUnavailableError } from '../data/catalogDatabase';
+import { fetchCatalogCover } from './artworkResolver';
+import { BluetoothRequestPolicy } from './BluetoothRequestPolicy';
 import { LocalCatalogOpenError } from '../data/catalogDatabase';
-import type { CatalogCoverProgress, CatalogIdentity, StoredCatalogCover, SyncedCatalogStore } from '../data/SyncedCatalogStore';
-import type { RemoteApi } from '../data/RemoteApi';
+import type { CatalogCoverProgress } from '../data/SyncedCatalogStore';
 import { matchesStoredCatalogSnapshot } from './CatalogSyncPolicy';
 
 const CATALOG_SYNC_RETRY_DELAYS_MS = [2000, 5000, 15000];
@@ -148,4 +154,225 @@ export async function syncCatalog(ctx: CatalogSyncContext, refreshManifest: bool
       await new Promise<void>((resolve) => setTimeout(resolve, CATALOG_SYNC_RETRY_DELAYS_MS[retry]));
     }
   }
+}
+interface CatalogSyncDependencies {
+  shared: Pick<SessionState,
+    'apiRef' | 'appForegroundRef' | 'bluetoothAudioOutputRef' | 'catalogCoversByAlbumRef'
+    | 'catalogSyncGenerationRef' | 'catalogSyncProgress' | 'connectionAttemptRef' | 'gateRef'
+    | 'lastBluetoothArtworkAtRef' | 'lastCatalogCoverProgressAtRef' | 'libraryBrowseCatalogRef'
+    | 'queueArtworkBySongRef' | 'queueArtworkPendingRef' | 'stateRef' | 'syncedCatalogStoreRef'
+    | 'syncedCoverStoreRef' | 'syncedCoverUriCacheRef'
+  >;
+  adoptCatalog: (identity: CatalogIdentity | null) => void;
+  markCatalogUnavailable: () => void;
+  restartCatalogBrowse: (api: RemoteApi, isNested: boolean, query: string) => void;
+}
+
+// Background Catalog Sync Worker
+const catalogSyncIsCurrent = ({ shared }: CatalogSyncDependencies, api: RemoteApi, attempt: number, generation: number) => {
+  const { apiRef, catalogSyncGenerationRef, connectionAttemptRef } = shared;
+  return apiRef.current === api && attempt === connectionAttemptRef.current && generation === catalogSyncGenerationRef.current;
+};
+
+const startCatalogSync = async (
+  deps: CatalogSyncDependencies,
+  api: RemoteApi,
+  attempt: number,
+  features: string[],
+  refreshCoversManifest: boolean = false
+) => {
+  const { shared, adoptCatalog, markCatalogUnavailable, restartCatalogBrowse } = deps;
+  const {
+    apiRef, catalogCoversByAlbumRef, catalogSyncGenerationRef, catalogSyncProgress,
+    connectionAttemptRef, lastCatalogCoverProgressAtRef, libraryBrowseCatalogRef,
+    queueArtworkBySongRef, queueArtworkPendingRef, stateRef, syncedCatalogStoreRef, syncedCoverUriCacheRef,
+  } = shared;
+  if (apiRef.current !== api || attempt !== connectionAttemptRef.current) return;
+  const generation = ++catalogSyncGenerationRef.current;
+  const ownsCatalogSync = () => catalogSyncIsCurrent(deps, api, attempt, generation);
+  try {
+    const supported = features.includes('catalog_sync_v1');
+    if (!supported) {
+      adoptCatalog(null);
+      catalogCoversByAlbumRef.current = new Map();
+      syncedCoverUriCacheRef.current = new Map();
+      queueArtworkBySongRef.current.clear();
+      queueArtworkPendingRef.current.clear();
+      catalogSyncProgress.set(null);
+      return;
+    }
+
+    syncedCoverUriCacheRef.current = new Map();
+    queueArtworkBySongRef.current.clear();
+    queueArtworkPendingRef.current.clear();
+    lastCatalogCoverProgressAtRef.current = 0;
+    catalogSyncProgress.set('Checking player library');
+
+    await syncCatalog({
+      api,
+      store: syncedCatalogStoreRef.current,
+      isCurrent: ownsCatalogSync,
+      request: (request) => catalogNetwork(deps, api, attempt, generation, false, request),
+      setMessage: catalogSyncProgress.set,
+      adopt: adoptCatalog,
+      setCovers: (covers) => {
+        const coverMap = catalogCoversByAlbumRef.current;
+        coverMap.clear();
+        covers.forEach((cover) => coverMap.set(cover.albumKey, cover));
+      },
+      finishCovers: (identity, covers) => downloadCatalogCovers(deps, api, attempt, generation, identity, covers),
+    }, refreshCoversManifest);
+  } catch (error) {
+    if (!ownsCatalogSync()) return;
+    if (error instanceof LocalCatalogUnavailableError) {
+      const restartBrowse = libraryBrowseCatalogRef.current;
+      markCatalogUnavailable();
+      if (restartBrowse) {
+        const { libraryIsNested, libraryQuery } = stateRef.current;
+        restartCatalogBrowse(api, libraryIsNested, libraryQuery);
+      }
+    } else {
+      catalogSyncProgress.set('Library sync failed');
+    }
+  }
+};
+
+const catalogTransferAllowed = ({ shared }: CatalogSyncDependencies, optionalArtwork: boolean): boolean => {
+  const { appForegroundRef, bluetoothAudioOutputRef, gateRef, stateRef } = shared;
+  const transport = stateRef.current.connectionTransport;
+  const route = bluetoothAudioOutputRef.current;
+  if (!BluetoothRequestPolicy.allowsPassiveRequests(transport, appForegroundRef.current, route)) return false;
+  if (BluetoothRequestPolicy.requiresBluetoothAudioPriority(transport, route)) {
+    if (!appForegroundRef.current || !gateRef.current.confirmedPaused || stateRef.current.isPlaying) return false;
+  }
+  return !optionalArtwork || BluetoothRequestPolicy.allowsArtworkRequest(transport, stateRef.current.isPlaying, route);
+};
+
+const catalogNetwork = async <T,>(
+  deps: CatalogSyncDependencies,
+  api: RemoteApi,
+  attempt: number,
+  generation: number,
+  optionalArtwork: boolean,
+  request: () => Promise<T>
+): Promise<T> => {
+  const { bluetoothAudioOutputRef, catalogSyncProgress, lastBluetoothArtworkAtRef, stateRef } = deps.shared;
+  while (catalogSyncIsCurrent(deps, api, attempt, generation)) {
+    if (catalogTransferAllowed(deps, optionalArtwork)) {
+      if (!optionalArtwork || !BluetoothRequestPolicy.requiresBluetoothAudioPriority(
+        stateRef.current.connectionTransport,
+        bluetoothAudioOutputRef.current
+      ) || Date.now() - lastBluetoothArtworkAtRef.current >=
+        BluetoothRequestPolicy.artworkMinIntervalMs(stateRef.current.connectionTransport, bluetoothAudioOutputRef.current)) {
+        if (optionalArtwork && BluetoothRequestPolicy.requiresBluetoothAudioPriority(
+          stateRef.current.connectionTransport,
+          bluetoothAudioOutputRef.current
+        )) lastBluetoothArtworkAtRef.current = Date.now();
+        return await request();
+      }
+    }
+    catalogSyncProgress.set(BluetoothRequestPolicy.requiresBluetoothAudioPriority(
+      stateRef.current.connectionTransport,
+      bluetoothAudioOutputRef.current
+    ) ? 'Waiting for WiFi or paused Bluetooth audio' : 'Waiting to resume library sync');
+    await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error('Catalog sync no longer owns the active player session');
+};
+
+const storePendingCovers = async (
+  deps: CatalogSyncDependencies,
+  api: RemoteApi, activeIdentity: CatalogIdentity, allCovers: StoredCatalogCover[], pending: StoredCatalogCover[],
+  coverStore: SyncedCoverStore, coverUriMap: Map<string, string>, ownsCoverDownloads: () => boolean,
+  read: <T>(request: () => Promise<T>) => Promise<T>,
+) => {
+  const { catalogSyncProgress, lastCatalogCoverProgressAtRef, syncedCatalogStoreRef } = deps.shared;
+  const downloadableTotal = allCovers.filter((c) => c.available !== false).length;
+  let done = downloadableTotal - pending.length;
+  // A cover cut off by a timeout or a server error gets one more try at the end of this pass.
+  const requeued = new Set<string>();
+
+  for (const cover of pending) {
+    if (!ownsCoverDownloads()) return;
+    const markCoverState = (state: number) =>
+      syncedCatalogStoreRef.current.markCoverState(activeIdentity.libraryId, activeIdentity.revision, cover.albumKey, state);
+    if (cover.available === false) {
+      await markCoverState(SyncedCatalogStore.COVER_MISSING);
+      done++;
+      continue;
+    }
+
+    const progressTime = Date.now();
+    if (progressTime - lastCatalogCoverProgressAtRef.current >= 2000) {
+      lastCatalogCoverProgressAtRef.current = progressTime;
+      catalogSyncProgress.set(`Downloading covers ${Math.min(done, downloadableTotal)}/${downloadableTotal}`);
+    }
+
+    try {
+      const existing = await coverStore.getDiskUri(activeIdentity.libraryId, cover.coverKey);
+      if (!ownsCoverDownloads()) return;
+      const { uri, onDisk } = existing ? { uri: existing, onDisk: true } : await fetchCatalogCover(
+        api, coverStore, activeIdentity, cover,
+        read, ownsCoverDownloads,
+      );
+      if (!ownsCoverDownloads()) return;
+      if (onDisk || !uri) {
+        await markCoverState(onDisk ? SyncedCatalogStore.COVER_STORED : SyncedCatalogStore.COVER_MISSING);
+      }
+      if (!ownsCoverDownloads()) return;
+      if (onDisk && uri) coverUriMap.set(cover.albumKey, uri);
+    } catch (err: any) {
+      if (!ownsCoverDownloads()) return;
+      if (err instanceof LocalCatalogUnavailableError) throw err;
+      if (err?.statusCode === 404) {
+        await markCoverState(SyncedCatalogStore.COVER_MISSING);
+      } else if (err?.statusCode === 413) {
+        await markCoverState(SyncedCatalogStore.COVER_PERMANENT_FAILURE);
+      } else if (!requeued.has(cover.albumKey)) {
+        requeued.add(cover.albumKey);
+        pending.push(cover);
+        continue;
+      }
+    }
+    done++;
+  }
+
+  if (ownsCoverDownloads()) catalogSyncProgress.set(null);
+};
+
+const downloadCatalogCovers = async (
+  deps: CatalogSyncDependencies,
+  api: RemoteApi,
+  attempt: number,
+  generation: number,
+  activeIdentity: CatalogIdentity,
+  allCovers: StoredCatalogCover[]
+) => {
+  const {
+    catalogCoversByAlbumRef, syncedCatalogStoreRef, syncedCoverStoreRef, syncedCoverUriCacheRef,
+  } = deps.shared;
+  const ownsCatalogSync = () => catalogSyncIsCurrent(deps, api, attempt, generation);
+  const coverMap = catalogCoversByAlbumRef.current;
+  const coverUriMap = syncedCoverUriCacheRef.current;
+  // The manifest is complete here, so files for covers it no longer lists are orphans.
+  const coverStore = syncedCoverStoreRef.current;
+  void coverStore.pruneLibrary(activeIdentity.libraryId, allCovers.map((c) => c.coverKey), ownsCatalogSync).catch(() => {});
+  void syncedCatalogStoreRef.current.retainedLibraryIds().then((ids) => {
+    if (ownsCatalogSync()) return coverStore.purgeLibrariesExcept(ids, ownsCatalogSync);
+  }).catch(() => {});
+
+  const pending = await syncedCatalogStoreRef.current.pendingCovers(activeIdentity.libraryId, activeIdentity.revision);
+  if (!ownsCatalogSync() || catalogCoversByAlbumRef.current !== coverMap || syncedCoverUriCacheRef.current !== coverUriMap) return;
+  const ownsCoverDownloads = () => ownsCatalogSync() &&
+    catalogCoversByAlbumRef.current === coverMap && syncedCoverUriCacheRef.current === coverUriMap;
+  await storePendingCovers(deps,
+    api, activeIdentity, allCovers, pending, coverStore, coverUriMap, ownsCoverDownloads,
+    (request) => catalogNetwork(deps, api, attempt, generation, true, request),
+  );
+};
+
+export function createCatalogSync(deps: CatalogSyncDependencies) {
+  return {
+    startCatalogSync: startCatalogSync.bind(undefined, deps),
+  };
 }
