@@ -95,7 +95,9 @@ export const en: Record<string, TranslationValue> = {
   'Replace plugin files?': 'Replace plugin files?',
   'Installing this plugin may replace files on the player. Continue only if you trust this plugin.': 'Installing this plugin may replace files on the player. Continue only if you trust this plugin.',
   'This removes the plugin from the player.': 'This removes the plugin from the player.',
-  'The player only returned the first {count} installed plugins.': 'The player only returned the first {count} installed plugins.', '{count} song': { one: '{count} song', other: '{count} songs' } };
+  'The player only returned the first {count} installed plugins.': 'The player only returned the first {count} installed plugins.', '{count} song': { one: '{count} song', other: '{count} songs' },
+  "Use Play or Shuffle to play recently added music on the player.": "Use Play or Shuffle to play recently added music on the player.",
+};
 
 Object.assign(en, {
   'Beta version {version} · {size}': 'Beta version {version} · {size}',
@@ -122,6 +124,7 @@ Object.assign(en, {
   'Could not open the phone file picker.': 'Could not open the phone file picker.',
   'Could not start Wi-Fi import.': 'Could not start Wi-Fi import.',
   '{count} files uploaded.': { one: '{count} file uploaded.', other: '{count} files uploaded.' },
+  '{count} already on this phone.': '{count} already on this phone.',
   'A file with this name already exists. Rename the file or choose another destination.': 'A file with this name already exists. Rename the file or choose another destination.',
   'Upload stopped. You can retry the remaining files.': 'Upload stopped. You can retry the remaining files.',
   'Could not finish import.': 'Could not finish import.',
@@ -215,6 +218,13 @@ Object.assign(en, {
 
 Object.assign(en, {
   'The transfer service is busy. Wait a moment and try again.': 'The transfer service is busy. Wait a moment and try again.',
+  'That file is no longer on the player. Refresh the folder and try again.': 'That file is no longer on the player. Refresh the folder and try again.',
+  'Could not save the file on this phone. Check free space and file access, then try again.': 'Could not save the file on this phone. Check free space and file access, then try again.',
+  '{name} is not available': '{name} is not available',
+  '{name} is not a folder': '{name} is not a folder',
+  'Could not read {name}': 'Could not read {name}',
+  'Choose fewer than {count} files at once': 'Choose fewer than {count} files at once',
+  'Allow file access to browse this device': 'Allow file access to browse this device',
   'Turn on Wi-Fi on the player and try again.': 'Turn on Wi-Fi on the player and try again.',
   'Insert or remount the player’s SD card, then try again.': 'Insert or remount the player’s SD card, then try again.',
   'The player is busy with another task. Finish it and try again.': 'The player is busy with another task. Finish it and try again.',
@@ -252,4 +262,53 @@ Object.assign(en, {
   "Rating": "Rating",
   "Album Artist, then Year": "Album Artist, then Year",
   "Reversed order": "Reversed order",
+});
+
+Object.assign(en, {
+  "Capture the current player screen": "Capture the current player screen",
+  "Capturing screenshot…": "Capturing screenshot…",
+  "Could not capture a screenshot.": "Could not capture a screenshot.",
+  "Could not create folder.": "Could not create folder.",
+  "Could not open this folder.": "Could not open this folder.",
+  "Could not save the screenshot.": "Could not save the screenshot.",
+  "Download": "Download",
+  "Download cancelled.": "Download cancelled.",
+  "Download complete.": "Download complete.",
+  "Download failed.": "Download failed.",
+  "Downloading": "Downloading",
+  "Go to album": "Go to album",
+  "Go to artist": "Go to artist",
+  "More options": "More options",
+  "No subfolders here.": "No subfolders here.",
+  "Played": "Played",
+  "Player screenshot": "Player screenshot",
+  "Recently added": "Recently added",
+  "recently added albums": "recently added albums",
+  "Remove saved player": "Remove saved player",
+  "Save to device": "Save to device",
+  "Saved on the player SD card.": "Saved on the player SD card.",
+  "Saved on the player SD card. Connect over Wi-Fi to view or download it.": "Saved on the player SD card. Connect over Wi-Fi to view or download it.",
+  "Saved players": "Saved players",
+  "Screenshot saved.": "Screenshot saved.",
+  "Take another": "Take another",
+  "Take screenshot": "Take screenshot",
+});
+
+Object.assign(en, {
+  "Connect to a player first.": "Connect to a player first.",
+  "The Wi-Fi import session ended.": "The Wi-Fi import session ended.",
+  "Wi-Fi import did not become ready in time.": "Wi-Fi import did not become ready in time.",
+  "The Wi-Fi import session ended. Reconnect before finishing.": "The Wi-Fi import session ended. Reconnect before finishing.",
+  "The Wi-Fi import page did not stop in time.": "The Wi-Fi import page did not stop in time.",
+  "The Wi-Fi import session ended. Reopen import for the connected player.": "The Wi-Fi import session ended. Reopen import for the connected player.",
+  "Transfer cancelled.": "Transfer cancelled.",
+  "Invalid file name": "Invalid file name",
+  "Invalid destination folder": "Invalid destination folder",
+  "Destination path escapes selected folder": "Destination path escapes selected folder",
+  "Download cancellation timed out": "Download cancellation timed out",
+  "Enter a valid folder name": "Enter a valid folder name",
+  "Could not create folder": "Could not create folder",
+  "A file with that name already exists": "A file with that name already exists",
+  "Allow file write access to save to this device": "Allow file write access to save to this device",
+  "Could not find this album in the library.": "Could not find this album in the library.",
 });

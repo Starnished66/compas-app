@@ -273,6 +273,25 @@ export class CatalogBrowseQueries {
     return row && row.album_key ? String(row.album_key) : null;
   }
 
+  async albumKeysForTrack(
+    libraryId: string,
+    revision: string,
+    title: string,
+    artist: string,
+    album: string
+  ): Promise<string[]> {
+    const db = await this.database();
+    const rows = await db.query<{ album_key: string }>(
+      `SELECT DISTINCT album_key FROM catalog_songs
+       WHERE library_id = ? AND revision = ? AND
+             title = ? COLLATE NOCASE AND artist = ? COLLATE NOCASE AND album = ? COLLATE NOCASE AND
+             album_key IS NOT NULL
+       LIMIT 2`,
+      [libraryId, revision, title, artist, album]
+    );
+    return rows.map((row) => String(row.album_key));
+  }
+
   private songWhere(
     libraryId: string,
     revision: string,

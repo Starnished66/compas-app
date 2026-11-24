@@ -8,6 +8,7 @@ import { ArtworkThumb } from '../components/ArtworkThumb';
 import { AudioFormatBadges } from '../components/AudioFormatBadges';
 import { EnterView } from '../components/EnterView';
 import { FavoriteButton } from '../components/FavoriteButton';
+import { IconButton } from '../components/IconButton';
 import { NowPlayingFooter } from '../components/NowPlayingFooter';
 import { ReconnectBanner } from '../components/ReconnectBanner';
 import { SeekBar } from '../components/SeekBar';
@@ -97,14 +98,16 @@ interface ControlsOptions {
   track: RemoteTrack | null | undefined;
   commands: ReturnType<typeof usePlayerCommands>;
   showFormat: () => void;
+  showTrackMenu?: () => void;
   onClose: () => void;
   t: Translate;
 }
 
-function renderTrackInfo({ state, visible, metaOpacity, metaStyle, shown, track, commands, showFormat, t }: ControlsOptions) {
+function renderTrackInfo({ state, visible, metaOpacity, metaStyle, shown, track, commands, showFormat, showTrackMenu, t }: ControlsOptions) {
   const subtitle = shown ? [shown.artist || t('Unknown artist'), shown.album].filter(Boolean).join(' · ') : '';
   const canRate = state.supportedFeatures.includes('ratings_edit');
   const canFavorite = state.supportedFeatures.includes('favorites_edit');
+  const canJump = Boolean(showTrackMenu && (track?.album || track?.artist));
 
   return (
     <View style={styles.info}>
@@ -121,6 +124,14 @@ function renderTrackInfo({ state, visible, metaOpacity, metaStyle, shown, track,
             ) : null}
           </RNAnimated.View>
         </RNAnimated.View>
+        {canJump ? (
+          <IconButton
+            icon="moreHorizontal"
+            label={t('More options')}
+            size="sm"
+            onPress={showTrackMenu}
+          />
+        ) : null}
         {!canRate && canFavorite && track ? (
           <FavoriteButton
             rating={commands.displayedRating}

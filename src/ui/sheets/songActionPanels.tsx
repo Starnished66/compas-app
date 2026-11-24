@@ -14,7 +14,7 @@ import type { SongActionView } from './SongActionsSheet';
 const HEADER_ARTWORK_SIZE = 48;
 
 function renderSongActions(view: SongActionView) {
-  const { details, commands, pending, palette, t } = view;
+  const { state, onAction, details, commands, pending, palette, t } = view;
   const { entry, entryArtwork, title, rating, stars, busy, features } = details;
   const { run, setRating, openPlaylistStep } = commands;
   return (
@@ -52,6 +52,34 @@ function renderSongActions(view: SongActionView) {
         />
       ) : null}
       <SheetActionRow icon="playlistAdd" label={t('Add to playlist…')} onPress={openPlaylistStep} />
+      {state.songActionAlbum ? (
+        <SheetActionRow
+          icon="disc"
+          label={t('Go to album')}
+          onPress={() => {
+            commands.close();
+            onAction({
+              type: 'GoToAlbum',
+              album: state.songActionAlbum!,
+              title: state.songActionTitle || null,
+              artist: state.songActionArtist,
+              albumArtist: state.songActionAlbumArtist,
+              albumKey: state.songActionAlbumKey,
+              songId: state.songActionSongId ?? null,
+            });
+          }}
+        />
+      ) : null}
+      {state.songActionArtist ? (
+        <SheetActionRow
+          icon="person"
+          label={t('Go to artist')}
+          onPress={() => {
+            commands.close();
+            onAction({ type: 'GoToArtist', artist: state.songActionArtist! });
+          }}
+        />
+      ) : null}
       {renderPlaylistTrackActions(view)}
     </>
   );

@@ -7,6 +7,7 @@ interface QueueActionsDependencies {
   clearQueue: () => Promise<void>;
   editQueue: (id: string, direction?: 1 | -1 | undefined) => Promise<void>;
   loadMoreQueue: () => Promise<void>;
+  loadMorePlayedQueue: () => Promise<void>;
   loadQueueArtwork: (songIndexes: number[], api: RemoteApi, retry?: boolean) => void;
   removeQueueTrack: (id: string) => Promise<void>;
   removeQueueTracks: (ids: string[]) => Promise<void>;
@@ -15,6 +16,11 @@ interface QueueActionsDependencies {
 const handleLoadMoreQueue = (deps: QueueActionsDependencies) => {
   const { loadMoreQueue } = deps;
   loadMoreQueue();
+};
+
+const handleLoadMorePlayedQueue = (deps: QueueActionsDependencies) => {
+  const { loadMorePlayedQueue } = deps;
+  loadMorePlayedQueue();
 };
 
 const handleRetryQueueArtwork = (deps: QueueActionsDependencies, action: ActionOf<'RetryQueueArtwork'>) => {
@@ -51,6 +57,7 @@ export function createQueueActions(deps: QueueActionsDependencies) {
   return {
     queueActions: {
       LoadMoreQueue: handleLoadMoreQueue.bind(undefined, deps),
+      LoadMorePlayedQueue: handleLoadMorePlayedQueue.bind(undefined, deps),
       RetryQueueArtwork: handleRetryQueueArtwork.bind(undefined, deps),
       RemoveQueueTrack: handleRemoveQueueTrack.bind(undefined, deps),
       RemoveQueueTracks: handleRemoveQueueTracks.bind(undefined, deps),

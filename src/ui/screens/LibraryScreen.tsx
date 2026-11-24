@@ -47,6 +47,8 @@ function emptyMessage(category: LibraryCategory, nested: boolean, supportedFeatu
   switch (category) {
     case LibraryCategory.Favorites:
       return favoritesLabels(supportedFeatures).empty;
+    case LibraryCategory.RecentlyAdded:
+      return { title: 'Recently added', body: 'Use Play or Shuffle to play recently added music on the player.' };
     case LibraryCategory.Recent:
       return { title: 'Nothing played yet', body: 'Songs played on the player show up here.' };
     default:
@@ -87,7 +89,7 @@ function useLibraryProjection(state: RemoteUiState, category: LibraryCategory, s
   const nativeRootSongsPlayback =
     nativeCollectionSupported &&
     !nested &&
-    [LibraryCategory.Songs, LibraryCategory.Favorites, LibraryCategory.Recent].includes(category);
+    [LibraryCategory.Songs, LibraryCategory.Favorites, LibraryCategory.RecentlyAdded, LibraryCategory.Recent].includes(category);
   const nativeGenrePlayback =
     nativeCollectionSupported && category === LibraryCategory.Genres && nested && state.libraryNestedTitle === 'Tracks';
   const gridCapable = (!nested && category === LibraryCategory.Albums) || artistDetail;

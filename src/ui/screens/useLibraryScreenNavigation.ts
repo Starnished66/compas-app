@@ -40,7 +40,7 @@ export function useLibrarySetup(state: RemoteUiState, onAction: LibraryScreenPro
   const { columns, tileWidth } = useAlbumGrid();
   const nested = state.libraryIsNested;
   const searchActive = (searchOpen || category === LibraryCategory.Search) && !nested;
-  const trail = useCollectionTrail(state.libraryEntries, nested);
+  const trail = useCollectionTrail(state.libraryEntries, nested, state.catalogJump);
   const insets = useScreenInsets();
   const chipsHeader = useStuckHeader();
   const scroll = useLibraryListScroll(chipsHeader.trackOffset);

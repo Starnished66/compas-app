@@ -10,6 +10,7 @@ import { DisconnectButton } from '../components/DisconnectButton';
 import { EnterView } from '../components/EnterView';
 import { IconButton } from '../components/IconButton';
 import { PlayerCard } from '../components/PlayerCard';
+import { SavedPlayerList } from '../components/SavedPlayerList';
 import { SegmentedControl, SegmentedOption } from '../components/SegmentedControl';
 import { StatusIndicator } from '../components/StatusIndicator';
 import { WifiPlayerList } from '../components/WifiPlayerList';
@@ -78,7 +79,7 @@ function useConnectionScreen(state: RemoteUiState, onAction: ConnectionScreenPro
 
   return {
     t, palette, insets, manualOpen, setManualOpen, player, pairAndConnect, connected, connecting, failed, transport,
-    bluetooth, status, target, alreadyConnected, retryDelay, connect,
+    bluetooth, status, target, currentKey, alreadyConnected, retryDelay, connect,
   };
 }
 
@@ -147,7 +148,7 @@ function renderConnectedPlayer(
 }
 
 function renderConnectionList({ state, onAction }: ConnectionScreenProps, connection: ConnectionScreenState) {
-  const { t, player, connected, transport, failed, retryDelay, bluetooth, pairAndConnect, manualOpen, setManualOpen, connect } = connection;
+  const { t, player, connected, connecting, currentKey, transport, failed, retryDelay, bluetooth, pairAndConnect, manualOpen, setManualOpen, connect } = connection;
   return (
     <ScrollView
       style={styles.scroll}
@@ -155,7 +156,16 @@ function renderConnectionList({ state, onAction }: ConnectionScreenProps, connec
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-    {connected ? renderConnectedPlayer(player, onAction, t) : null}
+      {connected ? renderConnectedPlayer(player, onAction, t) : null}
+
+      <SavedPlayerList
+        profiles={state.savedProfiles ?? []}
+        connectedKey={connected ? currentKey : null}
+        connectedTransport={state.connectionTransport}
+        busy={connecting}
+        onSelect={(id) => onAction({ type: 'SwitchSavedProfile', id })}
+        onRemove={(id) => onAction({ type: 'RemoveSavedProfile', id })}
+      />
 
       {BLUETOOTH_AVAILABLE ? (
         <SegmentedControl

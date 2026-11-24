@@ -24,21 +24,27 @@ export interface CollectedFile {
 
 interface CompasFilesNativeModule {
   hasStorageAccess(): boolean;
+  hasWriteStorageAccess(): boolean;
   usesAllFilesAccess(): boolean;
   openAllFilesAccessSettings(): boolean;
   getRoots(): StorageRoot[];
   listDirectory(path: string, showHidden: boolean): Promise<LocalFileEntry[]>;
   collectFiles(paths: string[], showHidden: boolean): Promise<CollectedFile[]>;
+  createDirectory(parentPath: string, name: string): Promise<string>;
+  fileExists(path: string): boolean;
   uploadFile(taskId: string, url: string, fileUri: string, headers: Record<string, string>): Promise<{ status: number; body: string }>;
-  downloadFile(taskId: string, url: string, fileUri: string, headers: Record<string, string>): Promise<NativeDownloadResult>;
+  /** With `exclusive`, an existing file is never replaced; the body goes to the next free name (`savedPath`). */
+  downloadFile(taskId: string, url: string, fileUri: string, headers: Record<string, string>, exclusive: boolean): Promise<NativeDownloadResult>;
   cancelTransfer(taskId: string): void;
   addListener(eventName: 'onUploadProgress', listener: (event: { taskId: string; sent: number; total: number }) => void): { remove(): void };
+  addListener(eventName: 'onDownloadProgress', listener: (event: { taskId: string; received: number; total: number }) => void): { remove(): void };
 }
 
 export interface NativeDownloadResult {
   status: number;
   headers: Record<string, string>;
   errorBody: string;
+  savedPath?: string | null;
 }
 
 let nativeModule: CompasFilesNativeModule | null = null;
@@ -73,6 +79,14 @@ export function hasStorageAccess(): boolean {
   }
 }
 
+export function hasWriteStorageAccess(): boolean {
+  try {
+    return getNativeModule()?.hasWriteStorageAccess() ?? false;
+  } catch {
+    return false;
+  }
+}
+
 export function usesAllFilesAccess(): boolean {
   try {
     return getNativeModule()?.usesAllFilesAccess() ?? false;
@@ -101,6 +115,18 @@ export function collectLocalFiles(paths: string[], showHidden = false): Promise<
   return requireModule().collectFiles(paths, showHidden);
 }
 
+export function createLocalDirectory(parentPath: string, name: string): Promise<string> {
+  return requireModule().createDirectory(parentPath, name);
+}
+
+export function localFileExists(path: string): boolean {
+  try {
+    return getNativeModule()?.fileExists?.(path) ?? false;
+  } catch {
+    return false;
+  }
+}
+
 /** Builds a file:// URI that native upload code decodes back to the exact path. */
 export function localFileUri(path: string): string {
   return `file://${path.split('/').map(encodeURIComponent).join('/')}`;
@@ -114,6 +140,7 @@ export function getPinSafeTransfers(): Pick<CompasFilesNativeModule, 'uploadFile
 
 type PinSafeDownloads = Pick<CompasFilesNativeModule, 'downloadFile'> & {
   cancelTransfer(taskId: string): void | Promise<void>;
+  addListener?: CompasFilesNativeModule['addListener'];
 };
 
 /** The native redirect-rejecting downloader; Android only, other platforms keep the base64 path. */

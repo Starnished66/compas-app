@@ -1,4 +1,5 @@
 import type { SessionState } from './useSessionRefs';
+import type { RemoteTrack } from '../data/types';
 import { RemoteApi } from '../data/RemoteApi';
 import { applyQueueArtwork, QUEUE_ARTWORK_FLUSH_MS } from './queueArtwork';
 import { ArtworkSources } from './artworkResolver';
@@ -53,11 +54,13 @@ const scheduleQueueArtworkFlush = (deps: QueueSessionArtworkDependencies) => {
     if (!resolved.size) return;
     queueArtworkPendingRef.current = new Map();
     setState((prev) => {
-      const queue = applyQueueArtwork(prev.queue, (track) => {
+      const artworkFor = (track: RemoteTrack) => {
         const songIndex = queueTargetsRef.current.get(track.id)?.songIndex;
         return songIndex == null ? undefined : resolved.get(songIndex);
-      });
-      return queue === prev.queue ? prev : { ...prev, queue };
+      };
+      const queue = applyQueueArtwork(prev.queue, artworkFor);
+      const queuePlayed = prev.queuePlayed ? applyQueueArtwork(prev.queuePlayed, artworkFor) : prev.queuePlayed;
+      return queue === prev.queue && queuePlayed === prev.queuePlayed ? prev : { ...prev, queue, queuePlayed };
     });
   }, QUEUE_ARTWORK_FLUSH_MS);
 };

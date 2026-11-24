@@ -2,6 +2,7 @@ import type { useSessionRating } from './useSessionRating';
 import type { SessionState } from './useSessionRefs';
 import { ConnectionStatus, WifiImportStatus } from '../data/types';
 import { clearMediaState, stopPlaybackService } from '../../modules/compas-media-session/src/index';
+import { EMPTY_QUEUE_STATE } from './queueTargets';
 import type { NowPlayingArtwork } from './NowPlayingArtwork';
 
 interface ConnectionTeardownDependencies extends
@@ -69,8 +70,7 @@ const publishDisconnected = (setState: SessionState['setState']) => {
     playerVersion: null,
     currentRating: 0,
     pendingCurrentRating: undefined,
-    queue: [],
-    queueLoadingMore: false,
+    ...EMPTY_QUEUE_STATE,
     libraryEntries: [],
   }));
 };

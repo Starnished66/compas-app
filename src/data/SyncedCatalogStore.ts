@@ -116,6 +116,10 @@ export class SyncedCatalogStore {
     return this.browse.findAlbumKey(...args);
   }
 
+  albumKeysForTrack(...args: Parameters<CatalogBrowseQueries['albumKeysForTrack']>) {
+    return this.browse.albumKeysForTrack(...args);
+  }
+
   async beginCovers(
     libraryId: string,
     revision: string,

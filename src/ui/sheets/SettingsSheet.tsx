@@ -35,6 +35,7 @@ export interface SettingsSheetProps {
   onOpenConnection: () => void;
   onOpenUpdates: () => void;
   onOpenTransfer: () => void;
+  onOpenScreenshot?: () => void;
   onOpenPlayerSettings?: () => void;
   onOpenPlugins?: () => void;
 }
@@ -200,7 +201,7 @@ function renderSettingsPlayer(props: SettingsSheetProps, view: SettingsView) {
   );
 }
 
-function renderPlayerCommands({ state, onClose, onOpenTransfer, onOpenPlugins, onOpenPlayerSettings }: SettingsSheetProps, { t, afterClose }: SettingsView) {
+function renderPlayerCommands({ state, onClose, onOpenTransfer, onOpenScreenshot, onOpenPlugins, onOpenPlayerSettings }: SettingsSheetProps, { t, afterClose }: SettingsView) {
   return (
     <>
       <Divider />
@@ -219,6 +220,19 @@ function renderPlayerCommands({ state, onClose, onOpenTransfer, onOpenPlugins, o
           onOpenTransfer();
         }}
       />
+      {onOpenScreenshot && state.supportedFeatures.includes('screenshots') ? (
+        <>
+          <Divider />
+          <ListRow
+            variant="action"
+            title={t('Player screenshot')}
+            leading={<Icon name="playerScreen" />}
+            subtitle={t('Capture the current player screen')}
+            trailing={<Icon name="chevronRight" size={CHEVRON_SIZE} />}
+            onPress={() => { onClose(); onOpenScreenshot(); }}
+          />
+        </>
+      ) : null}
       {onOpenPlugins && (state.supportedFeatures.includes('plugin_store') || state.supportedFeatures.includes('plugin_management') || state.supportedFeatures.includes('player_layouts')) ? (
         <>
           <Divider />

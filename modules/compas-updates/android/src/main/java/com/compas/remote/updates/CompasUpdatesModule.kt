@@ -24,15 +24,53 @@ private const val CHANNEL_NAME = "Compás Updates"
 private const val FIRMWARE_NOTIFICATION_ID = 9401
 private const val APPLICATION_NOTIFICATION_ID = 9402
 private const val MAX_VERSION_LENGTH = 64
+internal const val EXTRA_INSTALL_APP_UPDATE = "com.compas.remote.updates.INSTALL_APP_UPDATE"
+private const val EVENT_APP_UPDATE_INSTALL_REQUESTED = "onAppUpdateInstallRequested"
+
+internal data class ReleaseNotificationCopy(
+    val title: String,
+    val contentText: String,
+    val bigText: String,
+)
+
+internal fun releaseNotificationCopy(kind: String, version: String): ReleaseNotificationCopy =
+    if (kind == "firmware") {
+        ReleaseNotificationCopy(
+            title = "Compás firmware $version released",
+            contentText = "Review release notes.",
+            bigText = "Review the release notes for details.",
+        )
+    } else {
+        ReleaseNotificationCopy(
+            title = "Compás Remote $version available",
+            contentText = "Tap to download and install.",
+            bigText = "Tap to download and install.",
+        )
+    }
 
 class CompasUpdatesModule : Module() {
     private val installInFlight = AtomicBoolean(false)
+    private val pendingAppUpdateInstall = AtomicBoolean(false)
     private val context: Context
         get() = appContext.reactContext?.applicationContext
             ?: throw IllegalStateException("React context is unavailable")
 
     override fun definition() = ModuleDefinition {
         Name("CompasUpdates")
+        Events(EVENT_APP_UPDATE_INSTALL_REQUESTED)
+
+        OnNewIntent { intent ->
+            if (consumeIntentInstallFlag(intent)) {
+                pendingAppUpdateInstall.set(true)
+                runCatching { sendEvent(EVENT_APP_UPDATE_INSTALL_REQUESTED, emptyMap<String, Any>()) }
+            }
+        }
+
+        Function("consumePendingAppUpdateInstall") {
+            val fromActivity = consumeIntentInstallFlag(appContext.currentActivity?.intent)
+            val fromNewIntent = pendingAppUpdateInstall.getAndSet(false)
+            fromActivity || fromNewIntent
+        }
 
         AsyncFunction("fetchAppUpdateManifest") { channel: String, promise: Promise ->
             Thread({
@@ -133,9 +171,17 @@ class CompasUpdatesModule : Module() {
 
         return runCatching {
             val notificationId = if (kind == "firmware") FIRMWARE_NOTIFICATION_ID else APPLICATION_NOTIFICATION_ID
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                addCategory(Intent.CATEGORY_BROWSABLE)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val intent = if (kind == "firmware") {
+                Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            } else {
+                // Reopen the existing task and ask JS to run the verified in-app installer.
+                context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    putExtra(EXTRA_INSTALL_APP_UPDATE, true)
+                } ?: return false
             }
             val pendingIntent = PendingIntent.getActivity(
                 context,
@@ -143,16 +189,12 @@ class CompasUpdatesModule : Module() {
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            val title = if (kind == "firmware") {
-                "Compás firmware $version released"
-            } else {
-                "Compás Remote $version available"
-            }
+            val copy = releaseNotificationCopy(kind, version)
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
-                .setContentTitle(title)
-                .setContentText("Review release notes.")
-                .setStyle(NotificationCompat.BigTextStyle().bigText("Review the release notes for details."))
+                .setContentTitle(copy.title)
+                .setContentText(copy.contentText)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(copy.bigText))
                 .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
                 .setSilent(true)
@@ -162,6 +204,13 @@ class CompasUpdatesModule : Module() {
             NotificationManagerCompat.from(context).notify(notificationId, notification)
             true
         }.getOrDefault(false)
+    }
+
+    private fun consumeIntentInstallFlag(intent: Intent?): Boolean {
+        if (intent == null || !intent.getBooleanExtra(EXTRA_INSTALL_APP_UPDATE, false)) return false
+        intent.removeExtra(EXTRA_INSTALL_APP_UPDATE)
+        // Reopening from Recents replays the old notification intent; only a real tap installs.
+        return (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
     }
 
     private fun isTrustedReleaseUrl(url: String, repository: String, version: String): Boolean {

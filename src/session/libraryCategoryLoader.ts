@@ -267,6 +267,12 @@ async function loadFavoritesList(context: CategoryLoadContext): Promise<LibraryL
   });
 }
 
+async function loadRecentlyAddedList(context: CategoryLoadContext): Promise<LibraryList> {
+  // The player has no read-only endpoint for recently added albums or dates; Play/Shuffle uses scope=recently_added.
+  requireFeature(context, 'collection_playback', 'Recently Added requires a newer player build');
+  return list([], 0, '');
+}
+
 export async function loadCategoryList(
   category: LibraryCategory,
   query: string | null,
@@ -289,6 +295,8 @@ export async function loadCategoryList(
   switch (category) {
     case LibraryCategory.Folders:
       return loadFolderList(context);
+    case LibraryCategory.RecentlyAdded:
+      return loadRecentlyAddedList(context);
     case LibraryCategory.Recent:
       return loadRecentList(context);
     case LibraryCategory.Favorites:

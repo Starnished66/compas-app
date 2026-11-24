@@ -20,6 +20,7 @@ import type {
   WifiImportUploadResult,
 } from './types';
 import type { NativeUploadProgress } from './nativeFileUpload';
+import type { FileDownloadProgress } from './fileDownload';
 import { assertIntegerArgument, RemoteApiException } from './remoteApiProtocol';
 import { RemoteApiConnection } from './RemoteApiConnection';
 import { WifiImportApi } from './WifiImportApi';
@@ -47,6 +48,16 @@ export class RemoteApi extends RemoteApiConnection {
 
   importFiles(path?: string, offset?: number, limit?: number, showHidden?: boolean): Promise<WifiImportDirectoryPage> {
     return this.wifiImportApi.importFiles(path, offset, limit, showHidden);
+  }
+
+  downloadImportFile(
+    endpoint: string,
+    remotePath: string,
+    fileUri: string,
+    onProgress: (progress: FileDownloadProgress) => void,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    return this.wifiImportApi.downloadImportFile(endpoint, remotePath, fileUri, onProgress, signal);
   }
 
   uploadImportFile(
@@ -284,14 +295,20 @@ export class RemoteApi extends RemoteApiConnection {
     await this.command('/playback/queue', params);
   }
 
-  async queue(offset: number = 0, limit: number = 25): Promise<QueuePage> {
+  async takeScreenshot(): Promise<void> {
+    await this.command('/screenshot');
+  }
+
+  async queue(offset: number = 0, limit: number = 25, full: boolean = false): Promise<QueuePage> {
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 25) {
       throw new Error('Invalid queue offset or limit');
     }
-    const json = await this.jsonGet(`${this.prefix}/queue`, [
+    const params: [string, string][] = [
       ['offset', offset.toString()],
       ['limit', limit.toString()],
-    ]);
+    ];
+    if (full) params.push(['full', '1']);
+    const json = await this.jsonGet(`${this.prefix}/queue`, params);
     const songs: Song[] = (Array.isArray(json.songs) ? json.songs : []).map((s: any) => ({
       index: Number(s.index != null ? s.index : -1),
       title: String(s.title || ''),
@@ -303,17 +320,21 @@ export class RemoteApi extends RemoteApiConnection {
       total: Number(json.total || 0),
       offset: Number(json.offset !== undefined ? json.offset : offset),
       revision: Number(json.revision || 0),
+      currentPosition: json.current_position !== undefined ? Number(json.current_position) : undefined,
+      queuedCount: json.queued_count !== undefined ? Number(json.queued_count) : undefined,
       songs,
     };
   }
 
-  async removeFromQueue(offset: number, revision: number): Promise<void> {
+  async removeFromQueue(offset: number, revision: number, full: boolean = false): Promise<void> {
     assertIntegerArgument(offset, 'Offset', 0);
     assertIntegerArgument(revision, 'Revision', 0);
-    await this.command('/queue/remove', [
+    const params: [string, string][] = [
       ['offset', offset.toString()],
       ['revision', revision.toString()],
-    ]);
+    ];
+    if (full) params.push(['full', '1']);
+    await this.command('/queue/remove', params);
   }
 
   async clearQueue(revision: number): Promise<void> {
@@ -321,17 +342,21 @@ export class RemoteApi extends RemoteApiConnection {
     await this.command('/queue/clear', [['revision', revision.toString()]]);
   }
 
-  async moveQueueTrack(from: number, to: number, revision: number): Promise<void> {
+  async moveQueueTrack(from: number, to: number, revision: number, full: boolean = false): Promise<void> {
     assertIntegerArgument(from, 'From', 0);
     assertIntegerArgument(to, 'To', 0);
     assertIntegerArgument(revision, 'Revision', 0);
-    await this.command('/queue/move', [['from', String(from)], ['to', String(to)], ['revision', String(revision)]]);
+    const params: [string, string][] = [['from', String(from)], ['to', String(to)], ['revision', String(revision)]];
+    if (full) params.push(['full', '1']);
+    await this.command('/queue/move', params);
   }
 
-  async playQueueTrack(offset: number, revision: number): Promise<void> {
+  async playQueueTrack(offset: number, revision: number, full: boolean = false): Promise<void> {
     assertIntegerArgument(offset, 'Offset', 0);
     assertIntegerArgument(revision, 'Revision', 0);
-    await this.command('/queue/play', [['offset', String(offset)], ['revision', String(revision)]]);
+    const params: [string, string][] = [['offset', String(offset)], ['revision', String(revision)]];
+    if (full) params.push(['full', '1']);
+    await this.command('/queue/play', params);
   }
 
   async playCollection(request: CollectionPlayRequest): Promise<number> {

@@ -118,20 +118,60 @@ private inline fun <T> writeDestination(write: () -> T): T {
     }
 }
 
-private fun saveDownload(input: InputStream, file: File) {
-    val output = writeDestination { file.outputStream() }
+/** Creates [file], or the first free "name (n).ext" beside it, without ever replacing an existing file. */
+private fun reserveNewFile(file: File): File {
+    val dir = file.parentFile ?: throw TransferDestinationException(IOException("Invalid destination"))
+    val dot = file.name.lastIndexOf('.')
+    val stem = if (dot > 0) file.name.substring(0, dot) else file.name
+    val ext = if (dot > 0) file.name.substring(dot) else ""
+    for (i in 0 until 1000) {
+        val candidate = if (i == 0) file else File(dir, "$stem ($i)$ext")
+        if (writeDestination { candidate.createNewFile() }) return candidate
+    }
+    throw TransferDestinationException(IOException("No free file name in ${dir.name}"))
+}
+
+/** Writes [input] to [file] (replaced) or, when [exclusive], to a newly created file; returns the file written. */
+private fun saveDownload(
+    input: InputStream,
+    file: File,
+    total: Long = -1L,
+    onProgress: ((received: Long, total: Long) -> Unit)? = null,
+    exclusive: Boolean = false,
+): File {
+    val target = if (exclusive) reserveNewFile(file) else file
+    val output = try {
+        writeDestination { target.outputStream() }
+    } catch (error: Throwable) {
+        if (exclusive) runCatching { target.delete() }
+        throw error
+    }
+    var received = 0L
+    var lastEmit = 0L
     try {
         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
         while (true) {
             val count = input.read(buffer)
             if (count < 0) break
             writeDestination { output.write(buffer, 0, count) }
+            received += count
+            if (onProgress != null) {
+                val now = System.currentTimeMillis()
+                if ((total > 0 && received >= total) || now - lastEmit >= PROGRESS_INTERVAL_MS) {
+                    lastEmit = now
+                    onProgress(received, if (total > 0) total else received)
+                }
+            }
         }
+        // A storage error can surface on close too; the half-written file goes with it.
+        writeDestination { output.close() }
     } catch (error: Throwable) {
         runCatching { output.close() }
+        runCatching { target.delete() }
         throw error
     }
-    writeDestination { output.close() }
+    if (onProgress != null) onProgress(received, if (total > 0) total else received)
+    return target
 }
 
 private const val PROGRESS_INTERVAL_MS = 100L
@@ -185,12 +225,29 @@ class PinSafeTransfers(private val client: OkHttpClient = pinSafeClient()) {
     fun download(
         taskId: String, url: String, file: File, headers: Map<String, String>,
         done: (Result<Triple<Int, Map<String, String>, String>>) -> Unit,
+    ) = download(taskId, url, file, headers, null, done)
+
+    /**
+     * Saves a 2xx body to [file], reporting download progress; any other status returns its body as text.
+     * With [exclusive] an existing file is never replaced: the body goes to the next free name, passed to [onSaved].
+     */
+    fun download(
+        taskId: String, url: String, file: File, headers: Map<String, String>,
+        onProgress: ((received: Long, total: Long) -> Unit)?,
+        done: (Result<Triple<Int, Map<String, String>, String>>) -> Unit,
+        exclusive: Boolean = false,
+        onSaved: ((File) -> Unit)? = null,
     ) {
         val request = Request.Builder().url(url).apply { headers.forEach { (n, v) -> addHeader(n, v) } }.build()
         start(taskId, request, { response ->
             val responseHeaders = response.headers.toMultimap().mapValues { it.value.firstOrNull() ?: "" }
             if (response.isSuccessful) {
-                response.body?.byteStream()?.use { input -> saveDownload(input, file) }
+                val body = response.body
+                val total = body?.contentLength() ?: -1L
+                body?.byteStream()?.use { input ->
+                    val saved = saveDownload(input, file, total, onProgress, exclusive)
+                    onSaved?.invoke(saved)
+                }
                 Triple(response.code, responseHeaders, "")
             } else {
                 Triple(response.code, responseHeaders, response.body?.string() ?: "")

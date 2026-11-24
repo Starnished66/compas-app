@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject, type Dispatch, type SetStateAction } from 'react';
 import { collectLocalFiles, type LocalFileEntry } from '../../../modules/compas-files/src';
 import { planTransfer } from '../../session/transferPlan';
+import type { TransferSessionLease } from '../../session/transferSessionLeases';
 import { localizedMessage } from '../localizedLabels';
 import { sendFiles } from './transferFileUploads';
 import type { useSdBrowser } from './useSdBrowser';
@@ -93,7 +94,6 @@ export function createTransferUpload(state: UploadState, options: UploadOptions)
       if (!aliveRef.current) return;
       if (controller.signal.aborted) setNotice(t('Upload cancelled. {count} files uploaded.', { count: result.uploaded }));
       else {
-        // Spell out what survived: the selection is kept so only the retry is left to the user.
         const summary = t('Upload stopped after {count} files. You can retry the remaining files.', { count: result.uploaded });
         setError(cause?.message ? `${summary} ${localizedMessage(cause.message, t)}` : summary);
       }
@@ -103,7 +103,6 @@ export function createTransferUpload(state: UploadState, options: UploadOptions)
         setPreparing(false);
         setJob(null);
         if (result.uploaded) setUploadedSinceFinish((count) => count + result.uploaded);
-        // Show the chosen folder while preserving the upload summary.
         setPane('sd');
         if (transferRef.current.status.state === 'ready') void loadSd(destination);
         else reopenPathRef.current = destination;
@@ -116,16 +115,27 @@ export function createFinishImport(
   state: UploadState,
   { transferRef, aliveRef, setError, setNotice, t }: Pick<UploadOptions, 'transferRef' | 'aliveRef' | 'setError' | 'setNotice' | 't'>,
   wantSessionRef: RefObject<boolean>,
+  leaseRef: RefObject<TransferSessionLease | null>,
   errorText: (cause: unknown, fallback: string) => string,
 ) {
-  const { uploading, finishing, setFinishing, setUploadedSinceFinish } = state;
+  const { uploading, finishing, setFinishing, uploadedSinceFinish, setUploadedSinceFinish } = state;
   const finish = async () => {
     if (uploading || finishing) return;
+    const hadUploads = uploadedSinceFinish > 0;
     setFinishing(true);
     setError(null);
     try {
-      await transferRef.current.finish();
+      const lease = leaseRef.current;
+      leaseRef.current = null;
+      if (lease) {
+        await lease.release({ stopIfIdle: true });
+      } else {
+        await transferRef.current.finish();
+      }
       wantSessionRef.current = false;
+      if (hadUploads) {
+        await transferRef.current.refreshAfterUpload();
+      }
       if (!aliveRef.current) return;
       setUploadedSinceFinish(0);
       setNotice(t('The player is updating its library.'));

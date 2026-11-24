@@ -37,7 +37,7 @@ class CompasFilesModule : Module() {
     override fun definition() = ModuleDefinition {
         Name("CompasFiles")
 
-        Events("onUploadProgress")
+        Events("onUploadProgress", "onDownloadProgress")
 
         /**
          * Raw-body upload on a client that never follows redirects, so the PIN header stays with the player.
@@ -54,15 +54,18 @@ class CompasFilesModule : Module() {
             }
         }
 
-        AsyncFunction("downloadFile") { taskId: String, url: String, fileUri: String, headers: Map<String, String>, promise: Promise ->
-            transfers.download(taskId, url, fileOf(fileUri), headers) { result ->
+        AsyncFunction("downloadFile") { taskId: String, url: String, fileUri: String, headers: Map<String, String>, exclusive: Boolean, promise: Promise ->
+            var savedPath: String? = null
+            transfers.download(taskId, url, fileOf(fileUri), headers, { received, total ->
+                sendEvent("onDownloadProgress", mapOf("taskId" to taskId, "received" to received.toDouble(), "total" to total.toDouble()))
+            }, { result ->
                 result.fold(
                     { (status, responseHeaders, errorBody) ->
-                        promise.resolve(mapOf("status" to status, "headers" to responseHeaders, "errorBody" to errorBody))
+                        promise.resolve(mapOf("status" to status, "headers" to responseHeaders, "errorBody" to errorBody, "savedPath" to savedPath))
                     },
                     { promise.reject(it as? CodedException ?: TransferException(it.message ?: "Transfer failed")) },
                 )
-            }
+            }, exclusive, { file -> savedPath = file.absolutePath })
         }
 
         Function("cancelTransfer") { taskId: String ->
@@ -71,6 +74,10 @@ class CompasFilesModule : Module() {
 
         Function("hasStorageAccess") {
             hasStorageAccess()
+        }
+
+        Function("hasWriteStorageAccess") {
+            hasWriteStorageAccess()
         }
 
         /** True when access is granted through the all-files Settings screen rather than a runtime dialog. */
@@ -123,6 +130,27 @@ class CompasFilesModule : Module() {
             }
             collected
         }
+
+        AsyncFunction("createDirectory") { parentPath: String, name: String ->
+            requireWriteAccess()
+            // The exact name: downloaded folders keep names like " Album"; typed names are trimmed by the app.
+            if (name.isBlank() || name == "." || name == ".." || name.contains("/") || name.contains("\\")) {
+                throw InvalidPathException("Enter a valid folder name")
+            }
+            val parent = resolveDirectory(parentPath)
+            val target = File(parent, name)
+            if (!target.exists() && !target.mkdir()) {
+                throw StorageAccessException("Could not create folder")
+            }
+            if (!target.isDirectory) throw StorageAccessException("A file with that name already exists")
+            target.absolutePath
+        }
+
+        Function("fileExists") { path: String ->
+            if (!hasStorageAccess() || !path.startsWith("/")) return@Function false
+            val file = File(path)
+            isWithinRoots(file) && file.exists()
+        }
     }
 
     private fun hasStorageAccess(): Boolean =
@@ -132,8 +160,20 @@ class CompasFilesModule : Module() {
             context.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         }
 
+    private fun hasWriteStorageAccess(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            hasStorageAccess() &&
+                context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+
     private fun requireAccess() {
         if (!hasStorageAccess()) throw StorageAccessException("Allow file access to browse this device")
+    }
+
+    private fun requireWriteAccess() {
+        if (!hasWriteStorageAccess()) throw StorageAccessException("Allow file write access to save to this device")
     }
 
     private fun storageRoots(): List<Map<String, Any>> {

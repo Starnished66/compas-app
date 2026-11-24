@@ -42,20 +42,60 @@ for (const lang of expected) {
     }
   }
 }
+// Internal session errors that are caught/handled internally and never displayed to users.
+const INTERNAL_SESSION_ERRORS = new Set([
+  'Player catalog changed during sync',
+  'Player catalog page did not advance',
+  'Catalog sync no longer owns the active player session',
+  'The player returned duplicate plugin entries.',
+  'The player returned an incomplete plugin list.',
+  'Unsupported Compás protocol version',
+  'Request cancelled',
+  'A player command may have changed the track during the artwork request',
+  'Invalid ordered album group page',
+  'Screenshot cancelled',
+]);
+function collectStringLeaves(node, out) {
+  if (!node) return;
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    if (node.text.trim()) out.add(node.text);
+  } else if (ts.isConditionalExpression(node)) {
+    collectStringLeaves(node.whenTrue, out);
+    collectStringLeaves(node.whenFalse, out);
+  } else if (ts.isBinaryExpression(node) && (node.operatorToken.kind === ts.SyntaxKind.BarBarToken || node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)) {
+    collectStringLeaves(node.left, out);
+    collectStringLeaves(node.right, out);
+  }
+}
 const literals = new Set();
+const dynamicErrors = new Set();
 for (const file of walk(src)) {
   if (/\/i18n\//.test(file) || /\.test\.tsx?$/.test(file) || /\/(?:__tests__|test)\//.test(file)) continue;
+  const isSession = /\/session\//.test(file);
   const ast = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   function visit(node) {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && ['t', 'translate'].includes(node.expression.text)) {
       const arg = node.arguments[0];
       if (arg && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg))) literals.add(arg.text);
     }
+    if (isSession) {
+      if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Error' && node.arguments?.[0]) {
+        const found = new Set();
+        collectStringLeaves(node.arguments[0], found);
+        for (const text of found) if (!INTERNAL_SESSION_ERRORS.has(text)) dynamicErrors.add(text);
+      }
+      if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === 'connectionMessage') {
+        collectStringLeaves(node.initializer, dynamicErrors);
+      }
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'publish') {
+        for (const arg of node.arguments.slice(1)) collectStringLeaves(arg, dynamicErrors);
+      }
+    }
     ts.forEachChild(node, visit);
   }
   visit(ast);
 }
-const knownSources = new Set([...literals, ...Object.keys(catalogs.en || {})]);
+const knownSources = new Set([...literals, ...dynamicErrors, ...Object.keys(catalogs.en || {})]);
 for (const lang of expected) for (const source of knownSources) {
   if (lang !== 'en' && !Object.hasOwn(catalogs[lang], source)) errors.push(`${lang}: no catalog entry for UI literal ${JSON.stringify(source)}`);
 }
@@ -88,4 +128,4 @@ for (const lang of expected) {
 }
 for (const lang of expected) delete catalogs[lang]?.__plural_probe;
 if (errors.length) { const sample = errors.filter((e) => !e.includes('no catalog entry')).slice(0, 12); const coverage = expected.map((lang) => `${lang}:${errors.filter((e) => e.startsWith(`${lang}: no catalog entry`)).length}`).filter((x) => !x.endsWith(':0')); console.error(`Translation validation failed (${errors.length}); coverage gaps by locale: ${coverage.join(', ') || 'none'}${sample.length ? `\nOther findings:\n- ${sample.join('\n- ')}` : ''}`); process.exitCode = 1; }
-else console.log(`Translation validation passed: ${expected.length} locales, ${Object.keys(catalogs.en).length} English catalog keys, ${literals.size} literal UI strings.`);
+else console.log(`Translation validation passed: ${expected.length} locales, ${Object.keys(catalogs.en).length} English catalog keys, ${literals.size} literal UI strings, ${dynamicErrors.size} dynamic session strings.`);

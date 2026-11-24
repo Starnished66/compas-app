@@ -208,10 +208,11 @@ const editQueue = async (deps: QueueEditsDependencies, id: string, direction?: -
   const api = apiRef.current;
   const target = queueTargetsRef.current.get(id);
   if (!api || !target || !featureSetRef.current.has('queue_edit')) return;
+  if (direction && target.full) return;
   if (direction && (target.offset + direction < 0 || target.offset + direction >= stateRef.current.queueTotal)) return;
   try {
     if (direction) await api.moveQueueTrack(target.offset, target.offset + direction, target.revision);
-    else await api.playQueueTrack(target.offset, target.revision);
+    else await api.playQueueTrack(target.offset, target.revision, Boolean(target.full));
     reconcileQueueAfterWrite(api);
   } catch (err: any) {
     if (api !== apiRef.current) return;

@@ -70,6 +70,10 @@ const UpdatesSheet = deferScreen(
   () => (require('./src/ui/sheets/UpdatesSheet') as typeof import('./src/ui/sheets/UpdatesSheet')).UpdatesSheet,
   ({ visible }) => visible,
 );
+const ScreenshotSheet = deferScreen(
+  () => (require('./src/ui/sheets/ScreenshotSheet') as typeof import('./src/ui/sheets/ScreenshotSheet')).ScreenshotSheet,
+  ({ visible }) => visible,
+);
 
 const TAB_ORDER: TabKey[] = ['home', 'library', 'playlists', 'transfer'];
 
@@ -106,15 +110,17 @@ export default function App() {
 
 function useAppSession() {
   const session = useRemoteSession();
-  const { state, wifiImportStatus, refreshWifiImport, startWifiImport, stopWifiImport, listWifiImportFiles,
-    uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile, createWifiImportDirectory } = session;
+  const { state, wifiImportStatus, refreshWifiImport, stopWifiImport, refreshAfterWifiUpload, acquireWifiImportLease, listWifiImportFiles,
+    downloadWifiImportFile, uploadWifiImportFile, renameWifiImportFile, deleteWifiImportFile, createWifiImportDirectory } = session;
   const connectedPlayer = useConnectedPlayer(state);
   const transfer: TransferApi = {
     status: wifiImportStatus,
-    start: startWifiImport,
     finish: stopWifiImport,
+    refreshAfterUpload: refreshAfterWifiUpload,
+    acquire: acquireWifiImportLease,
     list: listWifiImportFiles,
     refresh: refreshWifiImport,
+    download: downloadWifiImportFile,
     upload: uploadWifiImportFile,
     rename: renameWifiImportFile,
     remove: deleteWifiImportFile,
@@ -129,6 +135,7 @@ function useAppScreens(state: RemoteUiState) {
   const [nowPlayingVisible, setNowPlayingVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [updatesVisible, setUpdatesVisible] = useState(false);
+  const [screenshotVisible, setScreenshotVisible] = useState(false);
   const [playerSettingsVisible, setPlayerSettingsVisible] = useState(false);
   const [playerPluginsVisible, setPlayerPluginsVisible] = useState(false);
   const lastBrowseCategoryRef = useRef<LibraryCategory>(LibraryCategory.Albums);
@@ -161,6 +168,7 @@ function useAppScreens(state: RemoteUiState) {
 
   return {
     nowPlayingVisible, setNowPlayingVisible, settingsVisible, setSettingsVisible, updatesVisible, setUpdatesVisible,
+    screenshotVisible, setScreenshotVisible,
     playerSettingsVisible, setPlayerSettingsVisible, playerPluginsVisible, setPlayerPluginsVisible, lastBrowseCategoryRef,
     connectionReturnCount, setConnectionReturnCount, isDark, palette, connectionVisible, mainScreen, activeTab,
     isConnected, showMiniPlayer, insets, contentBottomInset,
@@ -307,10 +315,10 @@ function renderAppTabs(session: AppSession, screens: AppScreens, navigation: App
 }
 
 function renderAppOverlays(session: AppSession, screens: AppScreens, navigation: AppNavigation) {
-  const { state, onAction, connectedPlayer, playerSettingsApi, playerPluginsApi } = session;
+  const { state, onAction, connectedPlayer, playerSettingsApi, playerPluginsApi, takeScreenshot, transfer } = session;
   const {
     connectionVisible, settingsVisible, setSettingsVisible, setPlayerSettingsVisible, setPlayerPluginsVisible,
-    playerSettingsVisible, playerPluginsVisible, updatesVisible, setUpdatesVisible,
+    playerSettingsVisible, playerPluginsVisible, updatesVisible, setUpdatesVisible, screenshotVisible, setScreenshotVisible,
   } = screens;
   const { handleConnectionHidden, openUpdates } = navigation;
   return (
@@ -328,8 +336,17 @@ function renderAppOverlays(session: AppSession, screens: AppScreens, navigation:
         onOpenConnection={() => onAction({ type: 'OpenConnection' })}
         onOpenUpdates={openUpdates}
         onOpenTransfer={() => onAction({ type: 'OpenTransfer' })}
+        onOpenScreenshot={() => setScreenshotVisible(true)}
         onOpenPlayerSettings={() => setPlayerSettingsVisible(true)}
         onOpenPlugins={() => setPlayerPluginsVisible(true)}
+      />
+      <ScreenshotSheet
+        visible={screenshotVisible}
+        state={state}
+        sessionKey={session.wifiImportOwnerKey ?? (state.connectionStatus === ConnectionStatus.Connected ? state.wifiAddress : null)}
+        takeScreenshot={takeScreenshot}
+        transfer={transfer}
+        onClose={() => setScreenshotVisible(false)}
       />
       <SlideUpScreen visible={playerSettingsVisible}>
         <PlayerSettingsScreen state={state} settingsApi={playerSettingsApi()} onClose={() => setPlayerSettingsVisible(false)} />
@@ -363,6 +380,9 @@ function renderAppNowPlaying(state: RemoteUiState, onAction: AppSession['onActio
       supportedFeatures={state.supportedFeatures}
       playerName={state.playerName}
       queue={state.queue}
+      queuePlayed={state.queuePlayed}
+      queuePlayedHasMore={state.queuePlayedHasMore}
+      queuePlayedLoadingMore={state.queuePlayedLoadingMore}
       queueTotal={state.queueTotal}
       queueStatus={state.queueStatus}
       queueHasMore={state.queueHasMore}

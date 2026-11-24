@@ -86,6 +86,11 @@ function sessionResult(
     libraryArtwork: shared.libraryArtwork,
     playerSettingsApi: () => shared.apiRef.current?.settings() ?? null,
     playerPluginsApi: () => shared.apiRef.current?.plugins() ?? null,
+    takeScreenshot: async () => {
+      const api = shared.apiRef.current;
+      if (!api) throw new Error('Connect to a player first.');
+      await api.takeScreenshot();
+    },
   };
 }
 

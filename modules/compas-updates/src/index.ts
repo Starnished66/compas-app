@@ -16,6 +16,8 @@ interface CompasUpdatesNativeModule {
   getDeviceApiLevel(): number;
   installAppUpdate(url: string, sha256: string, versionCode: number, size: number): Promise<void>;
   fetchAppUpdateManifest(channel: 'stable' | 'beta'): Promise<{ status: number; body: string }>;
+  consumePendingAppUpdateInstall(): boolean;
+  addListener?(eventName: 'onAppUpdateInstallRequested', listener: () => void): { remove(): void };
 }
 
 export function canInstallAppUpdates(): boolean {
@@ -77,5 +79,22 @@ export function notifyRelease(kind: ReleaseKind, version: string, url: string): 
     return getNativeModule()?.notifyRelease(kind, version, url) ?? false;
   } catch {
     return false;
+  }
+}
+
+export function consumePendingAppUpdateInstall(): boolean {
+  try {
+    return getNativeModule()?.consumePendingAppUpdateInstall() ?? false;
+  } catch {
+    return false;
+  }
+}
+
+export function addAppUpdateInstallListener(listener: () => void): { remove(): void } | null {
+  try {
+    const mod = getNativeModule();
+    return mod?.addListener ? mod.addListener('onAppUpdateInstallRequested', listener) : null;
+  } catch {
+    return null;
   }
 }

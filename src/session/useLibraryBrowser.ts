@@ -59,6 +59,8 @@ export function useLibraryBrowser({
       }),
       ...createNavigationActions({
         shared, loadLibraryCategory, refreshQueue, stopSearchReads, navigateBack: navigation.navigateBack,
+        beginCatalogJump: navigation.beginCatalogJump, findAlbumForJump: collections.findAlbumForJump,
+        openAlbumGroup: collections.openAlbumGroup, loadGroupAlbums,
       }),
     };
   }).current;

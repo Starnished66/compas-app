@@ -30,8 +30,12 @@ export type RemoteAction =
   | { type: 'ScanBluetoothPlayers' }
   | { type: 'SelectBluetoothPlayer'; id: string }
   | { type: 'PairBluetoothPlayer'; id: string }
+  | { type: 'SwitchSavedProfile'; id: string }
+  | { type: 'RemoveSavedProfile'; id: string }
   | { type: 'Back' }
   | { type: 'OpenLibrary'; category: LibraryCategory }
+  | { type: 'GoToAlbum'; album: string; title?: string | null; artist?: string | null; albumArtist?: string | null; albumKey?: string | null; songId?: number | null }
+  | { type: 'GoToArtist'; artist: string }
   | { type: 'RefreshLibrary'; category: LibraryCategory }
   | { type: 'SyncLibrary' }
   | { type: 'OpenQueue' }
@@ -49,6 +53,7 @@ export type RemoteAction =
   | { type: 'SearchLibrary'; query: string }
   | { type: 'LoadMoreLibrary' }
   | { type: 'LoadMoreQueue' }
+  | { type: 'LoadMorePlayedQueue' }
   | { type: 'RetryQueueArtwork'; ids: string[] }
   | { type: 'LoadLibraryArtwork'; entryId: string }
   | { type: 'SelectLibraryEntry'; id: string }

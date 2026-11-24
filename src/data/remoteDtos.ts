@@ -133,6 +133,8 @@ export interface QueuePage {
   total: number;
   offset: number;
   revision: number;
+  currentPosition?: number;
+  queuedCount?: number;
   songs: Song[];
 }
 

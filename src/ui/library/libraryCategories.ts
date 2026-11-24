@@ -42,6 +42,7 @@ export const LIBRARY_CATEGORY_OPTIONS: LibraryCategoryOption[] = [
   { value: LibraryCategory.Songs, label: 'Songs', noun: 'songs' },
   { value: LibraryCategory.Genres, label: 'Genres', noun: 'genres' },
   { value: LibraryCategory.Favorites, label: favorites.label, noun: favorites.noun, feature: 'favorites_edit' },
+  { value: LibraryCategory.RecentlyAdded, label: 'Recently added', noun: 'recently added albums', feature: 'collection_playback' },
   { value: LibraryCategory.Recent, label: 'Recently played', noun: 'recently played songs', feature: 'recently_played' },
   { value: LibraryCategory.Folders, label: 'Folders', noun: 'folders', feature: 'folder_browse' },
 ];

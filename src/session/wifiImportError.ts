@@ -9,21 +9,25 @@ const ERROR_MESSAGES: Record<string, string> = {
   import_screen_not_foreground: 'Open the Wi-Fi import screen on the player, then try again.',
   unavailable: 'Update the player firmware to use Wi-Fi import.',
   wifi_import_unavailable: 'Update the player firmware to use Wi-Fi import.',
+  item_not_found: 'That file is no longer on the player. Refresh the folder and try again.',
+  import_not_ready: 'The transfer service is busy. Wait a moment and try again.',
+  download_failed: 'Download failed.',
 };
 
 function knownWifiImportErrorMessage(value: unknown): string | null {
   if (typeof value === 'string') return ERROR_MESSAGES[value] ?? null;
   if (value && typeof value === 'object') {
     const error = value as { statusCode?: number; responseBody?: string; message?: string };
-    if (error.statusCode === 404 || error.statusCode === 501) return ERROR_MESSAGES.unavailable;
-    if (typeof error.message === 'string' && ERROR_MESSAGES[error.message]) return ERROR_MESSAGES[error.message];
+    // The player's own reason (for example item_not_found) comes before the bare status, which only means an old player.
     try {
       const body = JSON.parse(error.responseBody ?? '{}');
       if (typeof body.code === 'string' && ERROR_MESSAGES[body.code]) return ERROR_MESSAGES[body.code];
       if (typeof body.error === 'string' && ERROR_MESSAGES[body.error]) return ERROR_MESSAGES[body.error];
-    } catch { /* Use the generic transfer-service message below. */ }
+    } catch { /* Not JSON; the plain-text code is checked below. */ }
     const responseCode = error.responseBody?.trim();
     if (responseCode && ERROR_MESSAGES[responseCode]) return ERROR_MESSAGES[responseCode];
+    if (error.statusCode === 404 || error.statusCode === 501) return ERROR_MESSAGES.unavailable;
+    if (typeof error.message === 'string' && ERROR_MESSAGES[error.message]) return ERROR_MESSAGES[error.message];
   }
   return null;
 }

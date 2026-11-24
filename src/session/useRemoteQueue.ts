@@ -20,7 +20,9 @@ export function useRemoteQueue({ shared, artworkSources, abandonBulkProgress }: 
       shared, abandonBulkProgress, refreshQueue: pages.refreshQueue,
       reconcileQueueAfterWrite: pages.reconcileQueueAfterWrite,
     });
-    return createQueueActions({ shared, loadQueueArtwork, loadMoreQueue: pages.loadMoreQueue, ...edits });
+    return createQueueActions({
+      shared, loadQueueArtwork, loadMoreQueue: pages.loadMoreQueue, loadMorePlayedQueue: pages.loadMorePlayedQueue, ...edits,
+    });
   }).current;
 
   return {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { Alert } from 'react-native';
 import type { WifiImportFileEntry } from '../../data/types';
 import { isTransferUnavailable } from '../../session/transferAvailability';
+import type { TransferSessionLease } from '../../session/transferSessionLeases';
 import { useSdBrowser } from './useSdBrowser';
 import type { TransferApi } from '../screens/TransferScreen';
 import type { useI18n } from '../../i18n';
@@ -41,24 +42,58 @@ export function useTransferSession(destination: ReturnType<typeof useTransferDes
   const { connected, active, status, transferRef, aliveRef, uploadControllerRef, setError, errorText, t } = options;
   // Set once the import session opens and cleared by Finish, so a reconnect reopens it.
   const wantSessionRef = useRef(false);
+  const leaseRef = useRef<TransferSessionLease | null>(null);
+  const mountedRef = useRef(true);
+  const acquireControllerRef = useRef<AbortController | null>(null);
   const sdPathRef = useRef('');
   sdPathRef.current = sdPath;
   // An upload that ended offline shows its destination once the session reopens.
   const reopenPathRef = useRef<string | null>(null);
+  useEffect(() => () => {
+    mountedRef.current = false;
+    acquireControllerRef.current?.abort();
+    acquireControllerRef.current = null;
+    const lease = leaseRef.current;
+    leaseRef.current = null;
+    if (lease) void lease.release().catch(() => {});
+  }, []);
   const startSession = useCallback(async (requested = '') => {
+    acquireControllerRef.current?.abort();
+    const controller = new AbortController();
+    acquireControllerRef.current = controller;
+    const ownsStart = () =>
+      mountedRef.current &&
+      aliveRef.current &&
+      !controller.signal.aborted &&
+      acquireControllerRef.current === controller;
     setStarting(true);
     setError(null);
     try {
-      await transferRef.current.start();
+      if (!leaseRef.current?.isActive()) {
+        const acquired = await transferRef.current.acquire(controller.signal);
+        if (!ownsStart()) {
+          void acquired.release().catch(() => {});
+          return;
+        }
+        const previous = leaseRef.current;
+        leaseRef.current = acquired;
+        if (previous && previous !== acquired) {
+          void previous.release().catch(() => {});
+        }
+      }
+      if (!ownsStart()) return;
       wantSessionRef.current = true;
       // Read after start: an upload may have ended while it was pending.
       const path = reopenPathRef.current ?? requested;
       reopenPathRef.current = null;
-      if (aliveRef.current && !uploadControllerRef.current) await loadSd(path);
+      if (ownsStart() && !uploadControllerRef.current) await loadSd(path);
     } catch (cause: any) {
-      if (aliveRef.current) setError(errorText(cause, t('Could not start Wi-Fi import.')));
+      if (ownsStart()) setError(errorText(cause, t('Could not start Wi-Fi import.')));
     } finally {
-      if (aliveRef.current) setStarting(false);
+      if (acquireControllerRef.current === controller) {
+        acquireControllerRef.current = null;
+        if (mountedRef.current && aliveRef.current) setStarting(false);
+      }
     }
   }, [errorText, loadSd, t]);
 
@@ -79,7 +114,7 @@ export function useTransferSession(destination: ReturnType<typeof useTransferDes
     if (status === 'stopped' || status === 'error') sd.reset();
   }, [status, sd.reset]);
 
-  return { wantSessionRef, reopenPathRef, startSession };
+  return { wantSessionRef, reopenPathRef, leaseRef, startSession };
 }
 
 export function createSdEntryActions(

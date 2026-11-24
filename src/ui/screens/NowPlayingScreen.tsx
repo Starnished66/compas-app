@@ -8,6 +8,9 @@ import {
 import Animated from 'react-native-reanimated';
 import { RemoteAction, RemoteUiState } from '../../data/types';
 import { AppBackdrop } from '../components/AppBackdrop';
+import { BottomSheet } from '../components/BottomSheet';
+import { SheetActionRow } from '../components/SheetActionRow';
+import { SheetStepTitle } from '../components/SheetStepTitle';
 import { Durations, Easings, motionDuration } from '../motion';
 import { isReconnecting } from '../reconnecting';
 import { AudioFormatSheet } from '../sheets/AudioFormatSheet';
@@ -47,6 +50,7 @@ function useNowPlayingScreen({ queueOpen: _queueOpen, onAction, visible, onClose
   const insets = useScreenInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [formatVisible, setFormatVisible] = useState(false);
+  const [trackMenuVisible, setTrackMenuVisible] = useState(false);
   const [artArea, setArtArea] = useState({ width: 0, height: 0 });
   const gestureState = useNowPlayingDismissState(visible, windowHeight, onClose);
   const artScale = useRef(new RNAnimated.Value(state.isPlaying ? 1 : PAUSED_ART_SCALE)).current;
@@ -63,7 +67,10 @@ function useNowPlayingScreen({ queueOpen: _queueOpen, onAction, visible, onClose
 
   useNowPlayingDismissVisibility(gestureState, visible, windowHeight, reducedMotion, (token) => requestGestureClose(token));
   useEffect(() => {
-    if (!visible) setFormatVisible(false);
+    if (!visible) {
+      setFormatVisible(false);
+      setTrackMenuVisible(false);
+    }
   }, [visible]);
 
   useNowPlayingArtScale(artScale, visible, state.isPlaying, reducedMotion);
@@ -72,7 +79,8 @@ function useNowPlayingScreen({ queueOpen: _queueOpen, onAction, visible, onClose
     gestureState, visible, windowHeight, reducedMotion,
   );
   return {
-    t, insets, formatVisible, setFormatVisible, artArea, setArtArea, artScale, track, shown, lastVisibleArtwork, reconnecting,
+    t, insets, formatVisible, setFormatVisible, trackMenuVisible, setTrackMenuVisible,
+    artArea, setArtArea, artScale, track, shown, lastVisibleArtwork, reconnecting,
     commands, artStyle, metaStyle, liveOpacity, metaOpacity, panGesture, playerAnimatedStyle, scrimAnimatedStyle,
   };
 }
@@ -99,7 +107,8 @@ function renderNowPlayingScreen(
   model: ReturnType<typeof useNowPlayingScreen>,
 ) {
   const {
-    t, insets, formatVisible, setFormatVisible, artArea, setArtArea, artScale, track, shown, lastVisibleArtwork, reconnecting,
+    t, insets, formatVisible, setFormatVisible, trackMenuVisible, setTrackMenuVisible,
+    artArea, setArtArea, artScale, track, shown, lastVisibleArtwork, reconnecting,
     commands, artStyle, metaStyle, liveOpacity, metaOpacity, panGesture, playerAnimatedStyle, scrimAnimatedStyle,
   } = model;
   return (
@@ -129,9 +138,38 @@ function renderNowPlayingScreen(
           })}
           {renderNowPlayingControls({
             state, onAction, visible, reconnecting, liveOpacity, metaOpacity, metaStyle, shown, track,
-            commands, showFormat: () => setFormatVisible(true), onClose, t,
+            commands, showFormat: () => setFormatVisible(true),
+            showTrackMenu: () => setTrackMenuVisible(true),
+            onClose, t,
           })}
         </View>
+        <BottomSheet visible={trackMenuVisible} onClose={() => setTrackMenuVisible(false)}>
+          <SheetStepTitle title={track?.title || t('Now playing')} />
+          {track?.album ? (
+            <SheetActionRow
+              icon="disc"
+              label={t('Go to album')}
+              subtitle={track.album}
+              onPress={() => {
+                setTrackMenuVisible(false);
+                onClose();
+                onAction({ type: 'GoToAlbum', album: track.album, title: track.title, artist: track.artist });
+              }}
+            />
+          ) : null}
+          {track?.artist ? (
+            <SheetActionRow
+              icon="person"
+              label={t('Go to artist')}
+              subtitle={track.artist}
+              onPress={() => {
+                setTrackMenuVisible(false);
+                onClose();
+                onAction({ type: 'GoToArtist', artist: track.artist });
+              }}
+            />
+          ) : null}
+        </BottomSheet>
         <AudioFormatSheet
           visible={formatVisible}
           track={track}

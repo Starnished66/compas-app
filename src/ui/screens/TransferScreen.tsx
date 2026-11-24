@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { isFileBrowsingAvailable } from '../../../modules/compas-files/src';
 import {
@@ -10,7 +10,8 @@ import {
   WifiImportStatus,
 } from '../../data/types';
 import { useI18n } from '../../i18n';
-import { formatBytes } from '../../session/transferPlan';
+import { formatBytes, selectionTotals } from '../../session/transferPlan';
+import type { AcquireTransferLeaseOptions, TransferSessionLease } from '../../session/transferSessionLeases';
 import { isConnectionError } from '../../session/transferAvailability';
 import { wifiImportErrorMessage } from '../../session/wifiImportError';
 import { AppText } from '../components/AppText';
@@ -22,8 +23,11 @@ import { Spinner } from '../components/Spinner';
 import { SdBrowserError } from '../transfer/SdBrowserView';
 import { createSdEntryActions, useTransferDestination, useTransferSession } from '../transfer/useTransferDestination';
 import { createFinishImport, createTransferUpload, useTransferUploadState, type TransferPane } from '../transfer/useTransferUploads';
-import { useTransferPhoneLoading, useTransferPhoneSelection, useTransferPhoneState } from '../transfer/useTransferPhone';
+import { createTransferDownload, useTransferDownloadState } from '../transfer/useTransferDownloads';
+import { withoutSelectionsUnder } from '../transfer/sdSelection';
+import { useTransferPhoneBrowser, useTransferPhoneSelection } from '../transfer/useTransferPhone';
 import { renderPhonePane, renderSdPane, renderTransferQueue } from '../transfer/transferPanes';
+import { LocalDestinationSheet } from '../sheets/LocalDestinationSheet';
 import { TransferDestinationSheet } from '../sheets/TransferDestinationSheet';
 import { localizedMessage } from '../localizedLabels';
 import { usePalette } from '../PaletteProvider';
@@ -35,9 +39,12 @@ type Translate = ReturnType<typeof useI18n>['t'];
 export interface TransferApi {
   status: WifiImportStatus;
   refresh: () => Promise<void>;
-  start: () => Promise<void>;
   finish: () => Promise<void>;
+  refreshAfterUpload: () => Promise<void>;
+  acquire: (signal?: AbortSignal, options?: AcquireTransferLeaseOptions) => Promise<TransferSessionLease>;
   list: (path: string, offset: number, showHidden?: boolean) => Promise<{ path: string; entries: WifiImportFileEntry[]; nextOffset: number | null }>;
+  /** Resolves with the path actually written, when the phone had to pick another free name. */
+  download: (remotePath: string, destinationUri: string, onProgress: (received: number, total: number) => void, signal: AbortSignal) => Promise<string | null | void>;
   upload: (uri: string, path: string, name: string, onProgress: (sent: number, total: number) => void, signal: AbortSignal) => Promise<void>;
   rename: (path: string, name: string) => Promise<void>;
   remove: (path: string) => Promise<void>;
@@ -146,11 +153,28 @@ function TransferWorkspace(props: WorkspaceProps) {
   return renderTransferWorkspace(props, useTransferWorkspace(props));
 }
 
-function useTransferWorkspace({ transfer, active, connected }: WorkspaceProps) {
+/** The Transfer API with rename and delete keeping the SD download selection in step. */
+function useSelectionAwareTransfer(transfer: TransferApi, setSdSelected: Dispatch<SetStateAction<Map<string, WifiImportFileEntry>>>) {
+  return useMemo<TransferApi>(() => ({
+    ...transfer,
+    rename: async (path, name) => {
+      await transfer.rename(path, name);
+      setSdSelected((prev) => withoutSelectionsUnder(prev, path));
+    },
+    remove: async (path) => {
+      await transfer.remove(path);
+      setSdSelected((prev) => withoutSelectionsUnder(prev, path));
+    },
+  }), [transfer, setSdSelected]);
+}
+
+function useTransferWorkspace({ transfer: rawTransfer, active, connected }: WorkspaceProps) {
   const { t } = useI18n();
   const palette = usePalette();
   const { width } = useWindowDimensions();
   const wide = width >= WIDE_LAYOUT_MIN_WIDTH;
+  const [sdSelected, setSdSelected] = useState<Map<string, WifiImportFileEntry>>(() => new Map());
+  const transfer = useSelectionAwareTransfer(rawTransfer, setSdSelected);
   const transferRef = useRef(transfer);
   transferRef.current = transfer;
   const aliveRef = useRef(true);
@@ -165,29 +189,50 @@ function useTransferWorkspace({ transfer, active, connected }: WorkspaceProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const phone = useTransferPhoneState();
+  const phone = useTransferPhoneBrowser(setError, t);
   const destination = useTransferDestination(transfer, setError, t);
   const uploadState = useTransferUploadState();
+  const downloadState = useTransferDownloadState();
   const { sd, setChoosingDestination } = destination;
   const { uploading, uploadControllerRef } = uploadState;
+  const busy = uploading || downloadState.downloading;
   const { selected, setSelected, phoneHiddenRef } = phone;
   const status = transfer.status.state;
   const ready = status === 'ready';
-  const openPhoneDirectory = useTransferPhoneLoading(phone, aliveRef, setError, t);
-  const { startSession, reopenPathRef, wantSessionRef } = useTransferSession(destination, {
+  const { startSession, reopenPathRef, wantSessionRef, leaseRef } = useTransferSession(destination, {
     connected, active, status, transferRef, aliveRef, uploadControllerRef, setError, errorText, t,
   });
   const selection = useTransferPhoneSelection(phone);
   const clearSelected = () => setSelected(new Map());
+  const clearSdSelected = useCallback(() => setSdSelected(new Map()), []);
+  // A finished folder takes anything selected inside it along.
+  const deselectSd = useCallback((paths: readonly string[]) => {
+    setSdSelected((prev) => paths.reduce(withoutSelectionsUnder, prev));
+  }, []);
+  const toggleSdSelected = useCallback((entry: WifiImportFileEntry) => {
+    setSdSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(entry.path)) next.delete(entry.path);
+      else next.set(entry.path, entry);
+      return next;
+    });
+  }, []);
   const upload = createTransferUpload(uploadState, {
     transferRef, aliveRef, connected, ready, selected, phoneHiddenRef, setChoosingDestination, setSelected,
     setError, setNotice, setPane, t, loadSd: sd.load, reopenPathRef,
   });
-  const finish = createFinishImport(uploadState, { transferRef, aliveRef, setError, setNotice, t }, wantSessionRef, errorText);
-  const sdEntryActions = createSdEntryActions(sd, uploading, transferRef, setError, t);
+  const download = createTransferDownload(downloadState, {
+    transferRef, aliveRef, connected, ready, sdSelected, clearSdSelected, deselectSd, setError, setNotice,
+    onRefreshPhone: phone.refresh,
+    showHidden: sd.showHidden,
+    t,
+  });
+  const finish = createFinishImport(uploadState, { transferRef, aliveRef, setError, setNotice, t }, wantSessionRef, leaseRef, errorText);
+  const sdEntryActions = createSdEntryActions(sd, busy, transferRef, setError, t);
   return {
-    t, palette, wide, pane, setPane, error, notice, phone, destination, uploadState, ready, status,
-    openPhoneDirectory, startSession, selection, clearSelected, upload, finish, sdEntryActions,
+    t, palette, wide, pane, setPane, error, notice, phone, destination, uploadState, downloadState, ready, status, busy,
+    sdSelected, toggleSdSelected, clearSdSelected,
+    startSession, selection, clearSelected, upload, download, finish, sdEntryActions,
   };
 }
 
@@ -195,33 +240,51 @@ function renderTransferWorkspace(
   { transfer, connected }: WorkspaceProps,
   workspace: ReturnType<typeof useTransferWorkspace>,
 ) {
-  const { t, palette, wide, pane, setPane, error, notice, phone, destination, uploadState, ready, status,
-    openPhoneDirectory, startSession, selection, clearSelected, upload, finish, sdEntryActions } = workspace;
+  const { t, palette, wide, pane, setPane, error, notice, phone, destination, uploadState, downloadState, ready, status, busy,
+    sdSelected, toggleSdSelected, clearSdSelected,
+    startSession, selection, clearSelected, upload, download, finish, sdEntryActions } = workspace;
   const { selected } = phone;
   const { selectedFileBytes, selectedFolders, selectedCount, toggleSelected } = selection;
   const { sd, choosingDestination, setChoosingDestination, destinationUnavailable, starting } = destination;
   const { path: sdPath, loaded: sdLoaded, load: loadSd } = sd;
   const { job, uploading, uploadControllerRef, uploadedSinceFinish, finishing } = uploadState;
-  const phonePane = renderPhonePane({ phone, toggleSelected, openPhoneDirectory, uploading, wide, palette, t });
-  const sdPane = renderSdPane({ wide, palette, t, sd, starting, ready, connected, uploading, sdEntryActions, status, startSession });
-  const selectionSummary = selected.size === 0
-    ? t('Select files or folders on this device')
-    : [
-      t('{count} selected', { count: selected.size }),
-      selectedFolders ? t('{count} folders', { count: selectedFolders }) : '',
-      selectedFileBytes ? formatBytes(selectedFileBytes) : '',
-    ].filter(Boolean).join(' · ');
+  const { downloadJob, downloading, choosingLocalDest, setChoosingLocalDest, downloadControllerRef } = downloadState;
+  const phonePane = renderPhonePane({ phone, toggleSelected, uploading: busy, wide, palette, t });
+  const sdPane = renderSdPane({
+    wide, palette, t, sd, starting, ready, connected, busy, sdSelected, onToggleSdSelected: toggleSdSelected,
+    sdEntryActions, status, startSession,
+  });
+  const sdTotals = selectionTotals([...sdSelected.values()]);
+  const selectionSummary = sdSelected.size > 0
+    ? [
+      t('{count} selected', { count: sdSelected.size }),
+      sdTotals.folders ? t('{count} folders', { count: sdTotals.folders }) : '',
+      sdTotals.bytes ? formatBytes(sdTotals.bytes) : '',
+    ].filter(Boolean).join(' · ')
+    : selected.size === 0
+      ? t('Select files or folders on this device')
+      : [
+        t('{count} selected', { count: selected.size }),
+        selectedFolders ? t('{count} folders', { count: selectedFolders }) : '',
+        selectedFileBytes ? formatBytes(selectedFileBytes) : '',
+      ].filter(Boolean).join(' · ');
 
   return (
     <View style={styles.workspace}>
       <TransferDestinationSheet visible={choosingDestination} transfer={transfer} initialPath={sdPath} initialShowHidden={sd.showHidden} seed={sd} itemCount={selectedCount}
         available={connected && ready} onClose={(created) => { setChoosingDestination(false); if (created) void loadSd(sdPath); }}
         onUnavailable={destinationUnavailable} onSave={(path, created) => { if (created) void loadSd(sdPath); void upload(path); }} />
+      <LocalDestinationSheet
+        visible={choosingLocalDest}
+        initialPath={phone.phonePath ?? ''}
+        onClose={() => setChoosingLocalDest(false)}
+        onSave={(folderPath) => void download(folderPath)}
+      />
       {!wide ? (
         <SegmentedControl
           options={[
             { value: 'phone', label: t('This device'), icon: 'music', caption: selected.size ? t('{count} selected', { count: selected.size }) : undefined },
-            { value: 'sd', label: t('Player SD card'), icon: 'sdCard', caption: sdPath ? `SD/${sdPath}` : 'SD/' },
+            { value: 'sd', label: t('Player SD card'), icon: 'sdCard', caption: sdSelected.size ? t('{count} selected', { count: sdSelected.size }) : sdPath ? `SD/${sdPath}` : 'SD/' },
           ]}
           value={pane}
           onChange={setPane}
@@ -236,8 +299,11 @@ function renderTransferWorkspace(
       {!wide && pane === 'phone' ? <SdBrowserError browser={sd} canBrowse={ready && connected} /> : null}
       {notice ? <AppText variant="caption" tone="accent" style={styles.message}>{notice}</AppText> : null}
       {renderTransferQueue({
-        job, uploading, onCancel: () => uploadControllerRef.current?.abort(), selectionSummary, selectedSize: selected.size,
-        clearSelected, connected, ready, sdLoaded, editing: !!sd.editing, chooseDestination: () => setChoosingDestination(true),
+        job, uploading, onCancel: () => uploadControllerRef.current?.abort(),
+        downloadJob, downloading, onCancelDownload: () => downloadControllerRef.current?.abort(),
+        selectionSummary, selectedSize: selected.size, clearSelected,
+        sdSelectedSize: sdSelected.size, clearSdSelected, chooseLocalDestination: () => setChoosingLocalDest(true),
+        connected, ready, sdLoaded, editing: !!sd.editing, chooseDestination: () => setChoosingDestination(true),
         uploadedSinceFinish, finishing, finish, t,
       })}
     </View>

@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
-import { hasStorageAccess, openAllFilesAccessSettings, usesAllFilesAccess } from '../../modules/compas-files/src';
+import { hasStorageAccess, hasWriteStorageAccess, openAllFilesAccessSettings, usesAllFilesAccess } from '../../modules/compas-files/src';
 import { useAppActive } from './useAppActive';
+import { useRequestGuard } from './useRequestGuard';
+
+export type StorageAccessMode = 'read' | 'write';
 
 export interface StorageAccess {
   granted: boolean;
@@ -9,25 +12,44 @@ export interface StorageAccess {
   request: () => Promise<void>;
 }
 
-export function useStorageAccess(): StorageAccess {
+function checkStorageAccess(mode: StorageAccessMode): boolean {
+  return mode === 'write' ? hasWriteStorageAccess() : hasStorageAccess();
+}
+
+export function useStorageAccess(mode: StorageAccessMode = 'read'): StorageAccess {
   const appActive = useAppActive();
-  const [granted, setGranted] = useState(hasStorageAccess);
+  const requests = useRequestGuard();
+  const [granted, setGranted] = useState(() => checkStorageAccess(mode));
+
+  useEffect(() => {
+    requests.invalidate();
+    setGranted(checkStorageAccess(mode));
+  }, [mode, requests]);
 
   // Re-check on resume: the all-files grant happens in system Settings.
   useEffect(() => {
-    if (appActive) setGranted(hasStorageAccess());
-  }, [appActive]);
+    if (appActive) setGranted(checkStorageAccess(mode));
+  }, [appActive, mode]);
 
   const request = useCallback(async () => {
     if (usesAllFilesAccess()) {
       openAllFilesAccessSettings();
       return;
     }
+    const isCurrent = requests.next();
     if (Platform.OS === 'android') {
-      await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE);
+      if (mode === 'write') {
+        await PermissionsAndroid.requestMultiple([
+          PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+        ]);
+      } else {
+        await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE);
+      }
     }
-    setGranted(hasStorageAccess());
-  }, []);
+    if (!isCurrent()) return;
+    setGranted(checkStorageAccess(mode));
+  }, [mode, requests]);
 
   return { granted, request };
 }

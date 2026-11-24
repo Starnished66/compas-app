@@ -80,6 +80,10 @@ export function buildCollectionPlaybackRequest(
     request.scope = 'favorites';
     return request;
   }
+  if (input.category === LibraryCategory.RecentlyAdded) {
+    request.scope = 'recently_added';
+    return request;
+  }
   if (input.category === LibraryCategory.Recent) {
     request.scope = 'recently_played';
     return request;

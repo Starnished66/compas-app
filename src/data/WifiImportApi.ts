@@ -1,6 +1,12 @@
 import { refuseRedirect } from './redirectGuard';
 import type { NativeUploadProgress } from './nativeFileUpload';
-import type { WifiImportStatus, WifiImportDirectoryPage, WifiImportFileEntry, WifiImportUploadResult } from './types';
+import type { FileDownloadProgress } from './fileDownload';
+import type {
+  WifiImportStatus,
+  WifiImportDirectoryPage,
+  WifiImportFileEntry,
+  WifiImportUploadResult,
+} from './types';
 import { REMOTE_API_PREFIX, PIN_HEADER, RemoteApiException, encodeRemoteParam, assertIntegerArgument, type RemoteApiRequests } from './remoteApiProtocol';
 
 function validateImportPath(path: string, allowRoot: boolean): string {
@@ -64,6 +70,33 @@ export class WifiImportApi {
       return { name: entry.name, path: entry.path, isDirectory: entry.isDirectory, size: entry.size };
     });
     return { path: json.path, entries, offset: json.offset, nextOffset: json.next_offset, total: json.total };
+  }
+
+  async downloadImportFile(
+    endpoint: string,
+    remotePath: string,
+    fileUri: string,
+    onProgress: (progress: FileDownloadProgress) => void,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    const { downloadToFile } = await import('./fileDownload');
+    const relativePath = validateImportPath(remotePath, false);
+    const params = `path=${encodeRemoteParam(relativePath)}`;
+    const headers: Record<string, string> = {};
+    const pin = this.requests.getPin();
+    if (pin) headers[PIN_HEADER] = pin;
+    const response = await downloadToFile(
+      `${endpoint.replace(/\/+$/, '')}${REMOTE_API_PREFIX}/import/files/download?${params}`,
+      fileUri,
+      headers,
+      signal,
+      onProgress,
+      true,
+    );
+    refuseRedirect(response.status);
+    if (response.status !== 200) throw new RemoteApiException(response.status, response.errorBody);
+    // The native writer picks the next free name if the requested one was taken meanwhile.
+    return response.savedPath ?? null;
   }
 
   async uploadImportFile(

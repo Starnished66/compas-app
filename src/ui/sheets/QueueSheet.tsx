@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { ListRenderItem } from '@shopify/flash-list';
 import { BulkActionProgress, ContentStatus, PlaybackMode, RemoteAction, RemoteTrack, RemoteUiState } from '../../data/types';
@@ -21,13 +21,22 @@ import { useQueueReorder } from '../useQueueReorder';
 import { useQueueArtworkViewability } from '../useQueueArtworkViewability';
 import { useOptimisticErrorSnackbar } from './useOptimisticErrorSnackbar';
 import { useQueueRemovalProgress, useQueueSelectionActions, useQueueSelectionState } from './useQueueSelection';
-import { QUEUE_ROW_HEIGHT, QueueRow, renderQueueTrackList } from './QueueTrackList';
+import {
+  LoadEarlierQueueRow,
+  PlayedQueueRow,
+  QUEUE_ROW_HEIGHT,
+  QueueListItem,
+  QueueRow,
+  renderQueueEmptyState,
+  renderQueueTrackList,
+} from './QueueTrackList';
 import { useI18n } from '../../i18n';
+import { localizedMessage } from '../localizedLabels';
 import { isShuffleMode } from '../../session/playbackModes';
 
 export interface QueuePlaybackState extends Pick<RemoteUiState,
   'currentTrack' | 'dacMode' | 'isPlaying' | 'supportedFeatures' | 'playbackMode' | 'connectionMessage' |
-  'queue' | 'queueTotal' | 'queueStatus' | 'queueHasMore' | 'queueLoadingMore'> {
+  'queue' | 'queuePlayed' | 'queuePlayedHasMore' | 'queuePlayedLoadingMore' | 'queueTotal' | 'queueStatus' | 'queueHasMore' | 'queueLoadingMore'> {
   queueRemovalProgress?: BulkActionProgress;
   queueBusy: boolean;
 }
@@ -61,15 +70,21 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
   const canEditQueue = state.supportedFeatures.includes('queue_edit');
   const progress = useQueueRemovalProgress(state, dismissedBulkStatus, setDismissedBulkStatus);
   const { queueBusy } = progress;
-  const { rows, artwork, drag, hasRows } = useQueueList({
-    state, onAction, visible, canEditQueue, selecting, firstRow, snackbar, t,
+  const { items, artwork, drag, cellStyle, hasRows } = useQueueList({
+    state, onAction, visible, canEditQueue, selecting, firstRow, nowPlaying, snackbar, t,
   });
   const queueCount = Math.max(state.queueTotal, state.queue.length);
   const loadMore = useQueuePagination(state, onAction, lastPageRequest);
   const trackActions = useQueueTrackActions(state, onAction, snackbar, t, canEditQueue, queueBusy);
   const selectionActions = useQueueSelectionActions(selection, progress, onAction, onClose);
-  const renderTrack = useQueueTrackRenderer({ selection, selectionActions, trackActions, drag, firstRow, canEditQueue, queueBusy });
+  const renderItem = useQueueItemRenderer({
+    state, onAction, nowPlaying, selection, selectionActions, trackActions, drag, firstRow, canEditQueue, queueBusy, t,
+  });
   const { removeSelected, cancelSelection, close, confirmClear, handleBackPress } = selectionActions;
+  const hasPlayed = (state.queuePlayed?.length ?? 0) > 0;
+  const listHeader = renderQueueStatus({
+    state, onAction, progress, nowPlaying, hasRows, canEditQueue, hasPlayed, setDismissedBulkStatus, t,
+  });
 
   return (
     <BottomSheet visible={visible} onClose={close} onBackPress={handleBackPress} fullHeight scrollable={false}>
@@ -77,8 +92,7 @@ export function QueueSheet({ state, onAction, visible, onClose }: QueueSheetProp
         onAction, playbackMode: state.playbackMode, queueCount, queueBusy, canEditQueue,
         selectedCount: selectedIds.size, removeSelected, cancelSelection, openClear: () => setConfirmingClear(true), t,
       })}
-      {renderQueueStatus({ state, onAction, progress, nowPlaying, hasRows, canEditQueue, setDismissedBulkStatus, t })}
-      {renderQueueTrackList({ state, rows, drag, artwork, renderTrack, loadMore, palette, t })}
+      {renderQueueTrackList({ state, items, hasUpNext: hasRows, drag, cellStyle, artwork, renderItem, header: listHeader, loadMore, palette, t })}
       <ConfirmDialog
         visible={confirmingClear}
         title={t('Clear the queue?')}
@@ -99,24 +113,60 @@ interface QueueListOptions {
   canEditQueue: boolean;
   selecting: boolean;
   firstRow: React.RefObject<RemovableRowHandle | null>;
+  nowPlaying: ReturnType<typeof useDisplayTrack>;
   snackbar: ReturnType<typeof useSnackbar>;
   t: ReturnType<typeof useI18n>['t'];
 }
 
-function useQueueList({ state, onAction, visible, canEditQueue, selecting, firstRow, snackbar, t }: QueueListOptions) {
+function useQueueList({ state, onAction, visible, canEditQueue, selecting, firstRow, nowPlaying, snackbar, t }: QueueListOptions) {
   const { queueBusy } = state;
   const reorder = useQueueReorder(state.queue, onAction, ({ track, from, to }) =>
     snackbar.show({ text: t('Moved “{title}”', { title: track.title }), actionLabel: t('Undo'), onAction: () => reorder.move(to, from) }),
   );
   const rows = reorder.queue;
-  const artwork = useQueueArtworkViewability(rows, onAction, visible);
+  const hasRows = rows.length > 0;
+  const played = state.queuePlayed ?? [];
+
+  const { items, upNextOffset, artworkTracks } = useMemo(() => {
+    const built: QueueListItem[] = [];
+    if (played.length > 0) {
+      built.push({ kind: 'section', id: 'queue-section-played', label: t('Played') });
+      if (state.queuePlayedHasMore || state.queuePlayedLoadingMore) {
+        built.push({ kind: 'loadEarlier', id: 'queue-load-earlier' });
+      }
+      for (const track of played) {
+        built.push({ kind: 'played', id: track.id, track });
+      }
+      if (nowPlaying) {
+        built.push({ kind: 'nowPlaying', id: 'queue-now-playing' });
+      }
+      built.push({
+        kind: 'section',
+        id: 'queue-section-up-next',
+        label: t('Up next'),
+        caption: hasRows && canEditQueue ? t('Drag ≡ to reorder · swipe left to remove') : undefined,
+      });
+    }
+    const offset = built.length;
+    if (hasRows) {
+      rows.forEach((track, upNextIndex) => {
+        built.push({ kind: 'upNext', id: track.id, track, upNextIndex });
+      });
+    } else if (played.length > 0) {
+      built.push({ kind: 'emptyUpNext', id: 'queue-empty-up-next' });
+    }
+    const tracks = built.map((item) => (item.kind === 'played' || item.kind === 'upNext' ? item.track : undefined));
+    return { items: built, upNextOffset: offset, artworkTracks: tracks };
+  }, [played, state.queuePlayedHasMore, state.queuePlayedLoadingMore, nowPlaying, hasRows, canEditQueue, rows, t]);
+
+  const artwork = useQueueArtworkViewability(artworkTracks, onAction, visible);
   const drag = useDragReorder({
     itemCount: rows.length,
     rowHeight: QUEUE_ROW_HEIGHT,
     enabled: visible && canEditQueue && !reorder.moving && !selecting && !queueBusy,
     onMove: reorder.move,
   });
-  const hasRows = rows.length > 0;
+  const cellStyle = useCallback((index: number) => drag.rowStyle(index - upNextOffset), [drag.rowStyle, upNextOffset]);
 
   useEffect(() => {
     if (!visible || removeHintShown || !canEditQueue) return;
@@ -127,7 +177,7 @@ function useQueueList({ state, onAction, visible, canEditQueue, selecting, first
     }, Durations.peekDelay);
     return () => clearTimeout(timer);
   }, [visible, hasRows, canEditQueue]);
-  return { rows, artwork, drag, hasRows };
+  return { items, artwork, drag, cellStyle, hasRows };
 }
 
 function useQueuePagination(state: QueuePlaybackState, onAction: QueueSheetProps['onAction'], lastPageRequest: React.RefObject<string>) {
@@ -183,7 +233,10 @@ function useQueueTrackActions(
   return { removeTrack, playTrack };
 }
 
-interface QueueTrackRendererOptions {
+interface QueueItemRendererOptions {
+  state: QueuePlaybackState;
+  onAction: QueueSheetProps['onAction'];
+  nowPlaying: ReturnType<typeof useDisplayTrack>;
   selection: ReturnType<typeof useQueueSelectionState>;
   selectionActions: ReturnType<typeof useQueueSelectionActions>;
   trackActions: ReturnType<typeof useQueueTrackActions>;
@@ -191,30 +244,58 @@ interface QueueTrackRendererOptions {
   firstRow: QueueListOptions['firstRow'];
   canEditQueue: boolean;
   queueBusy: boolean;
+  t: ReturnType<typeof useI18n>['t'];
 }
 
-function useQueueTrackRenderer({ selection, selectionActions, trackActions, drag, firstRow, canEditQueue, queueBusy }: QueueTrackRendererOptions) {
+function useQueueItemRenderer({
+  state, onAction, nowPlaying, selection, selectionActions, trackActions, drag, firstRow, canEditQueue, queueBusy, t,
+}: QueueItemRendererOptions) {
   const { selecting, selectedIds } = selection;
   const { toggleSelected, beginSelecting } = selectionActions;
   const { playTrack, removeTrack } = trackActions;
   const { draggingIndex, handleProps } = drag;
-  const renderTrack: ListRenderItem<RemoteTrack> = useCallback(({ item, index }) => (
-    <QueueRow
-      track={item}
-      selecting={selecting}
-      selected={selecting && selectedIds.has(item.id)}
-      lifted={draggingIndex === index}
-      removable={canEditQueue && !queueBusy}
-      dragHandle={canEditQueue ? handleProps(index) : undefined}
-      rowRef={index === 0 ? firstRow : undefined}
-      onPlay={playTrack}
-      onToggleSelected={toggleSelected}
-      onBeginSelecting={beginSelecting}
-      onRemove={removeTrack}
-    />
-  ), [queueBusy, canEditQueue, draggingIndex, handleProps, playTrack, removeTrack, selecting, selectedIds, toggleSelected, beginSelecting]);
+  const renderItem: ListRenderItem<QueueListItem> = useCallback(({ item }) => {
+    switch (item.kind) {
+      case 'loadEarlier':
+        return (
+          <LoadEarlierQueueRow
+            loading={Boolean(state.queuePlayedLoadingMore)}
+            onLoad={() => onAction({ type: 'LoadMorePlayedQueue' })}
+          />
+        );
+      case 'section':
+        return <SectionHeader label={item.label} caption={item.caption} tone="muted" style={styles.sectionHeader} />;
+      case 'played':
+        return <PlayedQueueRow track={item.track} onPlay={playTrack} />;
+      case 'nowPlaying':
+        return nowPlaying ? (
+          <QueueNowPlayingCard track={nowPlaying} isPlaying={state.isPlaying} style={styles.nowPlaying} />
+        ) : null;
+      case 'emptyUpNext':
+        return renderQueueEmptyState(state, t);
+      case 'upNext':
+        return (
+          <QueueRow
+            track={item.track}
+            selecting={selecting}
+            selected={selecting && selectedIds.has(item.track.id)}
+            lifted={draggingIndex === item.upNextIndex}
+            removable={canEditQueue && !queueBusy}
+            dragHandle={canEditQueue ? handleProps(item.upNextIndex) : undefined}
+            rowRef={item.upNextIndex === 0 ? firstRow : undefined}
+            onPlay={playTrack}
+            onToggleSelected={toggleSelected}
+            onBeginSelecting={beginSelecting}
+            onRemove={removeTrack}
+          />
+        );
+    }
+  }, [
+    state, onAction, nowPlaying, queueBusy, canEditQueue, draggingIndex, handleProps, playTrack,
+    removeTrack, selecting, selectedIds, toggleSelected, beginSelecting, firstRow, t,
+  ]);
 
-  return renderTrack;
+  return renderItem;
 }
 
 interface QueueHeaderOptions {
@@ -285,19 +366,35 @@ interface QueueStatusOptions {
   onAction: QueueSheetProps['onAction'];
   progress: ReturnType<typeof useQueueRemovalProgress>;
   nowPlaying: ReturnType<typeof useDisplayTrack>;
-  canEditQueue: boolean;
   hasRows: boolean;
+  canEditQueue: boolean;
+  hasPlayed: boolean;
   setDismissedBulkStatus: ReturnType<typeof useQueueSelectionState>['setDismissedBulkStatus'];
   t: ReturnType<typeof useI18n>['t'];
 }
 
-function renderQueueStatus({ state, onAction, progress, nowPlaying, hasRows, canEditQueue, setDismissedBulkStatus, t }: QueueStatusOptions) {
+function formatProgressMessage(
+  message: string | null | undefined,
+  values: Record<string, string | number> | undefined,
+  t: ReturnType<typeof useI18n>['t'],
+): string | null {
+  if (!message) return null;
+  if (!values) return localizedMessage(message, t);
+  const localizedValues = typeof values.error === 'string'
+    ? { ...values, error: localizedMessage(values.error, t) }
+    : values;
+  return t(message, localizedValues);
+}
+
+function renderQueueStatus({
+  state, onAction, progress, nowPlaying, hasRows, canEditQueue, hasPlayed, setDismissedBulkStatus, t,
+}: QueueStatusOptions) {
   const { queueRemovalRunning, queueRemovalFinished, queueRemovalProgress } = progress;
   return (
-    <>
+    <View>
       {queueRemovalRunning ? <View style={styles.progress}><AppText>{t('{completed} of {total} processed', { completed: queueRemovalProgress?.completed ?? 0, total: queueRemovalProgress?.total ?? 0 })}</AppText><Button label={t('Stop')} variant="plain" onPress={() => onAction({ type: 'CancelBulkAction' })} /></View> : null}
-      {queueRemovalFinished ? <View style={styles.progress}><AppText>{queueRemovalProgress?.message ? t(queueRemovalProgress.message, queueRemovalProgress.messageValues) : null}</AppText><Button label={t('Done')} variant="plain" onPress={() => setDismissedBulkStatus(true)} /></View> : null}
-      {nowPlaying ? (
+      {queueRemovalFinished ? <View style={styles.progress}><AppText>{formatProgressMessage(queueRemovalProgress?.message, queueRemovalProgress?.messageValues, t)}</AppText><Button label={t('Done')} variant="plain" onPress={() => setDismissedBulkStatus(true)} /></View> : null}
+      {!hasPlayed && nowPlaying ? (
         <QueueNowPlayingCard
           track={nowPlaying}
           isPlaying={state.isPlaying}
@@ -307,18 +404,20 @@ function renderQueueStatus({ state, onAction, progress, nowPlaying, hasRows, can
       {state.connectionMessage ? (
         <InlineError message={state.connectionMessage} style={styles.error} />
       ) : null}
-      <SectionHeader
-        label={t('Up next')}
-        tone="muted"
-        caption={hasRows && canEditQueue ? t('Drag ≡ to reorder · swipe left to remove') : undefined}
-        style={styles.sectionHeader}
-      />
-    </>
+      {!hasPlayed ? (
+        <SectionHeader
+          label={t('Up next')}
+          tone="muted"
+          caption={hasRows && canEditQueue ? t('Drag ≡ to reorder · swipe left to remove') : undefined}
+          style={styles.sectionHeader}
+        />
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  progress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Space.lg, paddingVertical: Space.sm },
+  progress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Space.lg, paddingVertical: Space.sm, gap: Space.sm },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -333,7 +432,7 @@ const styles = StyleSheet.create({
   },
   nowPlaying: {
     marginHorizontal: Space.lg,
-    marginBottom: Space.md,
+    marginVertical: Space.sm,
   },
   error: {
     marginHorizontal: Space.lg,

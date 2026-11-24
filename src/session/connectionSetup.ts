@@ -12,7 +12,9 @@ import {
 } from '../data/types';
 import { RemoteApi } from '../data/RemoteApi';
 import { PIN_NOT_SAVED_MESSAGE } from '../data/SecurePinStore';
+import { loadSavedProfiles, persistSavedProfiles, profileIdFor, upsertSavedProfile } from '../data/SavedProfilesStore';
 import { fromNumeric } from './playbackModes';
+import { EMPTY_QUEUE_STATE } from './queueTargets';
 import { ratingFromStatus } from './trackRating';
 
 interface ConnectionSetupDependencies extends
@@ -22,8 +24,9 @@ interface ConnectionSetupDependencies extends
     'activeCatalogRef' | 'apiRef' | 'autoReconnectEnabledRef' | 'bluetoothAudioOutputRef'
     | 'bluetoothPairingRequiredRef' | 'bulkSelectionsRef' | 'collectionPendingRef'
     | 'collectionStartingRef' | 'connectedPlayerKeyRef' | 'currentLibraryCategoryRef'
-    | 'currentTrackRef' | 'featureSetRef' | 'gateRef' | 'lastConnectionTransportRef'
-    | 'lastPlayerKeyRef' | 'lastQueueRefreshAtRef' | 'libraryBackStackRef' | 'libraryContextRef'
+    | 'currentTrackRef' | 'featureSetRef' | 'gateRef'
+    | 'lastConnectionTransportRef' | 'lastPlayerKeyRef' | 'lastQueueRefreshAtRef'
+    | 'libraryBackStackRef' | 'libraryContextRef'
     | 'libraryEntriesRef' | 'libraryListCacheRef' | 'playerSessionRef' | 'positionStoreRef'
     | 'setState' | 'shownLibraryListRef'
   >;
@@ -39,8 +42,8 @@ interface ConnectionSetupDependencies extends
 
 const resetLibraryForNewPlayer = (deps: ConnectionSetupDependencies, playerKey: string) => {
   const {
-    activeCatalogRef, lastPlayerKeyRef, libraryBackStackRef, libraryContextRef,
-    libraryEntriesRef, libraryListCacheRef, setState, shownLibraryListRef,
+    activeCatalogRef, lastPlayerKeyRef, libraryBackStackRef,
+    libraryContextRef, libraryEntriesRef, libraryListCacheRef, setState, shownLibraryListRef,
   } = deps.shared;
   const { clearArtworkState, closeSongActions } = deps;
   // lastPlayerKeyRef survives a dropped link, so reconnecting to the same player keeps navigation.
@@ -53,7 +56,7 @@ const resetLibraryForNewPlayer = (deps: ConnectionSetupDependencies, playerKey: 
     libraryBackStackRef.current = [];
     libraryContextRef.current = null;
     shownLibraryListRef.current = null;
-    setState((prev) => ({ ...prev, libraryEntries: [], queue: [], libraryIsNested: false }));
+    setState((prev) => ({ ...prev, libraryEntries: [], ...EMPTY_QUEUE_STATE, libraryIsNested: false }));
   }
 };
 
@@ -139,6 +142,21 @@ const commitConnection = (
   } else {
     AsyncStorage.setItem(PREF_BLUETOOTH_ID, playerKey.slice(3)).catch(() => {});
   }
+
+  const endpoint = transport === ConnectionTransport.Wifi ? playerKey : playerKey.slice(3);
+  const profile = {
+    id: profileIdFor(transport, endpoint),
+    name: status.deviceModel || 'Compás Player',
+    transport,
+    endpoint,
+    deviceModel: features.includes('device_info') ? status.deviceModel ?? null : null,
+    lastConnectedAt: Date.now(),
+  };
+  void loadSavedProfiles().then((existing) => {
+    const nextProfiles = upsertSavedProfile(existing, profile);
+    void persistSavedProfiles(nextProfiles);
+    setState((prev) => ({ ...prev, savedProfiles: nextProfiles }));
+  });
 
   publishConnection(deps, status, transport, features, pinNotSaved);
   if (pinNotSaved) {

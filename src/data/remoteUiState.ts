@@ -1,6 +1,7 @@
 import type { ArtworkReference } from './MemoryArtworkCache';
 import type { DacMode } from './dacMode';
 import type { LibrarySortingSnapshot, Playlist } from './remoteDtos';
+import type { SavedPlayerProfile } from './SavedProfilesStore';
 
 export type RemoteScreen =
   | { type: 'Home' }
@@ -19,6 +20,7 @@ export enum LibraryCategory {
   Search = 'Search',
   Folders = 'Folders',
   Recent = 'Recently Played',
+  RecentlyAdded = 'Recently Added',
   Favorites = 'Favorites',
 }
 
@@ -113,6 +115,7 @@ export interface RemoteUiState {
   bluetoothPlayers: BluetoothPlayer[];
   selectedBluetoothPlayerId?: string | null;
   bluetoothScanStatus: ContentStatus;
+  savedProfiles?: SavedPlayerProfile[];
   playerName: string;
   connectionMessage?: string | null;
   pinDialogVisible: boolean;
@@ -135,6 +138,9 @@ export interface RemoteUiState {
   settingsRevision?: number | null;
   settingsEpoch?: number | null;
   queue: RemoteTrack[];
+  queuePlayed?: RemoteTrack[];
+  queuePlayedHasMore?: boolean;
+  queuePlayedLoadingMore?: boolean;
   queueTotal: number;
   queueHasMore: boolean;
   queueLoadingMore: boolean;
@@ -146,8 +152,15 @@ export interface RemoteUiState {
   libraryHasMore: boolean;
   libraryIsNested: boolean;
   libraryNestedTitle?: string | null;
+  /** Set by Go to Album / Go to Artist so the Library screen restarts its collection header from the jump. */
+  catalogJump?: { id: number; album: LibraryEntry | null } | null;
   songActionsVisible: boolean;
   songActionTitle: string;
+  songActionArtist?: string | null;
+  songActionAlbum?: string | null;
+  songActionAlbumArtist?: string | null;
+  songActionAlbumKey?: string | null;
+  songActionSongId?: number | null;
   playlistOptions: Playlist[];
   playlistOptionsStatus: ContentStatus;
   songActionRating: number | null;

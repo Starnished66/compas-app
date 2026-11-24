@@ -1,7 +1,8 @@
 import type { SessionState } from './useSessionRefs';
 import { ContentStatus, LibraryCategory, LibraryGroup, Playlist, PlayContext, LibraryFilter } from '../data/types';
 import { RemoteApi } from '../data/RemoteApi';
-import { CatalogIdentity } from '../data/SyncedCatalogStore';
+import { CatalogGroupKind, CatalogIdentity } from '../data/SyncedCatalogStore';
+import { resolveAlbumGroup, type AlbumLookupTarget } from './catalogJump';
 import { EntryTarget, LibraryContext } from './LibraryEntryFactory';
 import { AlbumBrowseIdentity } from './albumBrowseIdentity';
 import { LibraryList } from './LibraryListCache';
@@ -254,10 +255,54 @@ const selectLibraryEntry = async (deps: LibraryCollectionsDependencies, id: stri
   }
 };
 
+/** The song's album key from the synced catalog: by song id, else by a unique title/artist/album match. */
+const catalogAlbumKey = async (
+  store: SessionState['syncedCatalogStoreRef']['current'],
+  catalog: CatalogIdentity,
+  target: AlbumLookupTarget,
+): Promise<string | null> => {
+  if (target.albumKey) return target.albumKey;
+  if (target.songId != null && Number.isSafeInteger(target.songId) && target.songId > 0) {
+    const bySongId = await store.albumKeyForSong(catalog.libraryId, catalog.revision, target.songId);
+    if (bySongId) return bySongId;
+  }
+  if (!target.title?.trim()) return null;
+  const keys = await store.albumKeysForTrack(
+    catalog.libraryId, catalog.revision, target.title.trim(), (target.artist ?? '').trim(), target.album.trim(),
+  );
+  return keys.length === 1 ? keys[0] : null;
+};
+
+export type AlbumJumpLookup = { group: LibraryGroup } | { error: string };
+
+/** Finds the album for Go to Album without touching any state; never guesses between albums of the same name. */
+const findAlbumForJump = async (deps: LibraryCollectionsDependencies, target: AlbumLookupTarget): Promise<AlbumJumpLookup> => {
+  const { activeCatalogRef, syncedCatalogStoreRef } = deps.shared;
+  const notFound = { error: 'Could not find this album in the library.' };
+  const catalog = activeCatalogRef.current;
+  if (!catalog) {
+    const albumArtist = target.albumArtist?.trim();
+    if (!albumArtist) return { error: 'Sync the player library before browsing this album.' };
+    return { group: { name: target.album.trim(), count: 0, index: target.songId ?? -1, albumArtist, albumKey: target.albumKey ?? null } };
+  }
+  try {
+    const store = syncedCatalogStoreRef.current;
+    const albumKey = await catalogAlbumKey(store, catalog, target);
+    if (!albumKey) return notFound;
+    const candidates = await store.groups(catalog.libraryId, catalog.revision, CatalogGroupKind.Album, target.album.trim(), null, null);
+    const group = resolveAlbumGroup(candidates, { ...target, albumKey });
+    return group ? { group } : notFound;
+  } catch {
+    return notFound;
+  }
+};
+
 export function createLibraryCollections(deps: LibraryCollectionsDependencies) {
   return {
     loadGroupAlbums: loadGroupAlbums.bind(undefined, deps),
     browsePlaylist: browsePlaylist.bind(undefined, deps),
     selectLibraryEntry: selectLibraryEntry.bind(undefined, deps),
+    findAlbumForJump: findAlbumForJump.bind(undefined, deps),
+    openAlbumGroup: (group: LibraryGroup) => browseAlbum(deps, group, null),
   };
 }

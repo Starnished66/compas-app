@@ -1,3 +1,4 @@
+import { EMPTY_QUEUE_STATE } from './queueTargets';
 import {
   RemoteUiState,
   RemoteTheme,
@@ -33,10 +34,7 @@ export function createInitialSessionState(): RemoteUiState {
     playbackMode: PlaybackMode.RepeatAll,
     currentRating: 0,
     supportedFeatures: [],
-    queue: [],
-    queueTotal: 0,
-    queueHasMore: false,
-    queueLoadingMore: false,
+    ...EMPTY_QUEUE_STATE,
     libraryEntries: [],
     libraryStatus: ContentStatus.Ready,
     queueStatus: ContentStatus.Ready,

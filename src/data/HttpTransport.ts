@@ -25,6 +25,8 @@ export interface FileDownloadResult {
   status: number;
   headers: Record<string, string>;
   errorBody: string;
+  /** Where an exclusive native download actually wrote the file, when that differs from the request. */
+  savedPath?: string | null;
 }
 
 export type FileDownloader = (

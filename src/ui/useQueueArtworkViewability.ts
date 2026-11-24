@@ -19,7 +19,7 @@ interface QueueViewabilityChange {
 }
 
 export function useQueueArtworkViewability(
-  rows: readonly RemoteTrack[],
+  rows: readonly (RemoteTrack | undefined)[],
   onAction: (action: RemoteAction) => void,
   enabled = true,
 ) {
@@ -31,7 +31,9 @@ export function useQueueArtworkViewability(
 
   const retryMissing = useCallback(() => {
     const current = latest.current;
-    const rows = current.enabled ? visible.current.map((index) => current.rows[index]).filter(Boolean) : [];
+    const rows = current.enabled
+      ? visible.current.map((index) => current.rows[index]).filter((row): row is RemoteTrack => Boolean(row))
+      : [];
     visibleArtwork.setVisible(rows);
     const visibleIds = new Set(rows.map((row) => row.id));
     for (const id of retried) if (!visibleIds.has(id)) retried.delete(id);

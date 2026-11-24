@@ -1,6 +1,7 @@
 import type { useQueuePages } from './useQueuePages';
 import type { createLibraryLists } from './libraryLists';
 import type { SessionState } from './useSessionRefs';
+import { EMPTY_QUEUE_STATE } from './queueTargets';
 import { PREF_WIFI_ADDRESS, PREF_LAST_TRANSPORT } from './sessionPreferences';
 import { normalizedVolume, trackFromStatus } from './sessionPlayback';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -174,9 +175,9 @@ const commitWifiUpgrade = (
 ) => {
   const {
     activeCatalogRef, apiRef, bluetoothAudioOutputRef, connectedPlayerKeyRef,
-    connectionAttemptRef, currentLibraryCategoryRef, featureSetRef, gateRef,
-    lastConnectionTransportRef, lastPlayerKeyRef, lastQueueRefreshAtRef, libraryBackStackRef,
-    libraryContextRef, libraryEntriesRef, libraryListCacheRef, pendingSeekRef,
+    connectionAttemptRef, currentLibraryCategoryRef, featureSetRef,
+    gateRef, lastConnectionTransportRef, lastPlayerKeyRef, lastQueueRefreshAtRef,
+    libraryBackStackRef, libraryContextRef, libraryEntriesRef, libraryListCacheRef, pendingSeekRef,
     pendingVolumeRef, searchReads, setState, shownLibraryListRef, songActionTargetRef,
   } = deps.shared;
   const {
@@ -196,7 +197,7 @@ const commitWifiUpgrade = (
     libraryBackStackRef.current = [];
     libraryContextRef.current = null;
     shownLibraryListRef.current = null;
-    setState((prev) => ({ ...prev, libraryEntries: [], queue: [], libraryIsNested: false }));
+    setState((prev) => ({ ...prev, libraryEntries: [], ...EMPTY_QUEUE_STATE, libraryIsNested: false }));
   }
   stopPolling();
   apiRef.current = candidate;

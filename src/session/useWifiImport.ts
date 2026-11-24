@@ -13,6 +13,11 @@ import {
 import { RemoteApi } from '../data/RemoteApi';
 import { discoveryEndpoint } from './wifiDiscovery';
 import { isCurrentWifiImportSession } from './wifiImportSession';
+import {
+  TransferSessionLeases,
+  type AcquireTransferLeaseOptions,
+  type TransferSessionLease,
+} from './transferSessionLeases';
 import { wifiImportErrorMessage } from './wifiImportError';
 import {
   startDiscovery as startWifiDiscoveryModule,
@@ -205,8 +210,7 @@ const startWifiImport = async (deps: WifiImportCommandContext) => {
 };
 
 const stopWifiImport = async (deps: WifiImportCommandContext) => {
-  const { loadLibraryCategory, refreshQueue, setWifiImportStatus, startCatalogSync, wifiImportOperationRef } = deps;
-  const { connectionAttemptRef, currentLibraryCategoryRef, featureSetRef } = deps.shared;
+  const { setWifiImportStatus, wifiImportOperationRef } = deps;
   const session = wifiImportSession(deps);
   if (!session) throw new Error('The Wi-Fi import session ended. Reconnect before finishing.');
   const operation = ++wifiImportOperationRef.current;
@@ -220,16 +224,7 @@ const stopWifiImport = async (deps: WifiImportCommandContext) => {
       const status = await session.api.importStatus();
       if (!isCurrent()) return;
       setWifiImportStatus({ ...status, error: status.error ? wifiImportErrorMessage(status.error) : null });
-      if (status.state === 'stopped') {
-        const api = session.api;
-        await loadLibraryCategory(currentLibraryCategoryRef.current, api);
-        if (!isCurrent()) return;
-        refreshQueue(api);
-        if (featureSetRef.current.has(RemoteApi.CATALOG_SYNC_FEATURE)) {
-          startCatalogSync(api, connectionAttemptRef.current, [...featureSetRef.current]);
-        }
-        return;
-      }
+      if (status.state === 'stopped') return;
       if (status.state === 'error') throw new Error(status.error || 'The transfer service reported an error.');
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
@@ -237,6 +232,21 @@ const stopWifiImport = async (deps: WifiImportCommandContext) => {
   } catch (err: any) {
     if (isCurrent()) setWifiImportStatus({ state: 'error', error: wifiImportErrorMessage(err) });
     throw err;
+  }
+};
+
+/** After uploads, reload the Library list, queue and catalog. Browsing in progress is left alone; the catalog sync updates it. */
+const refreshAfterWifiUpload = async (deps: WifiImportCommandContext) => {
+  const { loadLibraryCategory, refreshQueue, startCatalogSync } = deps;
+  const { connectionAttemptRef, currentLibraryCategoryRef, featureSetRef, stateRef } = deps.shared;
+  const session = wifiImportSession(deps);
+  if (!session) return;
+  const api = session.api;
+  if (stateRef.current.screen.type !== 'Library') await loadLibraryCategory(currentLibraryCategoryRef.current, api);
+  if (!ownsWifiImportSession(deps, session)) return;
+  refreshQueue(api);
+  if (featureSetRef.current.has(RemoteApi.CATALOG_SYNC_FEATURE)) {
+    startCatalogSync(api, connectionAttemptRef.current, [...featureSetRef.current]);
   }
 };
 
@@ -251,6 +261,20 @@ const listWifiImportFiles = async (deps: WifiImportCommandContext, path: string,
   const page = await session.api.importFiles(path, offset, 50, showHidden);
   if (!ownsWifiImportSession(deps, session)) throw new Error('The Wi-Fi import session ended.');
   return page;
+};
+
+const downloadWifiImportFile = async (
+  deps: WifiImportCommandContext,
+  remotePath: string, destinationUri: string,
+  onProgress: (received: number, total: number) => void, signal: AbortSignal,
+): Promise<string | null> => {
+  const session = requireWifiImportSession(deps);
+  return session.api.downloadImportFile(
+    session.endpoint, remotePath, destinationUri,
+    ({ received, total }) => { if (ownsWifiImportSession(deps, session) && !signal.aborted) onProgress(received, total); },
+    signal,
+  );
+  // Once saved the file is done, even if the session changed meanwhile; the next file checks the session again.
 };
 
 const uploadWifiImportFile = async (
@@ -292,7 +316,9 @@ function createWifiImportCommands(deps: WifiImportCommandContext) {
     startWifiImportUpgrade: startWifiImportUpgrade.bind(undefined, deps),
     startWifiImport: startWifiImport.bind(undefined, deps),
     stopWifiImport: stopWifiImport.bind(undefined, deps),
+    refreshAfterWifiUpload: refreshAfterWifiUpload.bind(undefined, deps),
     listWifiImportFiles: listWifiImportFiles.bind(undefined, deps),
+    downloadWifiImportFile: downloadWifiImportFile.bind(undefined, deps),
     uploadWifiImportFile: uploadWifiImportFile.bind(undefined, deps),
     renameWifiImportFile: renameWifiImportFile.bind(undefined, deps),
     deleteWifiImportFile: deleteWifiImportFile.bind(undefined, deps),
@@ -308,12 +334,21 @@ export function useWifiImport(deps: WifiImportDependencies) {
 
   const wifiImportOperationRef = useRef(0);
 
-  const [wifiImportStatus, setWifiImportStatus] = useState<WifiImportStatus>({ state: 'stopped', error: null });
+  const [wifiImportStatus, setWifiImportStatusState] = useState<WifiImportStatus>({ state: 'stopped', error: null });
+  const wifiImportStatusRef = useRef<WifiImportStatus>(wifiImportStatus);
+  wifiImportStatusRef.current = wifiImportStatus;
+  const setWifiImportStatus: React.Dispatch<React.SetStateAction<WifiImportStatus>> = useCallback((next) => {
+    const resolved = typeof next === 'function' ? next(wifiImportStatusRef.current) : next;
+    wifiImportStatusRef.current = resolved;
+    setWifiImportStatusState(resolved);
+  }, []);
 
   const wifiUpgradeScanCleanupRef = useRef<(() => void) | null>(null);
+  const leasesRef = useRef<TransferSessionLeases | null>(null);
 
   const cancelWifiImportOperation = useCallback(() => {
     wifiImportOperationRef.current++;
+    leasesRef.current?.invalidate();
     wifiUpgradeScanCleanupRef.current?.();
     wifiUpgradeScanCleanupRef.current = null;
   }, []);
@@ -322,8 +357,32 @@ export function useWifiImport(deps: WifiImportDependencies) {
     ...deps, activeWifiEndpointRef, wifiImportOperationRef, wifiUpgradeScanCleanupRef,
     setWifiImportStatus, cancelWifiImportOperation,
   });
+  const commandsRef = useRef(commands);
+  commandsRef.current = commands;
+  const depsRef = useRef(deps);
+  depsRef.current = deps;
+  if (!leasesRef.current) {
+    leasesRef.current = new TransferSessionLeases({
+      getSessionToken: () => {
+        const { apiRef, stateRef } = depsRef.current.shared;
+        if (stateRef.current.connectionStatus !== ConnectionStatus.Connected ||
+            stateRef.current.connectionTransport !== ConnectionTransport.Wifi) return null;
+        return apiRef.current;
+      },
+      getState: () => wifiImportStatusRef.current.state,
+      start: () => commandsRef.current.startWifiImport(),
+      stop: () => commandsRef.current.stopWifiImport(),
+    });
+  }
+  const acquireWifiImportLease = useCallback(
+    (signal?: AbortSignal, options?: AcquireTransferLeaseOptions): Promise<TransferSessionLease> =>
+      leasesRef.current!.acquire(signal, options),
+    [],
+  );
+
   return {
     wifiImportStatus, wifiImportOwnerKeyRef, activeWifiEndpointRef, wifiImportOperationRef,
-    wifiUpgradeScanCleanupRef, setWifiImportStatus, commands: { refreshWifiImport, cancelWifiImportOperation, ...commands },
+    wifiUpgradeScanCleanupRef, setWifiImportStatus,
+    commands: { refreshWifiImport, cancelWifiImportOperation, acquireWifiImportLease, ...commands },
   };
 }

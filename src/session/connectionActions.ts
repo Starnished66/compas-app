@@ -2,13 +2,15 @@ import type { SessionState } from './useSessionRefs';
 import { type ActionOf } from './remoteActionDispatch';
 import { PREF_WIFI_ADDRESS, PREF_BLUETOOTH_ID, PREF_AUTO_RECONNECT } from './sessionPreferences';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ConnectionTransport } from '../data/types';
+import { persistSavedProfiles, pinKeyForProfile, removeSavedProfile } from '../data/SavedProfilesStore';
 import { selectConnectionTransport } from './connectionTransportSelection';
 import { pairDevice as pairBtDevice } from '../../modules/compas-bluetooth/src/index';
 import { getRequiredPermissionsForBluetooth, requestMissingPermissions } from './PermissionPolicy';
 
 interface ConnectionActionsDependencies {
   shared: Pick<SessionState,
-    'autoReconnectEnabledRef' | 'autoReconnectTimerRef' | 'setState' | 'stateRef'
+    'autoReconnectEnabledRef' | 'autoReconnectTimerRef' | 'pinStoreRef' | 'setState' | 'stateRef'
     | 'wifiAddressEditedRef'
   >;
   connect: (explicitPin?: string | undefined) => Promise<void>;
@@ -117,6 +119,39 @@ const handleDismissPin = (deps: ConnectionActionsDependencies) => {
   setState((prev) => ({ ...prev, pinDialogVisible: false, pinInput: '', pinError: null }));
 };
 
+const handleSwitchSavedProfile = (deps: ConnectionActionsDependencies, action: ActionOf<'SwitchSavedProfile'>) => {
+  const { setState, stateRef, wifiAddressEditedRef } = deps.shared;
+  const { connect } = deps;
+  const profile = (stateRef.current.savedProfiles ?? []).find((item) => item.id === action.id);
+  if (!profile) return;
+  const nextState = {
+    ...selectConnectionTransport(stateRef.current, profile.transport),
+    ...(profile.transport === ConnectionTransport.Wifi
+      ? { wifiAddress: profile.endpoint }
+      : { selectedBluetoothPlayerId: profile.endpoint }),
+  };
+  if (profile.transport === ConnectionTransport.Wifi) {
+    wifiAddressEditedRef.current = true;
+    AsyncStorage.setItem(PREF_WIFI_ADDRESS, profile.endpoint).catch(() => {});
+  } else {
+    AsyncStorage.setItem(PREF_BLUETOOTH_ID, profile.endpoint).catch(() => {});
+  }
+  stateRef.current = nextState;
+  setState(nextState);
+  void connect();
+};
+
+const handleRemoveSavedProfile = (deps: ConnectionActionsDependencies, action: ActionOf<'RemoveSavedProfile'>) => {
+  const { pinStoreRef, setState, stateRef } = deps.shared;
+  const current = stateRef.current.savedProfiles ?? [];
+  const target = current.find((item) => item.id === action.id);
+  if (!target) return;
+  const next = removeSavedProfile(current, action.id);
+  void persistSavedProfiles(next);
+  void pinStoreRef.current.remove(pinKeyForProfile(target));
+  setState((prev) => ({ ...prev, savedProfiles: next }));
+};
+
 const handleChangePin = (deps: ConnectionActionsDependencies) => {
   const { setState } = deps.shared;
   setState((prev) => ({ ...prev, pinDialogVisible: true, pinInput: '', pinError: null }));
@@ -135,6 +170,8 @@ export function createConnectionActions(deps: ConnectionActionsDependencies) {
     ScanBluetoothPlayers: handleScanBluetoothPlayers.bind(undefined, deps),
     SelectBluetoothPlayer: handleSelectBluetoothPlayer.bind(undefined, deps),
     PairBluetoothPlayer: handlePairBluetoothPlayer.bind(undefined, deps),
+    SwitchSavedProfile: handleSwitchSavedProfile.bind(undefined, deps),
+    RemoveSavedProfile: handleRemoveSavedProfile.bind(undefined, deps),
     SetPinInput: handleSetPinInput.bind(undefined, deps),
     SubmitPin: handleSubmitPin.bind(undefined, deps),
     DismissPin: handleDismissPin.bind(undefined, deps),

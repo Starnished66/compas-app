@@ -4,6 +4,7 @@ import { FlashList, type ListRenderItem } from '@shopify/flash-list';
 import { ContentStatus, type RemoteTrack } from '../../data/types';
 import { useI18n } from '../../i18n';
 import { AppText } from '../components/AppText';
+import { Button } from '../components/Button';
 import { DragHandle } from '../components/DragHandle';
 import { DragReorderCell } from '../components/DragReorderCell';
 import { DragReorderCellContext } from '../components/dragReorderCellContext';
@@ -22,13 +23,56 @@ const END_REACHED_THRESHOLD = 0.5;
 export const QUEUE_ROW_HEIGHT = 56;
 const NO_POSITION_KEEPING = { disabled: true };
 
-function keyOf(track: RemoteTrack): string {
-  return track.id;
+export type QueueListItem =
+  | { kind: 'loadEarlier'; id: 'queue-load-earlier' }
+  | { kind: 'section'; id: string; label: string; caption?: string }
+  | { kind: 'played'; id: string; track: RemoteTrack }
+  | { kind: 'nowPlaying'; id: 'queue-now-playing' }
+  | { kind: 'upNext'; id: string; track: RemoteTrack; upNextIndex: number }
+  | { kind: 'emptyUpNext'; id: 'queue-empty-up-next' };
+
+function keyOf(item: QueueListItem): string {
+  return item.id;
+}
+
+function itemTypeOf(item: QueueListItem): string {
+  return item.kind;
 }
 
 function trackSubtitle(track: RemoteTrack, t: (source: string) => string): string {
   const artist = track.artist || t('Unknown artist');
   return track.duration ? `${artist} · ${track.duration}` : artist;
+}
+
+export const PlayedQueueRow = memo(function PlayedQueueRow({
+  track,
+  onPlay,
+}: {
+  track: RemoteTrack;
+  onPlay: (track: RemoteTrack) => void;
+}) {
+  const { t } = useI18n();
+  const artworkUri = useQueueRowArtwork(track);
+  return (
+    <View style={styles.playedRow}>
+      <TrackRow
+        title={track.title || t('Unknown song')}
+        subtitle={trackSubtitle(track, t)}
+        artworkUri={artworkUri}
+        artworkSize={QUEUE_ROW_ARTWORK}
+        onPress={() => onPlay(track)}
+      />
+    </View>
+  );
+});
+
+export function LoadEarlierQueueRow({ loading, onLoad }: { loading: boolean; onLoad: () => void }) {
+  const { t } = useI18n();
+  return (
+    <View style={styles.loadEarlier}>
+      {loading ? <Spinner /> : <Button variant="plain" label={t('Load earlier tracks')} onPress={onLoad} />}
+    </View>
+  );
 }
 
 interface QueueRowProps {
@@ -120,43 +164,52 @@ function renderEditableRow(
 
 interface QueueTrackListProps {
   state: QueuePlaybackState;
-  rows: RemoteTrack[];
+  items: QueueListItem[];
+  hasUpNext: boolean;
   drag: ReturnType<typeof useDragReorder>;
+  cellStyle: (index: number) => ReturnType<ReturnType<typeof useDragReorder>['rowStyle']>;
   artwork: ReturnType<typeof useQueueArtworkViewability>;
-  renderTrack: ListRenderItem<RemoteTrack>;
+  renderItem: ListRenderItem<QueueListItem>;
+  header?: React.ReactElement | null;
   loadMore: () => void;
   palette: ReturnType<typeof usePalette>;
   t: ReturnType<typeof useI18n>['t'];
 }
 
-export function renderQueueTrackList({ state, rows, drag, artwork, renderTrack, loadMore, palette, t }: QueueTrackListProps) {
-  const { visibleArtwork, onViewableItemsChanged } = artwork;
-  const hasRows = rows.length > 0;
-  const emptyState =
-    state.queueStatus === ContentStatus.Loading ? (
+export function renderQueueEmptyState(state: QueuePlaybackState, t: ReturnType<typeof useI18n>['t']) {
+  if (state.queueStatus === ContentStatus.Loading) {
+    return (
       <View style={styles.message}>
         <Spinner />
         <AppText tone="inkMuted">{t('Loading queue…')}</AppText>
       </View>
-    ) : state.queueStatus === ContentStatus.Error ? (
+    );
+  }
+  if (state.queueStatus === ContentStatus.Error) {
+    return (
       <View style={styles.message}>
         <AppText tone="inkMuted" style={styles.centered}>
           {t('Couldn’t load the queue.')}
         </AppText>
       </View>
-    ) : (
-      <View style={styles.message}>
-        <AppText tone="inkMuted" style={styles.centered}>
-          {t('Nothing else is queued. Add songs from their menu in the Library.')}
-        </AppText>
-      </View>
     );
+  }
+  return (
+    <View style={styles.message}>
+      <AppText tone="inkMuted" style={styles.centered}>
+        {t('Nothing else is queued. Add songs from their menu in the Library.')}
+      </AppText>
+    </View>
+  );
+}
 
+export function renderQueueTrackList({ state, items, hasUpNext, drag, cellStyle, artwork, renderItem, header, loadMore, palette, t }: QueueTrackListProps) {
+  const { visibleArtwork, onViewableItemsChanged } = artwork;
   const footer = state.queueLoadingMore ? (
     <View style={styles.footer}>
       <Spinner />
     </View>
-  ) : hasRows && !state.queueHasMore ? (
+  ) : hasUpNext && !state.queueHasMore ? (
     <AppText variant="caption" tone="inkMuted" style={[styles.footer, styles.centered]}>
       {t('End of queue')}
     </AppText>
@@ -164,20 +217,22 @@ export function renderQueueTrackList({ state, rows, drag, artwork, renderTrack, 
 
   return (
     <VisibleQueueArtworkContext.Provider value={visibleArtwork}>
-      <DragReorderCellContext.Provider value={drag.rowStyle}>
+      <DragReorderCellContext.Provider value={cellStyle}>
         {/* Recycles row views; mounting fresh rows was most of the main-thread cost while flinging. */}
         <FlashList
-          data={rows}
+          data={items}
           // FlashList keeps a cell's rendered row when only its index changes; rows bind drag handles
           // by index, so a reorder must re-render them or a handle drags the song that used to be there.
-          extraData={rows}
+          extraData={items}
+          getItemType={itemTypeOf}
           maintainVisibleContentPosition={NO_POSITION_KEEPING}
           CellRendererComponent={DragReorderCell}
           scrollEnabled={drag.scrollEnabled}
           keyExtractor={keyOf}
-          renderItem={renderTrack}
+          renderItem={renderItem}
           onViewableItemsChanged={onViewableItemsChanged}
-          ListEmptyComponent={emptyState}
+          ListHeaderComponent={header}
+          ListEmptyComponent={renderQueueEmptyState(state, t)}
           ListFooterComponent={footer}
           onEndReached={loadMore}
           onEndReachedThreshold={END_REACHED_THRESHOLD}
@@ -192,6 +247,13 @@ export function renderQueueTrackList({ state, rows, drag, artwork, renderTrack, 
 const styles = StyleSheet.create({
   list: {
     flex: 1,
+  },
+  playedRow: {
+    opacity: 0.72,
+  },
+  loadEarlier: {
+    alignItems: 'center',
+    paddingVertical: Space.xs,
   },
   message: {
     alignItems: 'center',

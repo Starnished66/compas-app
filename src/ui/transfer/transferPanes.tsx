@@ -1,6 +1,6 @@
 import React from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
-import type { LocalFileEntry, StorageRoot } from '../../../modules/compas-files/src';
+import type { LocalFileEntry } from '../../../modules/compas-files/src';
 import type { WifiImportFileEntry } from '../../data/types';
 import type { useI18n } from '../../i18n';
 import { formatBytes } from '../../session/transferPlan';
@@ -11,24 +11,24 @@ import { Icon } from '../components/Icon';
 import { IconButton } from '../components/IconButton';
 import { ListRow } from '../components/ListRow';
 import { ProgressBar } from '../components/ProgressBar';
-import { SegmentedControl } from '../components/SegmentedControl';
 import { Spinner } from '../components/Spinner';
 import type { usePalette } from '../PaletteProvider';
 import { Space } from '../tokens';
 import { HiddenFilesButton } from './HiddenFilesButton';
+import { LocalDirectoryHeader } from './LocalDirectoryHeader';
 import { SdBrowserView } from './SdBrowserView';
 import type { useSdBrowser } from './useSdBrowser';
-import type { useTransferPhoneState } from './useTransferPhone';
+import type { useTransferPhoneBrowser } from './useTransferPhone';
 import type { UploadJob } from './useTransferUploads';
+import type { DownloadJob } from './useTransferDownloads';
 import type { TransferApi } from '../screens/TransferScreen';
 
 type Translate = ReturnType<typeof useI18n>['t'];
 type Palette = ReturnType<typeof usePalette>;
 
 interface PhonePaneOptions {
-  phone: ReturnType<typeof useTransferPhoneState>;
+  phone: ReturnType<typeof useTransferPhoneBrowser>;
   toggleSelected: (entry: LocalFileEntry) => void;
-  openPhoneDirectory: (path: string) => Promise<void>;
   uploading: boolean;
   wide: boolean;
   palette: Palette;
@@ -36,50 +36,39 @@ interface PhonePaneOptions {
 }
 
 export function renderPhonePane(options: PhonePaneOptions) {
-  const { phone, openPhoneDirectory, uploading, wide, palette, t } = options;
-  const { roots, root, setRoot, phonePath, phoneShowHidden, phoneHiddenRef, phoneEntries, phoneLoading, setPhoneShowHidden, setPhoneEntries } = phone;
-  // The native module names the primary volume in English; other volumes use the system's own label.
-  const rootLabel = (item: StorageRoot) => (item.name === 'Internal storage' ? t('Internal storage') : item.name);
-  const phoneRelative = phonePath && root ? phonePath.slice(root.path.length).replace(/^\//, '') : '';
-  const phoneParent = phonePath && root && phonePath !== root.path ? phonePath.slice(0, phonePath.lastIndexOf('/')) : null;
+  const { phone, uploading, wide, palette, t } = options;
+  const { roots, root, phonePath, phoneShowHidden, entries, loading, parentPath, displayPath, loadDirectory, selectRoot, toggleShowHidden } = phone;
 
   return (
     <Card variant="surface" style={[styles.pane, wide && styles.paneWide]}>
       <View style={styles.paneHeader}>
         <Icon name="music" size={18} color={palette.inkMuted} />
         <AppText variant="eyebrow" tone="inkMuted" style={styles.flex}>{t('This device')}</AppText>
-        {phoneLoading ? <Spinner /> : null}
+        {loading ? <Spinner /> : null}
       </View>
-      {roots.length > 1 ? (
-        <SegmentedControl
-          size="sm"
-          options={roots.map((item) => ({ value: item.path, label: rootLabel(item) }))}
-          value={root?.path ?? ''}
-          onChange={(path) => {
-            const next = roots.find((item) => item.path === path) ?? null;
-            setRoot(next);
-            if (next) void openPhoneDirectory(next.path);
-          }}
-          style={styles.rootPicker}
-        />
-      ) : null}
-      <View style={styles.pathRow}>
-        <IconButton icon="chevronLeft" label={t('Up')} size="sm" disabled={!phoneParent || phoneLoading} onPress={() => phoneParent && void openPhoneDirectory(phoneParent)} />
-        <AppText variant="bodyStrong" numberOfLines={1} style={styles.flex}>{phoneRelative ? `/${phoneRelative}` : root ? rootLabel(root) : ''}</AppText>
-        <HiddenFilesButton title={t('This device')} showHidden={phoneShowHidden}
-          disabled={uploading || phoneLoading || !phonePath} onPress={() => {
-            if (!phonePath) return;
-            phoneHiddenRef.current = !phoneHiddenRef.current;
-            setPhoneShowHidden(phoneHiddenRef.current);
-            setPhoneEntries([]);
-            void openPhoneDirectory(phonePath);
-          }} />
-      </View>
+      <LocalDirectoryHeader
+        roots={roots}
+        root={root}
+        displayPath={displayPath}
+        parentPath={parentPath}
+        loading={loading}
+        onSelectRoot={selectRoot}
+        onGoUp={(parent) => void loadDirectory(parent)}
+        trailing={(
+          <HiddenFilesButton
+            title={t('This device')}
+            showHidden={phoneShowHidden}
+            disabled={uploading || loading || !phonePath}
+            onPress={toggleShowHidden}
+          />
+        )}
+        t={t}
+      />
       <FlatList
-        data={phoneEntries}
+        data={entries}
         keyExtractor={(entry) => entry.path}
         style={styles.list}
-        ListEmptyComponent={!phoneLoading ? <AppText variant="caption" tone="inkMuted" style={styles.empty}>{t('This folder is empty.')}</AppText> : null}
+        ListEmptyComponent={!loading ? <AppText variant="caption" tone="inkMuted" style={styles.empty}>{t('This folder is empty.')}</AppText> : null}
         renderItem={({ item }) => renderPhoneEntry(item, options)}
       />
     </Card>
@@ -87,8 +76,8 @@ export function renderPhonePane(options: PhonePaneOptions) {
 }
 
 function renderPhoneEntry(item: LocalFileEntry, options: PhonePaneOptions) {
-  const { phone, toggleSelected, uploading, palette, t, openPhoneDirectory } = options;
-  const { selected } = phone;
+  const { phone, toggleSelected, uploading, palette, t } = options;
+  const { selected, loadDirectory } = phone;
   const isSelected = selected.has(item.path);
   return (
     <ListRow
@@ -105,7 +94,7 @@ function renderPhoneEntry(item: LocalFileEntry, options: PhonePaneOptions) {
           onPress={() => toggleSelected(item)}
         />
       )}
-      onPress={item.isDirectory ? () => void openPhoneDirectory(item.path) : () => !uploading && toggleSelected(item)}
+      onPress={item.isDirectory ? () => void loadDirectory(item.path) : () => !uploading && toggleSelected(item)}
       onLongPress={() => !uploading && toggleSelected(item)}
     />
   );
@@ -119,14 +108,16 @@ interface SdPaneOptions {
   starting: boolean;
   ready: boolean;
   connected: boolean;
-  uploading: boolean;
+  busy: boolean;
+  sdSelected: ReadonlyMap<string, WifiImportFileEntry>;
+  onToggleSdSelected: (entry: WifiImportFileEntry) => void;
   sdEntryActions: (entry: WifiImportFileEntry) => void;
   status: TransferApi['status']['state'];
   startSession: () => Promise<void>;
 }
 
 export function renderSdPane({
-  wide, palette, t, sd, starting, ready, connected, uploading, sdEntryActions, status, startSession,
+  wide, palette, t, sd, starting, ready, connected, busy, sdSelected, onToggleSdSelected, sdEntryActions, status, startSession,
 }: SdPaneOptions) {
   return (
     <Card variant="surface" style={[styles.pane, wide && styles.paneWide]}>
@@ -136,7 +127,14 @@ export function renderSdPane({
         {starting ? <Spinner /> : null}
       </View>
       {ready ? (
-        <SdBrowserView browser={sd} canBrowse={ready && connected} canMutate={ready && connected && !uploading} onEntryActions={sdEntryActions} />
+        <SdBrowserView
+          browser={sd}
+          canBrowse={ready && connected}
+          canMutate={ready && connected && !busy}
+          selected={sdSelected}
+          onToggleSelected={onToggleSdSelected}
+          onEntryActions={sdEntryActions}
+        />
       ) : (
         <View style={styles.sessionState}>
           {starting || status === 'starting' ? (
@@ -160,9 +158,15 @@ interface TransferQueueOptions {
   job: UploadJob | null;
   uploading: boolean;
   onCancel: () => void;
+  downloadJob: DownloadJob | null;
+  downloading: boolean;
+  onCancelDownload: () => void;
   selectionSummary: string;
   selectedSize: number;
   clearSelected: () => void;
+  sdSelectedSize: number;
+  clearSdSelected: () => void;
+  chooseLocalDestination: () => void;
   connected: boolean;
   ready: boolean;
   sdLoaded: boolean;
@@ -175,30 +179,65 @@ interface TransferQueueOptions {
 }
 
 export function renderTransferQueue({
-  job, uploading, onCancel, selectionSummary, selectedSize, clearSelected, connected, ready,
-  sdLoaded, editing, chooseDestination, uploadedSinceFinish, finishing, finish, t,
+  job, uploading, onCancel, downloadJob, downloading, onCancelDownload,
+  selectionSummary, selectedSize, clearSelected, sdSelectedSize, clearSdSelected, chooseLocalDestination,
+  connected, ready, sdLoaded, editing, chooseDestination, uploadedSinceFinish, finishing, finish, t,
 }: TransferQueueOptions) {
   return (
     <Card variant="surface" style={styles.actionBar}>
       {uploading ? (
         renderUploadMeter(job, onCancel, t)
+      ) : downloading ? (
+        renderDownloadMeter(downloadJob, onCancelDownload, t)
       ) : (
         <View style={[styles.actionRow, styles.actionWrap]}>
           <AppText variant="caption" tone="inkMuted" style={styles.summary}>{selectionSummary}</AppText>
           {selectedSize ? <Button size="sm" variant="plain" label={t('Clear')} onPress={clearSelected} /> : null}
-          <Button
-            size="md"
-            icon="import"
-            label={t('Upload')}
-            disabled={!connected || !ready || !sdLoaded || editing || selectedSize === 0}
-            onPress={chooseDestination}
-          />
+          {sdSelectedSize ? <Button size="sm" variant="plain" label={t('Clear')} onPress={clearSdSelected} /> : null}
+          {sdSelectedSize > 0 ? (
+            <Button
+              size="md"
+              icon="arrowDown"
+              label={t('Download')}
+              disabled={!connected || !ready || editing}
+              onPress={chooseLocalDestination}
+            />
+          ) : (
+            <Button
+              size="md"
+              icon="import"
+              label={t('Upload')}
+              disabled={!connected || !ready || !sdLoaded || editing || selectedSize === 0}
+              onPress={chooseDestination}
+            />
+          )}
           {ready && uploadedSinceFinish > 0 ? (
             <Button size="md" variant="container" icon="check" label={t('Finish and rescan library')} busy={finishing} onPress={() => void finish()} />
           ) : null}
         </View>
       )}
     </Card>
+  );
+}
+
+function renderDownloadMeter(job: DownloadJob | null, onCancel: () => void, t: Translate) {
+  const progress = job && job.totalBytes > 0 ? job.receivedBytes / job.totalBytes : 0;
+  return (
+    <View style={styles.progress}>
+      <View style={styles.actionRow}>
+        <AppText variant="caption" tone="inkMuted" numberOfLines={1} style={styles.flex}>
+          {job ? `${t('Downloading')} · ${job.fileName}` : t('Preparing files…')}
+        </AppText>
+        {job ? <AppText variant="caption" tabular>{Math.round(progress * 100)}%</AppText> : null}
+      </View>
+      <ProgressBar value={progress} />
+      <View style={styles.actionRow}>
+        <AppText variant="caption" tone="inkMuted" style={styles.flex}>
+          {job ? `${formatBytes(job.receivedBytes)} / ${formatBytes(job.totalBytes)}` : ''}
+        </AppText>
+        <Button size="sm" variant="container" label={t('Cancel')} onPress={onCancel} />
+      </View>
+    </View>
   );
 }
 

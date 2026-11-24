@@ -15,14 +15,22 @@ interface RemoteQueueDependencies {
 
 interface QueuePagesContext extends RemoteQueueDependencies {
   queueProbeRef: React.RefObject<RemoteApi | null>;
+  queuePlayedStartRef: React.RefObject<number>;
+  queuePlayedPageGenerationRef: React.RefObject<number>;
 }
 
 // Queue Operations
-const queueTrackFrom = (deps: QueuePagesContext, song: Song, fallbackOffset: number, revision: number): RemoteTrack => {
+const queueTrackFrom = (
+  deps: QueuePagesContext,
+  song: Song,
+  fallbackOffset: number,
+  revision: number,
+  full = false,
+): RemoteTrack => {
   const { nextEntryId, queueArtworkBySongRef, queueTargetsRef } = deps.shared;
   const id = nextEntryId('queue');
   const offset = song.offset != null ? song.offset : fallbackOffset;
-  queueTargetsRef.current.set(id, { offset, revision, songIndex: song.index });
+  queueTargetsRef.current.set(id, { offset, revision, songIndex: song.index, full });
   return {
     id,
     title: song.title,
@@ -46,7 +54,8 @@ const refreshQueue = async (deps: QueuePagesContext, activeApi?: RemoteApi, owns
   const generation = ++queueRefreshGenerationRef.current;
   const ownsRefresh = () => ownsRequest() && api === apiRef.current && generation === queueRefreshGenerationRef.current;
   queuePageGenerationRef.current++;
-  setState((prev) => ({ ...prev, queueStatus: ContentStatus.Loading, queueLoadingMore: false }));
+  deps.queuePlayedPageGenerationRef.current++;
+  setState((prev) => ({ ...prev, queueStatus: ContentStatus.Loading, queueLoadingMore: false, queuePlayedLoadingMore: false }));
   const request = { api, owns: ownsRefresh, started: null as { at: number; command: number } | null };
   const read = async () => {
     if (!ownsRefresh()) return;
@@ -67,25 +76,53 @@ const reconcileQueueAfterWrite = (deps: QueuePagesContext, api: RemoteApi) => {
 };
 
 const readQueuePage = async (deps: QueuePagesContext, api: RemoteApi, ownsRefresh: () => boolean) => {
-  const { shared: { queueRevisionRef, queueTargetsRef, setState }, loadQueueArtwork } = deps;
+  const { shared: { queueRevisionRef, queueTargetsRef, setState }, loadQueueArtwork, queuePlayedStartRef } = deps;
   try {
     const qPage = await api.queue(0, 25);
     if (!ownsRefresh()) return;
+
+    let playedSongs: Song[] = [];
+    let playedStart = 0;
+    let playedHasMore = false;
+    const currentPos = qPage.currentPosition ?? -1;
+    if (currentPos > 0) {
+      try {
+        const candidateStart = Math.max(0, currentPos - 25);
+        const playedLimit = Math.min(25, currentPos - candidateStart);
+        const fullPage = await api.queue(candidateStart, playedLimit, true);
+        if (!ownsRefresh()) return;
+        if (fullPage.revision === qPage.revision) {
+          playedSongs = fullPage.songs.filter((s, idx) => (s.offset ?? candidateStart + idx) < currentPos);
+          playedStart = candidateStart;
+          playedHasMore = candidateStart > 0;
+        }
+      } catch {
+        // Older players or transient errors: still show Up Next cleanly.
+      }
+    }
+
+    if (!ownsRefresh()) return;
+
     queueRevisionRef.current = qPage.revision;
+    queuePlayedStartRef.current = playedStart;
     queueTargetsRef.current.clear();
 
-    const tracks = qPage.songs.map((song, idx) => queueTrackFrom(deps, song, idx, qPage.revision));
+    const playedTracks = playedSongs.map((song, idx) => queueTrackFrom(deps, song, playedStart + idx, qPage.revision, true));
+    const tracks = qPage.songs.map((song, idx) => queueTrackFrom(deps, song, idx, qPage.revision, false));
 
     setState((prev) => ({
       ...prev,
       queue: tracks,
+      queuePlayed: playedTracks,
+      queuePlayedHasMore: playedHasMore,
+      queuePlayedLoadingMore: false,
       queueTotal: qPage.total,
       queueHasMore: tracks.length < qPage.total,
-      queueStatus: tracks.length > 0 ? ContentStatus.Ready : ContentStatus.Empty,
+      queueStatus: tracks.length > 0 || playedTracks.length > 0 ? ContentStatus.Ready : ContentStatus.Empty,
       // The refresh this message announced is done.
       connectionMessage: prev.connectionMessage === QUEUE_REFRESHING_MESSAGE ? null : prev.connectionMessage,
     }));
-    loadQueueArtwork(qPage.songs.map((song) => song.index), api);
+    loadQueueArtwork([...playedSongs, ...qPage.songs].map((song) => song.index), api);
   } catch {
     if (!ownsRefresh()) return;
     setState((prev) => ({ ...prev, queueStatus: ContentStatus.Error }));
@@ -156,16 +193,73 @@ const loadMoreQueue = async (deps: QueuePagesContext) => {
   }
 };
 
+const loadMorePlayedQueue = async (deps: QueuePagesContext) => {
+  const { loadQueueArtwork, queuePlayedStartRef, queuePlayedPageGenerationRef } = deps;
+  const {
+    apiRef, queueRefreshGenerationRef, queueRefreshRef, queueRevisionRef,
+    setState, stateRef,
+  } = deps.shared;
+  const api = apiRef.current;
+  if (!api || queueRefreshRef.current?.api === api || stateRef.current.queuePlayedLoadingMore || !stateRef.current.queuePlayedHasMore) return;
+  const prevStart = queuePlayedStartRef.current;
+  const nextStart = Math.max(0, prevStart - 25);
+  const limit = prevStart - nextStart;
+  if (limit <= 0) {
+    setState((prev) => ({ ...prev, queuePlayedHasMore: false }));
+    return;
+  }
+  const refreshGeneration = queueRefreshGenerationRef.current;
+  const playedPageGeneration = ++queuePlayedPageGenerationRef.current;
+  const ownsPlayedPage = () =>
+    api === apiRef.current
+    && refreshGeneration === queueRefreshGenerationRef.current
+    && playedPageGeneration === queuePlayedPageGenerationRef.current;
+
+  setState((prev) => ({ ...prev, queuePlayedLoadingMore: true }));
+  try {
+    const fullPage = await api.queue(nextStart, limit, true);
+    if (!ownsPlayedPage()) return;
+
+    if (fullPage.revision !== queueRevisionRef.current) {
+      setState((prev) => ({
+        ...prev,
+        queuePlayedLoadingMore: false,
+        connectionMessage: QUEUE_REFRESHING_MESSAGE,
+      }));
+      refreshQueue(deps, api);
+      return;
+    }
+
+    const olderSongs = fullPage.songs.filter((song, idx) => (song.offset ?? nextStart + idx) < prevStart);
+    const olderTracks = olderSongs.map((song, idx) => queueTrackFrom(deps, song, nextStart + idx, fullPage.revision, true));
+    queuePlayedStartRef.current = nextStart;
+
+    setState((prev) => ({
+      ...prev,
+      queuePlayed: [...olderTracks, ...(prev.queuePlayed ?? [])],
+      queuePlayedHasMore: nextStart > 0,
+      queuePlayedLoadingMore: false,
+    }));
+    loadQueueArtwork(olderSongs.map((song) => song.index), api);
+  } catch {
+    if (!ownsPlayedPage()) return;
+    setState((prev) => ({ ...prev, queuePlayedLoadingMore: false }));
+  }
+};
+
 function createQueuePages(deps: QueuePagesContext) {
   return {
     refreshQueue: refreshQueue.bind(undefined, deps),
     reconcileQueueAfterWrite: reconcileQueueAfterWrite.bind(undefined, deps),
     refreshQueueIfChanged: refreshQueueIfChanged.bind(undefined, deps),
     loadMoreQueue: loadMoreQueue.bind(undefined, deps),
+    loadMorePlayedQueue: loadMorePlayedQueue.bind(undefined, deps),
   };
 }
 
 export function useQueuePages(deps: RemoteQueueDependencies) {
   const queueProbeRef = useRef<RemoteApi | null>(null);
-  return createQueuePages({ ...deps, queueProbeRef });
+  const queuePlayedStartRef = useRef<number>(0);
+  const queuePlayedPageGenerationRef = useRef<number>(0);
+  return createQueuePages({ ...deps, queueProbeRef, queuePlayedStartRef, queuePlayedPageGenerationRef });
 }

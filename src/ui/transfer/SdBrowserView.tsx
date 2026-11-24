@@ -11,6 +11,7 @@ import { InlineError } from '../components/InlineError';
 import { ListRow } from '../components/ListRow';
 import { Spinner } from '../components/Spinner';
 import { TextField } from '../components/TextField';
+import { usePalette } from '../PaletteProvider';
 import { Space } from '../tokens';
 import { HiddenFilesButton } from './HiddenFilesButton';
 import { SdBrowser } from './useSdBrowser';
@@ -20,6 +21,8 @@ interface Props {
   canBrowse: boolean;
   canMutate: boolean;
   foldersOnly?: boolean;
+  selected?: ReadonlyMap<string, WifiImportFileEntry>;
+  onToggleSelected?: (entry: WifiImportFileEntry) => void;
   onEntryActions?: (entry: WifiImportFileEntry) => void;
 }
 
@@ -37,8 +40,9 @@ export function SdBrowserError({ browser, canBrowse }: Pick<Props, 'browser' | '
   );
 }
 
-export function SdBrowserView({ browser, canBrowse, canMutate, foldersOnly, onEntryActions }: Props) {
+export function SdBrowserView({ browser, canBrowse, canMutate, foldersOnly, selected, onToggleSelected, onEntryActions }: Props) {
   const { t } = useI18n();
+  const palette = usePalette();
   const parent = sdParent(browser.path);
   const locked = !canBrowse || browser.loading || !!browser.editing;
   const mutationsLocked = locked || !canMutate;
@@ -80,18 +84,52 @@ export function SdBrowserView({ browser, canBrowse, canMutate, foldersOnly, onEn
         onEndReached={foldersOnly && !browser.error ? more : undefined}
         ListEmptyComponent={browser.loaded && !browser.loading && !browser.error && browser.nextOffset === null ? <AppText variant="caption" tone="inkMuted" style={styles.message}>{t('This folder is empty.')}</AppText> : null}
         ListFooterComponent={browser.nextOffset !== null ? <Button size="sm" variant="plain" label={t('Load more')} disabled={locked} onPress={more} /> : null}
-        renderItem={({ item }) => (
-          <ListRow title={item.name} accessibilityLabel={item.name} subtitle={item.isDirectory ? t('Folder') : formatBytes(item.size)}
-            leading={<Icon name={item.isDirectory ? 'folder' : 'file'} />} disabled={locked}
-            trailing={onEntryActions ? <IconButton icon="moreHorizontal" label={t('More options for {name}', { name: item.name })} size="sm" disabled={mutationsLocked} onPress={() => onEntryActions(item)} /> : undefined}
-            onPress={item.isDirectory ? () => void browser.load(item.path) : undefined}
-            onLongPress={onEntryActions && !mutationsLocked ? () => onEntryActions(item) : undefined} />
-        )} />
+        renderItem={({ item }) => {
+          const isSelected = !!selected?.has(item.path);
+          return (
+            <ListRow
+              title={item.name}
+              accessibilityLabel={item.name}
+              subtitle={item.isDirectory ? t('Folder') : formatBytes(item.size)}
+              leading={<Icon name={item.isDirectory ? 'folder' : 'file'} color={isSelected ? palette.accent : undefined} />}
+              selected={isSelected}
+              disabled={locked}
+              trailing={(
+                <View style={styles.trailing}>
+                  {onToggleSelected ? (
+                    <IconButton
+                      icon={isSelected ? 'check' : 'selectionCircle'}
+                      label={isSelected ? t('Deselect {name}', { name: item.name }) : t('Select {name}', { name: item.name })}
+                      color={isSelected ? palette.accent : undefined}
+                      size="sm"
+                      disabled={mutationsLocked}
+                      onPress={() => onToggleSelected(item)}
+                    />
+                  ) : null}
+                  {onEntryActions ? (
+                    <IconButton
+                      icon="moreHorizontal"
+                      label={t('More options for {name}', { name: item.name })}
+                      size="sm"
+                      disabled={mutationsLocked}
+                      onPress={() => onEntryActions(item)}
+                    />
+                  ) : null}
+                </View>
+              )}
+              onPress={item.isDirectory
+                ? () => void browser.load(item.path)
+                : onToggleSelected && !mutationsLocked ? () => onToggleSelected(item) : undefined}
+              onLongPress={onEntryActions && !mutationsLocked ? () => onEntryActions(item) : undefined}
+            />
+          );
+        }} />
     </View>
   );
 }
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: Space.xs, paddingHorizontal: Space.sm, minHeight: 44 },
+  trailing: { flexDirection: 'row', alignItems: 'center' },
   message: { padding: Space.lg },
 });

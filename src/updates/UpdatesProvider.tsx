@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Alert, AppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { canInstallAppUpdates, getAppVersion, getDeviceApiLevel, installAppUpdate, notificationsEnabled, notifyRelease, openAppUpdatePermissionSettings } from '../../modules/compas-updates/src';
+import { addAppUpdateInstallListener, canInstallAppUpdates, consumePendingAppUpdateInstall, getAppVersion, getDeviceApiLevel, installAppUpdate, notificationsEnabled, notifyRelease, openAppUpdatePermissionSettings } from '../../modules/compas-updates/src';
 import { checkReleaseUpdates, isFirmwareReleaseNewer, ReleaseNotice } from './releaseUpdates';
 import { emptySaved, noticeKey, parseSavedUpdates } from './updatePreferences';
 import appConfig from '../../app.json';
@@ -62,6 +62,7 @@ function useReleaseState(playerVersion?: string | null) {
   const [appVersion, setAppVersion] = useState(appConfig.expo.version);
   const [application, setApplication] = useState<ReleaseNotice | null>(null);
   const inFlight = useRef<Promise<void> | null>(null);
+  const installInFlight = useRef(false);
   const deliveryInFlight = useRef(false);
   const channelRevision = useRef(0);
   const lastAttempt = useRef(0);
@@ -71,7 +72,7 @@ function useReleaseState(playerVersion?: string | null) {
     firmwareUpdate, firmwareUpdateRef, tRef, saved, revision, setRevision, ready, setReady, checking, setChecking,
     installing, setInstalling, installPermission, setInstallPermission, installError, setInstallError, permissionRetry,
     setPermissionRetry, error, setError, appVersion, setAppVersion, application, setApplication, inFlight,
-    deliveryInFlight, channelRevision, lastAttempt, mounted, writes,
+    installInFlight, deliveryInFlight, channelRevision, lastAttempt, mounted, writes,
   };
 }
 
@@ -234,43 +235,105 @@ function useReleaseControls(state: ReleaseState, check: ReturnType<typeof useRel
   return { setAlerts, setBetaUpdates, acknowledge, openRelease };
 }
 
-function useReleaseInstallation(state: ReleaseState) {
-  const { application, setInstalling, setInstallError, setInstallPermission, setPermissionRetry, ready, permissionRetry } = state;
-  const installApplicationUpdate = useCallback(async () => {
-    if (Platform.OS !== 'android' || !application?.sha256 || application.versionCode == null || application.size == null) return;
+function currentEligibleApplication(saved: ReleaseState['saved']): ReleaseNotice | null {
+  const installed = getAppVersion();
+  return eligibleApplicationNotice(
+    saved.current.application,
+    installed?.versionCode ?? 0,
+    Platform.OS === 'android' ? getDeviceApiLevel() : 0,
+    saved.current.betaUpdates,
+  );
+}
+
+function useReleaseInstallation(state: ReleaseState, check: ReturnType<typeof useReleaseCheck>) {
+  const { application, saved, setApplication, setInstalling, setInstallError, setInstallPermission,
+    setPermissionRetry, ready, permissionRetry, installInFlight, mounted } = state;
+
+  const installNotice = useCallback(async (target: ReleaseNotice | null): Promise<'started' | 'permission' | 'error' | 'skipped'> => {
+    if (Platform.OS !== 'android' || installInFlight.current || !target?.sha256 || target.versionCode == null || target.size == null) {
+      return 'skipped';
+    }
+    installInFlight.current = true;
     setInstalling(true);
     setInstallError(null);
     try {
       await installAppUpdate(
-        `https://github.com/Starnished66/compas-app/releases/download/v${application.version}/compas-${application.version}.apk`,
-        application.sha256, application.versionCode, application.size,
+        `https://github.com/Starnished66/compas-app/releases/download/v${target.version}/compas-${target.version}.apk`,
+        target.sha256, target.versionCode, target.size,
       );
-      setInstallPermission(canInstallAppUpdates());
+      if (mounted.current) setInstallPermission(canInstallAppUpdates());
+      return 'started';
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       const code = cause && typeof cause === 'object' && 'code' in cause ? String((cause as { code?: unknown }).code) : '';
       if (message.includes('ERR_INSTALL_PERMISSION') || code === 'ERR_INSTALL_PERMISSION') {
-        setInstallPermission(false);
-        setInstallError('Allow Compás to install unknown apps, then try again.');
-      } else setInstallError('Could not download or verify the update. Check your connection and try again.');
-    } finally { setInstalling(false); }
-  }, [application]);
+        if (mounted.current) {
+          setInstallPermission(false);
+          setInstallError('Allow Compás to install unknown apps, then try again.');
+        }
+        return 'permission';
+      }
+      if (mounted.current) setInstallError('Could not download or verify the update. Check your connection and try again.');
+      return 'error';
+    } finally {
+      installInFlight.current = false;
+      if (mounted.current) setInstalling(false);
+    }
+  }, [installInFlight, mounted, setInstallError, setInstallPermission, setInstalling]);
+
+  const installApplicationUpdate = useCallback(async () => {
+    await installNotice(application);
+  }, [application, installNotice]);
+
   const requestInstallPermission = useCallback(() => {
     try { openAppUpdatePermissionSettings(); setPermissionRetry(true); }
     catch { setInstallError('Could not open Android install settings.'); }
-  }, []);
-  useEffect(() => { setInstallPermission(Platform.OS === 'android' && canInstallAppUpdates()); }, [ready]);
+  }, [setInstallError, setPermissionRetry]);
+
+  // Notification taps only pass a boolean flag; always install from the verified manifest notice.
+  const handleNotificationInstall = useCallback(async () => {
+    if (Platform.OS !== 'android' || !ready) return;
+    if (!consumePendingAppUpdateInstall()) return;
+    let target = currentEligibleApplication(saved);
+    if (!target) {
+      await check();
+      if (!mounted.current) return;
+      target = currentEligibleApplication(saved);
+    }
+    if (!target) return;
+    setApplication(target);
+    const outcome = await installNotice(target);
+    if (outcome === 'permission' && mounted.current) {
+      requestInstallPermission();
+    }
+  }, [check, installNotice, mounted, ready, requestInstallPermission, saved, setApplication]);
+
+  useEffect(() => { setInstallPermission(Platform.OS === 'android' && canInstallAppUpdates()); }, [ready, setInstallPermission]);
   useEffect(() => {
     if (!permissionRetry) return;
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && canInstallAppUpdates()) {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && canInstallAppUpdates()) {
         setPermissionRetry(false);
         setInstallPermission(true);
         void installApplicationUpdate();
       }
     });
     return () => sub.remove();
-  }, [permissionRetry, installApplicationUpdate]);
+  }, [permissionRetry, installApplicationUpdate, setInstallPermission, setPermissionRetry]);
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !ready) return;
+    if (AppState.currentState === 'active') void handleNotificationInstall();
+    const appStateSub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') void handleNotificationInstall();
+    });
+    const intentSub = addAppUpdateInstallListener(() => {
+      void handleNotificationInstall();
+    });
+    return () => {
+      appStateSub.remove();
+      intentSub?.remove();
+    };
+  }, [handleNotificationInstall, ready]);
   return { installApplicationUpdate, requestInstallPermission };
 }
 
@@ -284,7 +347,7 @@ export function UpdatesProvider({ playerVersion, children }: { playerVersion?: s
   const check = useReleaseCheck(state, storage);
   useReleaseLifecycle(state, playerVersion, check, storage);
   const { setAlerts, setBetaUpdates, acknowledge, openRelease } = useReleaseControls(state, check, storage);
-  const { installApplicationUpdate, requestInstallPermission } = useReleaseInstallation(state);
+  const { installApplicationUpdate, requestInstallPermission } = useReleaseInstallation(state, check);
   const { saved, firmwareUpdate, application, appVersion, revision, checking, installError, error, installing,
     installPermission, ready } = state;
   const notices = [firmwareUpdate(saved.current.firmware), application].filter((n): n is ReleaseNotice => n != null);

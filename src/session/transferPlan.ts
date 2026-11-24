@@ -6,16 +6,16 @@ export interface TransferSource {
   size: number;
 }
 
-export interface PlannedUpload {
-  source: TransferSource;
+export interface PlannedUpload<S extends TransferSource = TransferSource> {
+  source: S;
   /** SD card folder the file is written into, relative to the card root. */
   destination: string;
 }
 
-export interface TransferPlan {
+export interface TransferPlan<S extends TransferSource = TransferSource> {
   /** Folders to create, parents before children, as [parent, name] pairs. */
   directories: [string, string][];
-  uploads: PlannedUpload[];
+  uploads: PlannedUpload<S>[];
   totalBytes: number;
 }
 
@@ -31,15 +31,20 @@ export function sdParent(path: string): string | null {
   return index < 0 ? '' : path.slice(0, index);
 }
 
-/** Maps selected phone files onto the SD card destination, keeping picked folders' structure. */
-export function planTransfer(sources: readonly TransferSource[], destination: string): TransferPlan {
+/**
+ * Maps selected files onto the destination, keeping picked folders' structure. `folders` lists extra relative
+ * folders to create even when no file lands in them, such as empty ones.
+ */
+export function planTransfer<S extends TransferSource>(
+  sources: readonly S[], destination: string, folders: readonly string[] = [],
+): TransferPlan<S> {
   const directories: [string, string][] = [];
   const seen = new Set<string>();
-  const uploads: PlannedUpload[] = [];
+  const uploads: PlannedUpload<S>[] = [];
   let totalBytes = 0;
-  for (const source of sources) {
+  const folderFor = (relativeDir: string) => {
     let parent = destination;
-    for (const segment of source.relativeDir.split('/').filter(Boolean)) {
+    for (const segment of relativeDir.split('/').filter(Boolean)) {
       const path = joinSdPath(parent, segment);
       if (!seen.has(path)) {
         seen.add(path);
@@ -47,7 +52,11 @@ export function planTransfer(sources: readonly TransferSource[], destination: st
       }
       parent = path;
     }
-    uploads.push({ source, destination: parent });
+    return parent;
+  };
+  for (const folder of folders) folderFor(folder);
+  for (const source of sources) {
+    uploads.push({ source, destination: folderFor(source.relativeDir) });
     totalBytes += source.size;
   }
   return { directories, uploads, totalBytes };

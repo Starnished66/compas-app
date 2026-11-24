@@ -7,9 +7,14 @@ export interface CollectionStep {
   kind: LibraryEntryKind;
 }
 
-export function useCollectionTrail(entries: LibraryEntry[], isNested: boolean) {
+export function useCollectionTrail(
+  entries: LibraryEntry[],
+  isNested: boolean,
+  jump?: { id: number; album: LibraryEntry | null } | null,
+) {
   const [trail, setTrail] = useState<CollectionStep[]>([]);
   const pendingStep = useRef<CollectionStep | null>(null);
+  const appliedJump = useRef<number | null>(null);
 
   useEffect(() => {
     if (!isNested) {
@@ -26,6 +31,14 @@ export function useCollectionTrail(entries: LibraryEntry[], isNested: boolean) {
       return entered ? [...next, entered] : next;
     });
   }, [entries, isNested]);
+
+  // Go to Album / Go to Artist start a new trail: the album they land on, or nothing for an artist.
+  useEffect(() => {
+    if (!jump || jump.id === appliedJump.current) return;
+    appliedJump.current = jump.id;
+    pendingStep.current = null;
+    setTrail(jump.album ? [{ entry: jump.album, kind: 'album' }] : []);
+  }, [jump?.id]);
 
   const rememberOpening = useCallback((step: CollectionStep) => {
     pendingStep.current = step;

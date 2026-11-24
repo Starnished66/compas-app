@@ -1,5 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import { nativeTransferError } from './nativeTransferError';
+import { runPinSafeTask } from './pinSafeTask';
 import { getPinSafeTransfers } from '../../modules/compas-files/src';
 
 export interface NativeUploadProgress {
@@ -49,25 +49,20 @@ function uploadUsingPinSafeTransfer(
   native: NonNullable<ReturnType<typeof getPinSafeTransfers>>,
   { url, fileUri, headers, onProgress, signal, resolve, reject }: UploadOptions,
 ) {
-  const taskId = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const progress = native.addListener('onUploadProgress', (event) => {
-    if (event.taskId === taskId && !signal?.aborted) onProgress({ sent: event.sent, total: event.total });
-  });
-  let cancelTimer: ReturnType<typeof setTimeout> | undefined;
-  const cancel = () => {
-    native.cancelTransfer(taskId);
-    // The old path rejected within this window even if the native task never settled.
-    cancelTimer = setTimeout(() => reject(new Error('Upload cancellation timed out')), CANCEL_SETTLE_TIMEOUT_MS);
-  };
-  signal?.addEventListener('abort', cancel, { once: true });
-  native.uploadFile(taskId, url, fileUri, headers).then(
+  runPinSafeTask({
+    prefix: 'upload',
+    cancelMessage: 'Upload cancelled',
+    timeoutMessage: 'Upload cancellation timed out',
+    signal,
+    cancelTransfer: (taskId) => native.cancelTransfer(taskId),
+    addProgressListener: (taskId) => native.addListener('onUploadProgress', (event) => {
+      if (event.taskId === taskId && !signal?.aborted) onProgress({ sent: event.sent, total: event.total });
+    }),
+    run: (taskId) => native.uploadFile(taskId, url, fileUri, headers),
+  }).then(
     (result) => resolve({ status: result.status, body: result.body }),
-    (error) => reject(signal?.aborted ? new Error('Upload cancelled') : nativeTransferError(error)),
-  ).finally(() => {
-    if (cancelTimer) clearTimeout(cancelTimer);
-    progress.remove();
-    signal?.removeEventListener('abort', cancel);
-  });
+    (error) => reject(error),
+  );
 }
 
 function uploadUsingFileSystem({ url, fileUri, headers, onProgress, signal, resolve, reject }: UploadOptions) {
